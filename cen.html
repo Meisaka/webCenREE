@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Centurion</title>
+<link rel="stylesheet" href="main.css">
+<script src="js/cen.js"></script>
+<style>
+.fpl {
+	display: flex;
+}
+.fpl > div:nth-child(1) {
+	border: solid 1px #000;
+	width: 6em;
+	text-align: right;
+	display: inline-block;
+	padding: 2px 4px 2px 4px;
+}
+.fpl > span:nth-child(2) {
+	border: solid 1px #000;
+	display: inline-block;
+	padding: 0px 4px 0px 4px;
+}
+.fpl i {
+	display: inline-block;
+	font-style: normal;
+	padding: 2px 8px 2px 8px;
+	margin: 0px;
+	border: solid 1px rgb(78, 37, 37);
+	background: #000;
+	color: #444;
+}
+.fpl i.a {
+	border-color: #bb3838;
+	background: #ff3232;
+	color: #ffffff;
+}
+.frontpanel {
+	display: flex;
+	border: solid 2px #666666;
+	box-shadow: 3px 3px 3px 3px #000;
+	margin-left: 10px;
+	margin-right: 10px;
+	margin-top: 10px;
+}
+</style>
+</head>
+<body>
+	<div style="display:flex">
+		<button id="b_reset">Full Reset</button>
+		<button id="b_step">Step</button>
+		<button id="b_run">Run/Stop</button>
+		<button id="b_r1">1</button>
+		<button id="b_r2">10</button>
+		<button id="b_r3">1000</button>
+		<button id="b_micro">&#x03bc;Code</button>
+		<button id="b_mstep">&#x03bc;Step</button>
+		<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
+		<span class="conv-sel"><input type="radio" name="conv" id="conv_mei" value="mei" checked/><label for="conv_mei">Modern Parametric</label></span>
+		<span class="conv-sel" style="display: none"><input type="radio" name="conv" id="conv_uew" value="uew"/><label for="conv_uew">Centurion RE Wiki</label></span>
+		<span class="conv-sel"><input type="checkbox" name="conv_hex" id="conv_hex"/><label for="conv_hex">Hex Prefix in Listing</label></span>
+	</div>
+	<div class="frontpanel">
+		<div>
+			<div>Front Panel Display:</div>
+			<div style="display:flex; align-items:flex-end;">
+				<button id="fp_r">R/F</button>
+				<button id="fp_l">LOAD/OPSYS</button>
+				<button id="fp_s">SELECT</button>
+				
+			</div>
+			<div>Debug Commands / DisAsm Address:</div>
+			<div><input id="dbgcmd"/></div>
+			<div>Debug Data:</div>
+			<div><input id="dbgdat"/></div>
+		</div>
+		<div class="regs">
+			<div class="fpl"><div>Address:</div><span id="fp_addr">0x0000: 0000 0000 0000 0000</span></div>
+			<div class="fpl"><div>Level:</div><span id="fp_level">0x0: 0000</span></div>
+			<div class="fpl"><div>Map:</div><span id="fp_flags"><i>ABT</i><i>3</i><i>2</i><i>1</i><i>F</i><i>L</i><i>M</i><i>V</i></span></div>
+			<div class="fpl"><div>Status:</div><span id="fp_runstate"><i>RUN</i><i class="a">HALT</i></span></div>
+		</div>
+		<div class="regs">
+			<div class="fpl"><div>Reg0/1</div><span id="mcr_file0">----</span></div>
+			<div class="fpl"><div>Reg2/3</div><span id="mcr_file2">----</span></div>
+			<div class="fpl"><div>Reg4/5</div><span id="mcr_file4">----</span></div>
+			<div class="fpl"><div>Reg6/7</div><span id="mcr_file6">----</span></div>
+			<div class="fpl"><div>Reg8/9</div><span id="mcr_file8">----</span></div>
+			<div class="fpl"><div>RegA/B</div><span id="mcr_fileA">----</span></div>
+			<div class="fpl"><div>RegC/D</div><span id="mcr_fileC">----</span></div>
+			<div class="fpl"><div>RegE/F</div><span id="mcr_fileE">----</span></div>
+		</div>
+	</div>
+	<div class="frontpanel">
+		<div class="regs">
+			<div class="fpl"><div>Level</div><span id="mcr_level">--</span></div>
+			<div class="fpl"><div>Result</div><span id="mcr_res">--</span></div>
+			<div class="fpl"><div>Swap</div><span id="mcr_swap">--</span></div>
+		</div>
+		<div class="regs">
+			<div class="fpl"><div>RIndex</div><span id="mcr_rfir">--</span></div>
+			<div class="fpl"><div>RData</div><span id="mcr_rfdr">--</span></div>
+			<div class="fpl"><div>PTA</div><span id="mcr_pta">--</span></div>
+		</div>
+		<div class="regs">
+			<div class="fpl"><div>Nxt/&#x03bc;PC/&#x03bc;RH</div><span id="mcs_p">000 000 000</span></div>
+			<div class="fpl"><div>&#x03bc;STK</div><span id="mcs_s">000 000 000 000</span></div>
+			<div class="fpl"><div>BusCtl</div><span id="mcr_bus">--</span></div>
+			<div><button id="or0">|1</button><button id="or1">|2</button><button id="or2">|4</button><button id="or3">|8</button></div>
+		</div>
+		<div class="regs">
+			<div class="fpl"><div>ALU Q/Flag</div><span id="mcs_alu">--</span></div>
+			<div class="fpl"><div>ALU Reg0-7</div><span id="mcs_alu2">--</span></div>
+			<div class="fpl"><div>ALU Reg8-F</div><span id="mcs_alu3">--</span></div>
+			<div class="fpl"><div>WA/MA</div><span id="mcr_addr">---- ----</span></div>
+			
+		</div>
+	</div>
+	<div class="frontpanel">
+		<div class="regs">
+			<div class="fpl fixed"><div>&#x03bc;Op:SEQ</div><span id="mcs_op"></span></div>
+			<div class="fpl fixed"><div>&#x03bc;Op:ALU</div><span id="mcs_op_alu"></span></div>
+			<div class="fpl fixed"><div>&#x03bc;Op:Bus</div><span id="mcs_op_bus"></span></div>
+		</div>
+	</div>
+	<div style="display: flex;">
+		<div style="overflow-y: scroll;height: 700px;margin: 10px;border: 2px solid;width: 75%;">
+			<div class="regs fixed" id="micro"></div>
+			<div class="regs fixed" id="listing"></div>
+		</div>
+		<div>
+			<div>
+				<button id="cm_imp">Import</button>
+				<button id="cm_impcb">Import from Clipboard</button>
+				<button id="cm_clear">Clear</button>
+			</div>
+			<textarea name="anno" id="anno" cols="40" rows="30"></textarea>
+		</div>
+	</div>
+	
+	
+</body>
+</html>

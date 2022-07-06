@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "typescript": "^4.6.3",
+    "uglify-js": "^3.15.4"
+  }
+}
