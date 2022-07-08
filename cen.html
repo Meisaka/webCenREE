@@ -16,7 +16,7 @@
 	display: inline-block;
 	padding: 2px 4px 2px 4px;
 }
-.fpl > span:nth-child(2) {
+.fpl > span:nth-child(2), .fpb > span {
 	border: solid 1px #000;
 	display: inline-block;
 	padding: 0px 4px 0px 4px;
@@ -35,6 +35,11 @@
 	background: #ff3232;
 	color: #ffffff;
 }
+.ils {
+	border: solid 1px rgb(78, 37, 37);
+	background: #290707;
+	padding: 0;
+}
 .frontpanel {
 	display: flex;
 	border: solid 2px #666666;
@@ -42,6 +47,16 @@
 	margin-left: 10px;
 	margin-right: 10px;
 	margin-top: 10px;
+}
+.term {
+	border: 2px solid #77e;
+	margin-right: 10px;
+	margin-top: 10px;
+	background: #01050c;
+}
+.term:focus {
+	border-color: #7af;
+	box-shadow: 0px 0px 3px 1px #eeeeee;
 }
 </style>
 </head>
@@ -53,6 +68,7 @@
 		<button id="b_r1">1</button>
 		<button id="b_r2">10</button>
 		<button id="b_r3">1000</button>
+		<button id="b_r4">10k</button>
 		<button id="b_micro">&#x03bc;Code</button>
 		<button id="b_mstep">&#x03bc;Step</button>
 		<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
@@ -79,16 +95,17 @@
 			<div class="fpl"><div>Level:</div><span id="fp_level">0x0: 0000</span></div>
 			<div class="fpl"><div>Map:</div><span id="fp_flags"><i>ABT</i><i>3</i><i>2</i><i>1</i><i>F</i><i>L</i><i>M</i><i>V</i></span></div>
 			<div class="fpl"><div>Status:</div><span id="fp_runstate"><i>RUN</i><i class="a">HALT</i></span></div>
+			<div class="fpl"><div>Diag:</div><canvas id="fp_diag" class="ils" width="40" height="30"></canvas></div>
 		</div>
 		<div class="regs">
-			<div class="fpl"><div>Reg0/1</div><span id="mcr_file0">----</span></div>
-			<div class="fpl"><div>Reg2/3</div><span id="mcr_file2">----</span></div>
-			<div class="fpl"><div>Reg4/5</div><span id="mcr_file4">----</span></div>
-			<div class="fpl"><div>Reg6/7</div><span id="mcr_file6">----</span></div>
-			<div class="fpl"><div>Reg8/9</div><span id="mcr_file8">----</span></div>
-			<div class="fpl"><div>RegA/B</div><span id="mcr_fileA">----</span></div>
-			<div class="fpl"><div>RegC/D</div><span id="mcr_fileC">----</span></div>
-			<div class="fpl"><div>RegE/F</div><span id="mcr_fileE">----</span></div>
+			<div class="fpl fixed"><div>Reg0/1</div><span id="mcr_file0">----</span></div>
+			<div class="fpl fixed"><div>Reg2/3</div><span id="mcr_file2">----</span></div>
+			<div class="fpl fixed"><div>Reg4/5</div><span id="mcr_file4">----</span></div>
+			<div class="fpl fixed"><div>Reg6/7</div><span id="mcr_file6">----</span></div>
+			<div class="fpl fixed"><div>Reg8/9</div><span id="mcr_file8">----</span></div>
+			<div class="fpl fixed"><div>RegA/B</div><span id="mcr_fileA">----</span></div>
+			<div class="fpl fixed"><div>RegC/D</div><span id="mcr_fileC">----</span></div>
+			<div class="fpl fixed"><div>RegE/F</div><span id="mcr_fileE">----</span></div>
 		</div>
 	</div>
 	<div class="frontpanel">
@@ -106,14 +123,22 @@
 			<div class="fpl"><div>Nxt/&#x03bc;PC/&#x03bc;RH</div><span id="mcs_p">000 000 000</span></div>
 			<div class="fpl"><div>&#x03bc;STK</div><span id="mcs_s">000 000 000 000</span></div>
 			<div class="fpl"><div>BusCtl</div><span id="mcr_bus">--</span></div>
-			<div><button id="or0">|1</button><button id="or1">|2</button><button id="or2">|4</button><button id="or3">|8</button></div>
 		</div>
 		<div class="regs">
 			<div class="fpl"><div>ALU Q/Flag</div><span id="mcs_alu">--</span></div>
 			<div class="fpl"><div>ALU Reg0-7</div><span id="mcs_alu2">--</span></div>
 			<div class="fpl"><div>ALU Reg8-F</div><span id="mcs_alu3">--</span></div>
-			<div class="fpl"><div>WA/MA</div><span id="mcr_addr">---- ----</span></div>
-			
+			<div class="fpl"><div>WA/MA/PA</div><span id="mcr_addr">---- ---- -----</span></div>
+		</div>
+		<div class="regs">
+			<div>&#x03bc;Tests</div>
+			<div><button id="or0">|1</button><button id="or1">|2</button><button id="or2">|4</button><button id="or3">|8</button></div>
+		</div>
+		<div class="regs">
+			<div class="fpb fixed"><span id="mcp_0">--</span></div>
+			<div class="fpb fixed"><span id="mcp_1">--</span></div>
+			<div class="fpb fixed"><span id="mcp_2">--</span></div>
+			<div class="fpb fixed"><span id="mcp_3">--</span></div>
 		</div>
 	</div>
 	<div class="frontpanel">
@@ -127,6 +152,9 @@
 		<div style="overflow-y: scroll;height: 700px;margin: 10px;border: 2px solid;width: 75%;">
 			<div class="regs fixed" id="micro"></div>
 			<div class="regs fixed" id="listing"></div>
+		</div>
+		<div>
+			<canvas id="term0" class="term" width="640" height="340" tabindex="0"></canvas>
 		</div>
 		<div>
 			<div>
