@@ -24,6 +24,7 @@ const mcs_alu2 = document.getElementById('mcs_alu2') as HTMLSpanElement;
 const mcs_alu3 = document.getElementById('mcs_alu3') as HTMLSpanElement;
 const mcr_res = document.getElementById('mcr_res') as HTMLSpanElement;
 const mcr_bus = document.getElementById('mcr_bus') as HTMLSpanElement;
+const mcr_sys = document.getElementById('mcr_sys') as HTMLSpanElement;
 const mcr_addr = document.getElementById('mcr_addr') as HTMLSpanElement;
 const mcr_swap = document.getElementById('mcr_swap') as HTMLSpanElement;
 const fp_flags_con = document.getElementById('fp_flags') as HTMLSpanElement;
@@ -116,13 +117,22 @@ class VTerm {
 		const vca = this.cursor_y * VTerm.columns + this.cursor_x;
 		c = c & 255;
 		if (c < 32) {
-			if (c == 13) {
-				this.cursor_x = 0;
-			} else if (c == 10) {
+			if (c == 10) { // LF
 				this.cursor_y++;
 				if (this.cursor_y >= VTerm.rows) {
 					this.cursor_y = 0;
 				}
+			} else if (c == 12) { // FF (clear)
+				this.cursor_x = 0;
+				this.cursor_y = 0;
+				cx_term0.clearRect(0, 0, cv_term0.width, cv_term0.height);
+				let limit = VTerm.columns * VTerm.rows;
+				for (let q = 0; q < limit; q++) {
+					this.buffer[q] = 32;
+				}
+				return;
+			} else if (c == 13) { // CR
+				this.cursor_x = 0;
 			} else {
 				this.write(94);
 				this.write(64+c);
@@ -188,25 +198,43 @@ const listing:HTMLDivElement[] = [];
 let run_ctl = 0;
 let run_rate = 1;
 let run_step = 0;
+let run_busy = false;
+let run_stop:null | (()=>void);
 function run_control(run:boolean):void {
 	if (!run && (run_ctl !== 0)) {
 		clearInterval(run_ctl);
 		run_ctl = 0;
 		run_step = 0;
+		if (!run_busy && run_stop) {run_stop(); run_stop = null; }
 		return;
 	}
 	if (run && (run_ctl == 0)) {
 		run_ctl = setInterval(function(){
+			run_busy = true;
 			for (let i=0;i<run_rate;i++) {
-				mcstep();
-				if (run_ctl == 0) break;
+				mcstep(i == (run_rate - 1));
+				if (run_ctl == 0) {
+					if (run_stop) {run_stop(); run_stop = null; }
+					break;
+				}
 			}
+			run_busy = false;
 			mcshowstate();
 		}, 20);
 	}
 }
 
-const bpl_rom = atob(`9WVL0AyAfUHVvnOhZQmhZUBV0HM1QPoYKUA3BwSASAovewMBcYQVRPGBABx7Ai8f6pAALwABkAYv
+function bload(v:string):Uint8Array {
+	const bv = atob(v);
+	const a = new Uint8Array(bv.length);
+	let i = 0;
+	for(let c of bv) {
+		a[i] = c.charCodeAt(0);
+		i++;
+	}
+	return a;
+}
+const bpl_rom = bload(`9WVL0AyAfUHVvnOhZQmhZUBV0HM1QPoYKUA3BwSASAovewMBcYQVRPGBABx7Ai8f6pAALwABkAYv
 BC/yFFogAMAUGEkFwBkWMUERgA4ZMUEJgCUWSbDAJRRJjcAqFE3n0KAVWgAE0B6UAzt7QfGxOq8U
 WhAA0C2UQPGhuhhJB8BMeUAyom2+R5NMeQOzQZUAiwCMCfoVSgn4wdpzCQEVCL9zAnNicwnmpDFC
 38AEFkngwDFDgMD1hPsRLO6E73MB+IEDAXEDew17CIAI+KFFgAYvNC8CLx/qkAAvAAGQmnPyoQkB
@@ -216,7 +244,7 @@ gfWQAdCBpSqBpS+i9fsXKTAnBgCB0KL1AIPQouWIwKL1IDKi9QAP0D0YhYCBtTqBpYOAgaUxQA/A
 BBShhYGlhICBtQCBkF5AH5BJA8B/GH8WocVIFjFAUMBye1AVScjABRRJw8AKFKLlSaKloHMJ+xAs
 34RI8aFBhQn2hPoVKQH4gQD4oUGFAPxxxsByewC9xHl7XwAQkA4OAfKhjIAA8qHFgAGAcQNzAho=`);
 
-const wipl_test = atob(`AQEBcwMAZMU6sQBssQD8sQCukAUGsQD+g+2hBD2hBW6QAPBfgPF7GYD1exWA+XsRgP17DRoCczdh
+const wipl_test = bload(`AQEBcwMAZMU6sQBssQD8sQCukAUGsQD+g+2hBD2hBW6QAPBfgPF7GYD1exWA+XsRgP17DRoCczdh
 ABpQVP/sc0SjCaMNoxajGoAHof1A0DAAwf1FQiNBIxURwAPh/UjQMADB/UVCI0EjFfcpF90JkBAA
 W1yKwP/qyhQKqlBkkPAAUUAV72kDPVVCUDL9VfEEoFAy/nDxBKJQMv5wVSrQ/uVQQvECtoC9oQYY
 kAG7sQYAgLEdASmhA3dzQgRHTAD/AmVHnAmgA2V5BVp5BTYDQoCKoQNEfPUDTnkGCQNjeQU2A1R5
@@ -244,7 +272,7 @@ qnPBlaQ4UUBlobVF0AG785ciMOEF6glloTq1RWPvc+yVQW2iVWRtomUBXD8WDovA4UkWBIDBQDGl
 YXPvlaFcZaEJbaJbhaQ/FwRloT4JpSFz9QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAA==`);
 
-const wipl_dump = atob(`AQEBcwMAZMU6sQBssQD8sQCukAUGsQD+g+2hBD2hBW6QAPBfgPF7GYD1exWA+XsRgP17DRoCczdh
+const wipl_dump = bload(`AQEBcwMAZMU6sQBssQD8sQCukAUGsQD+g+2hBD2hBW6QAPBfgPF7GYD1exWA+XsRgP17DRoCczdh
 ABpQVP/sc0SjCaMNoxajGoAHofFA0DAAwfFFQiNBIxURwAPh8UjQMADB8UVCI0EjFfcpF90JkBAA
 W1yKwP/qyhQKqlBkkPAAUUAV72kDPVVCUDL9VfEEoFAy/nDxBKJQMv5wVSrQ/uVQQvECtoC9oQYY
 kAG7sQYAgLEdASmhA3dzQgRHTAD/AmVHnAmgA2V5BVp5BTYDQoCKoQNEfPUDTnkGCQNjeQU2A1R5
@@ -275,7 +303,7 @@ AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAA==`);
 
 const diag = {
-f1:atob(`ADqxuAAFDqHxT6HyDaHyD5DAAF8iMhQLkIB3sQD+OrEA/HY6ofEJofELofENofEPgfEQwA9CMaHx
+f1:bload(`ADqxuAAFDqHxT6HyDaHyD5DAAF8iMhQLkIB3sQD+OrEA/HY6ofEJofELofENofEPgfEQwA9CMaHx
 EKHxBsANSRUDcYcowfEQFrc90IBVWJmh8Qh1AIABgI6BG4GDgdyCA4JHgoSC44N/hG+FnYayhyiA
 AYABc4otLS0twA9I4fEQofEMofELofEGOnEAADJAwBEvQi8DUUAVQ8AhL0AvAVFAFTkgUCBAFeaQ
 ABJcVWC7IHAgcBX3kAASXICoQXEUBZtRYBUVIHAgcBXvofEKgfEQwA9CMSkVnHOzwDF7BHPuc5Lh
@@ -311,7 +339,7 @@ gONzjsAsc/eh8QiAxaHyAA55hiOMm5zB1djJzMnB0tmg1MXT1NONiooAYIgAOlyVQRkh0Af/WRgb
 MGDQ+ABSQlAgtaJVYHmFGcC9eYUOxUEV+XPb0PgAUiSQCABQBJDwAFFAFcp5hiONisXO1MXSoNTF
 09SgztXNwsXSugAyQIAPwfEQSoANSRQDcYABgfIALBHswfIBgF9BMRkDgN9K4fIBeYVoFgw1QDVA
 NUA1QEMVc8xVQBgDcYcoUWAW+VVAPTs40MAAUCCYVSpggAHQ+ABaVSih8Q51AD4AAAAAAAA=`),
-f2:atob(`AEnD0NWgyc7T1NLVw9TJz86g1MXT1I2KAAW7w9DVrbagzcHQ0MnOx6DSwc2g1MXT1I2KAAdf0s/N
+f2:bload(`AEnD0NWgyc7T1NLVw9TJz86g1MXT1I2KAAW7w9DVrbagzcHQ0MnOx6DSwc2g1MXT1I2KAAdf0s/N
 oNPFzMag1MXT1I2KigAAAJAHzFCAfQCbnIzD0NWgyc7T1NLVw9TJz86g1MXT1Kygw8/O1NLPzK3D
 oNTPoMXYydSNigBtolWAtaJgACCQBaFQgFyQABDFYeUBPxX5AwfAAREBABMBABcBABUBABgBABAC
 EQEAEgITAQAUAhUBABYCFwEAGQIYCgAYBAAYBwAY+wAY9QAIEAEABxEBAAYQAQAIEQEAAhIBAAMT
@@ -347,7 +375,7 @@ AaAuDP4BwC4M/wHgCX9FZaGQB8xQgH0AjYqqqqqgzcHQoNLBzaDF0tLP0qCqqqqNigCh8Quh8QyQ
 B4pQgHUAVYY6hWFAENAH3VCCUWIV84tBARUye1aNiqqqqqDQwdPToKqqqo2KAKHxCntA0NLF09Og
 09DBw8WHjYoAgfIALBH6gfIBdUB7JI2KqqqqoMPIxcPLoNPVzaDF0tLP0qCqqqqNigCh8Quh8Qxz
 voHyACwsEfmFQRUBCaHyAXPvggAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`),
-f3:atob(`A23DzcSgwdXYoM3Fzc/S2aDUxdPUjYoABG3DzcSg08XFy6DUxdPUjYoABTHDzcSg0sXBxKDUxdPU
+f3:bload(`A23DzcSgwdXYoM3Fzc/S2aDUxdPUjYoABG3DzcSg08XFy6DUxdPUjYoABTHDzcSg0sXBxKDUxdPU
 jYoAAs7GzM/Q0Nmgw8/NzcHOxKDC1cbGxdKg1MXT1I2KAAXoxszP0NDZoNPFxcug1MXT1I2KAAab
 xszP0NDZoNLFwcSg1MXT1I2KAAdH0s/NoNPFzMag1MXT1I2KigAAAIVBFQEJewJz98HyACQwJDAR
 96HyAQmB8gAsEfqB8gEJpaJFAXsFhaF7AQmlosDwQjEHJhAsLCzAsEAxwLlJGQTAB0Axe8OFocAP
@@ -383,7 +411,7 @@ LwKQQU0vAC80LwaAQ6IBFHoBGBMJofELofEMcgEOkOb/LwKQARwvAC80LwaARaIBFHoBGBMWegES
 llCCUWIV84tBARUYegESio2qqqqg0MHT06CqqqoAofEKcgEOegESqqqqoMbBycygqqqqAKHxC6Hx
 DHIBDowAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`),
-f4:atob(`As6wsbGzs6DDzcSgwdXYoM3Fzc/S2aDUxdPUjYoAA9mwsbGzs6DDzcSg08XFy6DUxdPUjYoABJ2w
+f4:bload(`As6wsbGzs6DDzcSgwdXYoM3Fzc/S2aDUxdPUjYoAA9mwsbGzs6DDzcSg08XFy6DUxdPUjYoABJ2w
 sbGzs6DDzcSg0sXBxKDUxdPUjYoAAtnGyc7DyKDB1digzcXNz9LZoNTF09SNigAFPMbJzsPIoNPF
 xcug1MXT1I2KAAX/xsnOw8ig0sXBxKDUxdPUjYoABp7Sz82g08XMxqDUxdPUjYqKAAAAhUEVAQl7
 AnP3wfIAJDAkMBH3ofIBCYHyACwR+oHyAQmlokUBewWFoXsBCaWiwPBCMQcmECwsLMCwQDHAuUkZ
@@ -421,7 +449,7 @@ AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`),
 };
 const uc = {
-e:atob(`wAAADQABDS2TUnAAUJoAACAAGgoQEAEACoAAAAEQAAAAAAAAgAENAAAAcC0AAAAtCQoAABAQAAAA
+e:bload(`wAAADQABDS2TUnAAUJoAACAAGgoQEAEACoAAAAEQAAAAAAAAgAENAAAAcC0AAAAtCQoAABAQAAAA
 AC1QAACdYAAAcBANDQAKCwAAAIAAAQAKGgAQAAAAAIAAAAABAAAAAAAAAYAAcBBQAAAgEgAAAAAA
 ABCAAAAAUAIAAAAAHRBQAAAKDQENLRMAAC0AAABQAQAQABAAIBEQgAAAI4AwIFBwEQAKABoAABoA
 DQogABAQgAANCw0QnTAQAC1QCgAgAAAAEAABARoAGhAaAAAALQAAAAAAAAAAAAAAAAAAAAAAAAAg
@@ -457,7 +485,7 @@ DQBQAQoaEBBwkwALIAEAAACBAAAAAAAAEQAMAAwAgAAAAAAAIAARAAABLQAAAC0AEABQcAAAAAAA
 AAAAAIAAAAAAAAoAEAEAEAAAcABQUBAIDSCgEAANDYAdAB0BAACAAAENGgBDgIAAAQAAAAtQjQwN
 AQ0ALYANLQAAkQAAAAEAIAAAIAANAABQEAAQAAAAABANLQAgLQ0AgBAQEAAACg0AAAAgABAAExAA
 ECEAEQABIQoKAJCAAAAAAAAACgAACgCQLQAAUACaAAAADQAKDQAAACoKAQBgAA0AkBGAEAA=`),
-f:atob(`qwABEwFjAEs5AwEBAQMBAKIBAQABgQABCzEbAAMBSwE7ASOjAVNLiwABGwEDAQHLABu7AQGBAYEj
+f:bload(`qwABEwFjAEs5AwEBAQMBAKIBAQABgQABCzEbAAMBSwE7ASOjAVNLiwABGwEDAQHLABu7AQGBAYEj
 AUsBAQGqmiMBBAuBA0kDGwAbAbEBI0O7q4uBAQMBATF1GwEjQwF1IwEBa3mJBAu7dRuBAYmLAwEB
 AYFxiYsju3MbIwGJqtoBAQEbAwsDAQEBG0sBARsBCwEBKwEBywEjORu5AbuBgQEBAQG7AQEBAQHL
 IxPLAUGBATNbAykButsBSUthIztLAAEAgQEbEwMBgREBAQEBAQEBAyYmJiYmJiYmJiYmJiYmJiZD
@@ -493,7 +521,7 @@ C4EBEwGLExMBOQEBARMBAwEAAUsBAQGbASOBAZMBOY8AAYEBgTsBAVkbUQGrOwEBgQEBAQEDAQEA
 gQABATsBAQEBAROBAQABgZsRAQEBAYE7AYGBigG7uwEBIwFLAQExeYt7AAF6STkBQxsBAQMBOQMT
 AwEBSxMTUVgbAxsBAAEBgZsBAZYAAZsBAQEBAQEBAAEBSwEBAQMruQGBAQEBQ0urAQsBu4GLAQG7
 AZoBqiMTigETAQExAQEDAQEBE4uLCwGBAQMBCIsBmwEBAAEAAQEBAUsbCwEBAQGBARMxAYE=`),
-h:atob(`xgAD/gN+//9/fgMDA3/GAC8Df3lzcn8DfwKSAH5yLmotAgZxA37/8goCDv4yAgI2/n8HAnNyAlIv
+h:bload(`xgAD/gN+//9/fgMDA3/GAC8Df3lzcn8DfwKSAH5yLmotAgZxA37/8goCDv4yAgI2/n8HAnNyAlIv
 Af8CAwP/LjEDc2qXf4R/f3IOA3MCFy4XFgdyAgcAAQJyDgI3DwByMwEBfgJFc2pycg5y1kUHBwAB
 AXICRkcucn4OJgJGFxMCAwN+/5b//34CDv8DAi8AfwJrLrcCchsSAhJmfTJycgIDfgIXkX8DA38T
 /38HAwcSAsX+3pfF/8b/A/4CfweSAAEAcAN/f38BFwZ/AgIC/gMCB3JycnJycnJycnJycnJycnKW
@@ -529,7 +557,7 @@ l1shcgHCAwIjwv/nfgJy8jeSSi1y8l6SXgHGAoYCAwL/cnEBfwMCAga3Z/8CAHMCf3JxAX4DAob/
 cgACAi0DAgIDA5dxcl4BEjIGAmsAAnJ9l3FzDgJ2lgL+Bv5/AgIBkhb/fwJ+AgICfnICAn0Ct31+
 frcB/hL//5KSfpICAH0DcgUClgb+AjMBkgKSAgJykQq3/gGSXv9y8pJykgMDfv/mcpKSMnLmfpIy
 kn4CfgZ/f38VAnICAgPyAgMDFxIyfwNy/n8DZzN+MwED/wOb+wEDA5d/fgNzAvsxcn4AcnI=`),
-j:atob(`gQAA9ACEgIABgoQAbxPIAEB0AIIAhgBgAIGAAIDChMDAgIKAAISAgICEhICIhICAgAQA9ACGgMBA
+j:bload(`gQAA9ACEgIABgoQAbxPIAEB0AIIAhgBgAIGAAIDChMDAgIKAAISAgICEhICIhICAgAQA9ACGgMBA
 gICAAHSDiMAAgMDAgMACAICEiEH0AMAAwMDAgECAgIGAhIAAwICAQICAgIXAgMCAgISAgsDAQICA
 gMCFwALAgICEwILAgIyAAHSAgICAgICEhIQA9EDgAIAAwoSClECChYTAoMLggoKAgIBAwAQCdAQC
 9AQAYECCgICAgN2cgYGDjYCBBAD0AIAAgAB0BAD0TIMMg4iEgAD0wICAgICAgICAgICAgICAgICA
@@ -565,7 +593,7 @@ gMDAdEDAg4OUgQDAgMCUAMCDgIyAgIKAjIDAgMCAgYAAgMCAgoCAgIGAgYQAgICAg4CPgICAhIAA
 wACAhMGg4IwAYEDAgICAgJDAgEDvgMSAwIACxOCAgIKAgIAAgOCBw4CAAJaAgYGUgICAhJSPwYCA
 gMCAgIKAgYGAg4SQAMAAgICEwICAhFDvgICAhODA4IDAgICAgICEwYCMgAB0gICAwICClIDUgoCA
 gICA7IB0AEDAgIOJgADAgAB0QICAAACDgIcAb1CDQPQAgGAAwIAAdAQcgAB0gMDAg4CBgMA=`),
-k:atob(`QgBAQMDgQEBAYEBAQEBEAERAQEBGxkBAQEBAAADgQEBAQPBBwOBAQlBASEBQQOBBQEBBQEXFQEpA
+k:bload(`QgBAQMDgQEBAYEBAQEBEAERAQEBGxkBAQEBAAADgQEBAQPBBwOBAQlBASEBQQOBBQEBBQEXFQEpA
 QEDgQEBCQkJAQEBEQEDAQENIQEBAUkBDQEBA4FBAQEBHSEBSSOBHQkBAQEBASEBBR0hE4EhQUEBA
 QEBAQFBAQUBIUcBIQk1AQEBA4EBAQEBASEBAQEAAQEBAQEPgQ0BSQExCQENBRMDgwEBD4EDAQEDs
 QEBEQEDwQENAQEBAQkVAQEBAQEJAAEAAQODAQEBAQVBAQEBAQEBAUEpKSkpKSkpKSkpKSkpKSkpE
@@ -601,7 +629,7 @@ QEJAQEBAUVFAQEBA4MFASEBAwEBAQEBBQEJAQEBAQEAAQENAZEBAQGBAQEBAQUBAUkBAQEBAQEAA
 QgBAQEBAQEBAQEJBQUBAUkFCQEBAQEBAQUFES0BDQ0BAQkBAQEBAQFBAQMBDQEBAAEQAQEBAQEBA
 QEBAQFFAQGBAQEBAAEBAREFAQEFAQEFAQMBAQEBBQEhAQEBAQEBAQkBCQEBAQEBCQEDgQ0FA4EDj
 QMNAwULAQEBBQEBAQEBAQEBAQVBQQEBAQEBAQEBAQUBAQEBAQEBAQEDgwEBCAEBDQOBAQkI=`),
-l:atob(`GAD+HvwY+Pj/GZn+//8cAP7//5j8G/7//xgeABAbGKCYHB2Y/Br4Fh0HeAAXHBwVHPn+GPwbHrj/
+l:bload(`GAD+HvwY+Pj/GZn+//8cAP7//5j8G/7//xgeABAbGKCYHB2Y/Br4Fh0HeAAXHBwVHPn+GPwbHrj/
 mPgc/f/4GJj/maD4+Bn8/x4Z+P2g/xj/GJigH/8RmB4YHRj/+B2g/5iYGRmYmaAcGB0ZGJj4/xGY
 mKAZGP8dHBkdGR0Y+PgY/v8f+Br4+BgdHPj+GP0Y/xD/HfgZEP8cHxwcmKAeHhj4HBj/mP/+//n+
 +Pn+//8aEJgQEPiY+Bn4mB8Z+f4YAJgAGf7//v6Y/Bj8GBgdGP4Y+BISEhISEhISEhISEhISEhIY
@@ -637,7 +665,7 @@ mB8H//yYHx/4Gf8fmB8e/KAfBx4fHxmYGhEeH5iYHh4AmJgfHh8fHR8fgBj/HRYZH5gf+JgcHx0A
 HwAdF5j4Hx/+//+QHx+YHAAfoP2YHxqQ+JD/Fh+goB+gH6D8GB+fHx+Y/6AVHgegHx8fGJgY+JgH
 HPiYBx/44B4fHx8fAJj/HpgZHx8YGf2YGR8ZHBkdmBmYH5gUH/gXHxkfGf7/H/gWHx8fGB+gGRkf
 GR8dHR///P+YHwcVBfwUH/7//B8f/v8fGPj+//8Y/Zj++P//+Jj+//7+H/7/GfiYGB8fHxk=`),
-m:atob(`twBDgIJjBPiFlwJDhV74AEOFTs6C70OFPpaPAAIOEADBaFPNgomALKqdCC5srr2Aar5DvYLvLACF
+m:bload(`twBDgIJjBPiFlwJDhV74AEOFTs6C70OFPpaPAAIOEADBaFPNgomALKqdCC5srr2Aar5DvYLvLACF
 xgLgzIWAjsGF0AD+/clmhXFnAMwAhV5OIgUAfIXZwk1pKRaFAMAAhTU1AQHG0AAAXynyfMYAhdnC
 NQABboXWAMwpx+Ru9wCdM4XYB+DwCGy08w5DpMzJhfGF/QcB8YW56zxq7gAw/YcJtIZOwa5Dhb5D
 8L5DhT67fsF+fv3JHuwADB4AvkNQAM4AwjOFNjPJZv1m5zxJLkMxAFlZWVlZWVlZWVlZWVlZWVnu
@@ -673,7 +701,7 @@ ChMThWbGMzME0YU9zYFYggADMScUkQHJXeH7H8V0WFQAxcG1EbhE1EbZqIGFGo7WYMVWBMkaYdQA
 tADU68EATlJDhT7FxADJejufCMzJTlHm98kyqJZ/gIh/TH6CRI61FS/wpgC9ARQACtkMgXcGCMHU
 MATFHoMQqIbZ1r3lAMJKEcUBLIIHAczNBZsF5dY5wQXwHsWOq7DrQgXkBTOF2IAsGsDGmcgA0QXM
 BfwbC3qFZgLOgtbZ1WZOEDOFZqSkJoUMLgBDhW4szMFDf4U+QMkzhTYzIzOFByPNS87Fu60=`),
-map:atob(`iwEZT4uLha97k4uOyn6Li/39/Pz7+/r6Vvn+7t7Ougfv7+/v7+/v7x0eIiMkIYuL+Pj4+Pj4+Pgu
+map:bload(`iwEZT4uLha97k4uOyn6Li/39/Pz7+/r6Vvn+7t7Ougfv7+/v7+/v7x0eIiMkIYuL+Pj4+Pj4+Pgu
 LyolTU4fH0VFRUVFRUugQUFBQEBAQECJiYmJiYl8fUNDQ0BAQEBAFGVlZWVlt7AxZGRkZGRQUwlU
 VFRUVIuJiWRkZGRkkJAbUVFRUVGLPTM1NTU1NTU1FVRUVFRUiwkzNTU1NTU1NStRUVFRUYsJMzU1
 NTU1NTU8VFRUVFSLCTM1NTU1NTU1LGBgYGBgiwk0NjY2NjY2Nj5iYmJiYmuLNDY2NjY2NjYmYGBg
@@ -800,7 +828,7 @@ class ALU {
 		case 1:
 			out = val_r + val_s + this.carry_in;
 			this.carry_out = Number(out > 15);
-			this.over = Number(((val_r & 7) + (val_s & 7) + this.carry_in) > 7);
+			this.over = this.carry_out ^ Number(((val_r & 7) + (val_s & 7) + this.carry_in) > 7);
 			break;
 		case 2:
 			out = val_r | val_s;
@@ -848,98 +876,15 @@ class ALU {
 		return r.replace(/[ABb]/g,ss=>{if(ss=='b')return'B';return ss=='A'? `[${hex(ia,1)}]`:`[${hex(ib,1)}]`;});
 	}
 }
-const FN_D4D5 = [
-	'R_SWP','R_REG','R_ADH','R_ADL','R_swp','R_reg','R_adH','R_adL',
-	'R_ATH','R_DH_','R_DAT','R_H14','R_DLI','RCnst','__ncE','__ncF',
-];
 const FN_E6 = [
 	'','F=>Result','F=>RIdx','F=>Level',
 	'F=>PTA','ASwap','SEQ_RE','(!)CondRegLD'
 ];
-const FN_SEQ_SN = [
-	'uPC','AHR','STK','DIR'
-];
-const FN_SEQ_FE = [
-	'POP','PSH','---','---'
-];
-const FN_K11 = [
-	'?K11_0', 'L13A_SET', '?K11_2', 'BusCtl',
-	'REG_WR', 'PTR_WR', 'WADL_W', 'BusD_R'
-];
-const FN_J12 = [
-	['?','?'],['RESF.S','?'],['?data','?'],['RESF.S','?RESF.?']
-]
+const FN_SEQ_SN = ['uPC','AHR','STK','DIR'];
+const FN_SEQ_FE = ['POP','PSH','---','---'];
 
 function mcdump() {
-	/* 
-	const tmpalu = new ALU();
-	for(let i = 0;i < 2048;i++) {
-		const div = document.createElement('div');
-		const v6 = uc.k.charCodeAt(i); //A / // MSB
-		const v5 = uc.f.charCodeAt(i); //B /
-		const v4 = uc.h.charCodeAt(i); //C /
-		const v3 = uc.l.charCodeAt(i); //D /
-		const v2 = uc.m.charCodeAt(i); //E /
-		const v1 = uc.j.charCodeAt(i); //F /
-		const v0 = uc.e.charCodeAt(i); //H / // LSB
-		const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
-
-		const k9_en = bit(v1,7);
-		let k9_com = 1;
-		if (k9_en == 0) {
-			switch(v2 & 7) {
-				case 0: k9_com = mcstate.f12
-			}
-		}
-		// branch and condition selectors
-		const seq_branch = bit(v4,1);
-		const sqd = v2 | ((v3 & 7)<<8);
-		const selJ11 = (v2>>3) & 3;
-		const enaJ11 = bit(v2,2);
-		const selJ12 = (v2 & 3);
-		const selJ13 = (v2>>4) & 3;
-		const selK13 = (v2>>6) & 3;
-		const selK9 = 0;
-		const d_branch = [];
-		if (seq_branch == 0) {
-			if ((sqd | 1) != sqd) {
-				d_branch.push(`${hex(sqd|1,3)} IF ${FN_J13[selJ13][0]}`);
-			}
-			if ((sqd | 2) != sqd) {
-				d_branch.push(`${hex(sqd|2,3)} IF ${FN_J13[selJ13][1]}`);
-			}
-			if ((sqd | 4) != sqd) { // mind the strange order
-				d_branch.push(`${hex(sqd|4,3)} IF ${FN_K13[selK13][1]}`);
-			}
-			if ((sqd | 8) != sqd) { // mind the strange order
-				d_branch.push(`${hex(sqd|8,3)} IF ${FN_K13[selK13][0]}`);
-			}
-		}
-
-		
-		const seq0_s0 = (k9_com & bit(v3,5)) ^ 1;
-		const seq0_s1 = (k9_com & bit(v3,6)) ^ 1;
-		const k6b_a = bit(v4,0); // TODO verify
-		const k6_imm = (bit(v6,6) & (k6b_a ^ 1)) ^ 1;
-		const seq12_s0 = (k9_com & bit(v3,7)) ^ 1; // TODO verify
-		const seq1_s1 = (k9_com & k6_imm) ^ 1;
-		const seq2_s1 = (k9_com & k6b_a) ^ 1;
-		const seq_pup = bit(v3,4); // TODO verify
-		const seq_fe = k9_com & bit(v3,3); // TODO verify
-		let lseq = `[${d_branch.join(',')}] S2:${FN_SEQ_SN[seq12_s0|(seq2_s1<<1)]} S1:${FN_SEQ_SN[seq12_s0|(seq1_s1<<1)]} S0:${FN_SEQ_SN[seq0_s0|(seq0_s1<<1)]} ${FN_SEQ_FE[seq_pup|(seq_fe<<1)]}`;
-		const l34 = `[${sqd.toString(16).padStart(3,'0')}]`;
-		const lf = bin(v5 >> 3, 5) + ',' + bin(v4&3, 2);
-
-		tmpalu.sel_a = (v6<<1)|(v5>>7);
-		tmpalu.sel_b = v5>>3;
-		tmpalu.src = v4>>2;
-		tmpalu.aop = v4>>5;
-		tmpalu.dst = v5;
-		const lh = tmpalu.funcstr().padEnd(10);
-		const mch = FN_D4D5[v0&15] + ' E6=' + FN_E6[(v0>>4)&7];
-		div.innerText = i.toString(16).padStart(3,'0') + `: ${lf} ${lh} ${lseq} ${l34} ${bin(v1>>2, 6)} ${FN_K11[x_k11]} ${mch}`;
-		d_micro.appendChild(div);
-	} */
+	// TODO rewrite
 }
 class Sequencer {
 	p:number = 0;
@@ -1110,10 +1055,12 @@ const mcstate = {
 	memaddr: 0,
 	memdata_in: 0,
 	memdata_out: 0,
+	resetting: 1,
 	physaddr: 0,
 	physpre: 0,
 	busctl: 0,
 	sysctl: 0,
+	sys_write_latch: false,
 	f12a: 0,
 	f12b: 0,
 	b15a: 1,
@@ -1132,6 +1079,10 @@ function mcreset() {
 	mcstate.result = 0;
 	mcstate.swap = 0;
 	mcstate.level = 0;
+	mcstate.sysctl = 0;
+	mcstate.busctl = 0;
+	mcstate.resetting = 1;
+	mcstate.sys_write_latch = false;
 }
 
 const enum CCR {
@@ -1230,9 +1181,12 @@ function mcshowstate() {
 	// 'AddrCtlSel','?oSys29','?iSys64','?DMA_M8i3b'
 	// mcstate.busctl
 	
-	let bc = mcstate.busctl;
-	mcr_bus.innerText = `${(bc&1)>0?'I':'-'} ${(bc&2)>0?'AE':'--'} ${(bc&4)>0?'AC':'--'} ${(bc&8)>0?'U':'D'}` +
-	` ${(bc&16)>0?'AS':'--'} ${(bc&32)>0?'e29':'---'}${(bc&64)>0?'e64':'---'}${(bc&128)>0?'M8':'--'}`;
+	const bc = mcstate.busctl;
+	const sc = mcstate.sysctl;
+	mcr_bus.innerText = `${(bc&1)>0?'I':'-'} ${(bc&2)>0?'--':'AE'} ${(bc&4)>0?'--':'AC'} ${(bc&8)>0?'U':'D'}` +
+	` ${(bc&16)>0?'DA':'--'} ${(bc&32)>0?'e29':'---'}${(bc&64)>0?'MFI':'---'}${(bc&128)>0?'DMA':'---'}`;
+	mcr_sys.innerText = `${(sc&1)>0?'DM4':'---'} ${(sc&2)>0?'DM3':'---'} ${(sc&4)>0?'TE':'--'} ${(sc&8)>0?'-':'M'}` +
+	` ${(sc&16)>0?'R':'H'} ${(sc&32)>0?'--':'TR'} ${(sc&64)>0?'A':'-'} ${(sc&128)>0?'IA':'--'}`;
 	const mpindex = pindex | ((mcstate.memaddr >> 11) & 31);
 	const mpage = mcstate.page[mpindex];
 	const mpaddress = ((mpage & 127) << 11) | (mcstate.memaddr & 0x7ff);
@@ -1241,19 +1195,19 @@ function mcshowstate() {
 
 ///////////////////////////////// Microcode stepping ////////////////////////////////////
 
-function mcstep() {
-	const mcp = mcstate.s2.output.toString(16) + mcstate.s1.output.toString(16) + mcstate.s0.output.toString(16);
+function mcstep(debug_output:boolean = false) {
 	const pc = ((mcstate.s2.output << 8) | (mcstate.s1.output << 4) | (mcstate.s0.output)) & 0x7ff;
 	if (run_step > 0 && pc == 0x101) {
 		run_control(false);
+		debug_output = true;
 	}
-	const v6 = /*A*/uc.k.charCodeAt(pc); // MSB
-	const v5 = /*B*/uc.f.charCodeAt(pc);
-	const v4 = /*C*/uc.h.charCodeAt(pc);
-	const v3 = /*D*/uc.l.charCodeAt(pc);
-	const v2 = /*E*/uc.m.charCodeAt(pc);
-	const v1 = /*F*/uc.j.charCodeAt(pc);
-	const v0 = /*H*/uc.e.charCodeAt(pc); // LSB
+	const v6 = /*A*/uc.k[pc]; // MSB
+	const v5 = /*B*/uc.f[pc];
+	const v4 = /*C*/uc.h[pc];
+	const v3 = /*D*/uc.l[pc];
+	const v2 = /*E*/uc.m[pc];
+	const v1 = /*F*/uc.j[pc];
+	const v0 = /*H*/uc.e[pc]; // LSB
 
 	const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
 	const x_h11 = (v1 >> 2) & 7;
@@ -1274,51 +1228,36 @@ function mcstep() {
 	const seq_pup = bit(v3,4); // TODO verify
 	const k6b_a = bit(v4,0); // TODO verify
 	const k6_imm = (bit(v6,6) & (k6b_a ^ 1)) ^ 1;
+	const busctld = bit(v5,3);
+	const busctla = (v5>>4) & 7;
+	const busctlmask = ~(1 << busctla);
 	
-	
+	const pindex = ((mcstate.memaddr >> 11) & 31) | (mcstate.pta << 5);
+	const pgram = mcstate.page[pindex];
+	const pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
+	const is_mmio = ((pgram & 253) == 253) ? 0 : 1;
+	const is_reg = (((pgram & 127) == 0) && ((mcstate.memaddr & 1792) == 0)) ? 0 : 1;
+	const is_regmmio = (is_reg & is_mmio) ^ 1;
+	const notpgbit = (pgram >> 7) ^ 1;
+	const is_mem = (is_reg & notpgbit) ^ 1;
 	
 	let k9_com = 1;
-	/*/ XXX:OUTPUT */ let k9_fn = '';
 	if (k9_en == 0) {
 		switch(v2 & 7) {
-		case 0:
-			k9_com = 0/* mcstate.f12b */;
-			/*/ XXX:OUTPUT */ k9_fn = '(0)F12';
-			break;
-		case 1:
-			k9_com = (mcstate.rir & 1)^1; /* TODO rir.0 nor ? */
-			/*/ XXX:OUTPUT */ k9_fn = '(1)RIR.0 nor ?';
-			break;
-		case 2:
-			k9_com = mcstate.rir & 1;
-			/*/ XXX:OUTPUT */ k9_fn = '(2)RIR.0';
-			break;
-		case 3:
-			k9_com = 0; /* TODO B12 (mmio/reg addressed) */
-			/*/ XXX:OUTPUT */ k9_fn = '(3)Ad=IO/REG';
-			break;
-		case 4:
-			k9_com = 0; /* P10_8 */
-			/*/ XXX:OUTPUT */ k9_fn = '(4)P10.8';
-			break;
-		case 5:
-			k9_com = 0; /* TODO F14 */
-			/*/ XXX:OUTPUT */ k9_fn = '(5)? NAND ?';
-			break;
-		case 6:
-			k9_com = mcstate.b15a ^ 1; /* TODO B15A */
-			/*/ XXX:OUTPUT */ k9_fn = '(6)B15A.~Q';
-			break;
-		case 7:
-			k9_com = 0; /* TODO F13->H13A */
-			/*/ XXX:OUTPUT */ k9_fn = '(7)F13 most';
-			break;
+		case 0: /* TODO mcstate.f12b */ k9_com = 1; break;
+		case 1: /* rir.0 nor 4 */
+			k9_com = ((mcstate.rir | (mcstate.rir >> 4)) & 1)^1; break;
+		case 2: /* rir.0 */ k9_com = mcstate.rir & 1; break;
+		case 3: /* TODO: double check this (mmio/reg addressed) */
+			k9_com = is_regmmio; break;
+		case 4: /* REG/pbit */ k9_com = is_mem; break;
+		case 5: /* TODO DMA P2.13 */ k9_com = 0; break;
+		case 6: /* TODO B15A */ k9_com = mcstate.b15a ^ 1; break;
+		case 7: /* TODO F13->H13A */ k9_com = 0; break;
 		}
-		k9_com = (~k9_com) & 1;
-		/*/ XXX:OUTPUT */ k9_fn = 'K9=' + k9_fn;
+		k9_com = k9_com ^ 1;
 	}
 	// branch and condition selectors
-	/*/ XXX:OUTPUT */ const d_branch = [];
 	let seq_or = 0;
 
 	// seqencer control
@@ -1329,49 +1268,38 @@ function mcstep() {
 	const seq_fc = seq_pup|((k9_com & bit(v3,3))<<1); // TODO verify FE (v3,3)
 
 	let datapath = 0;
-	let pgaddr = 0;
 	const sense = 1; // inverted on bus
 	let sysdata = mcstate.memdata_in;
-	if (in_dbgdat.value != '') {
-		sysdata = parseInt(in_dbgdat.value, 16) & 255;
-	}
 	const sysint = 0; // inverted on bus
 	const dswitch = 0; // inverted on bus
 	// Data Path Control
-	/*/ XXX:OUTPUT */ let mcd_d45 = '';
 	switch(v0&15) {
-		case 0: case 4: datapath = mcstate.swap;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=SWAPR';
-		break; // R_SWP ⇒ DP
-		case 1: case 5: datapath = mcstate.rdr;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=RDR';
-		break; // R_REG(d13) ⇒ DP
-		case 2: case 6: datapath = ((mcstate.memaddr >> 8) & 255) ^ 0xf0;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=MA_H';
-		break; // R_ADM(rawH) ⇒ DP
-		case 3: case 7: datapath = mcstate.memaddr & 255;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=MA_L';
-		break; // R_ADL ⇒ DP
-		case 8: datapath = pgaddr /* TODO */;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=(!)PA_H';
-		break; // R_AddrPH ⇒ DP
-		case 9: datapath = ((mcstate.ccr << 4) | sense) ^ 0xf0 /* TODO sense sw */;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=CCR_DSense';
-		break; // CCR:sense ⇒ DP
-		case 10: datapath = sysdata;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=SysDAT';
-		break; // R_SysDLatch ⇒ DP
-		case 11: datapath = (mcstate.level << 4) | 15 /* TODO H14? this is inverting */;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=(!)R_H14';
-		break; // R_H14 ?? ⇒ DP (connects to M7? and Regfile?)
-		case 12: datapath = (sysint << 4) | dswitch;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=(!)R_INTDIP';
-		break; // R_DLI (int7..4:dipsw3..0[RHIM]) ⇒ DP
-		case 13: datapath = v2 ^ 0xff;
-		/*/ XXX:OUTPUT */ mcd_d45='DP=RCnst';
-		break; // RCnst MCv2 ⇒ DP
-		// __ncE N/C
-		// __ncF N/C
+	case 0: case 4: // R_SWP ⇒ DP
+		datapath = mcstate.swap; break;
+	case 1: case 5: // R_REG(d13) ⇒ DP
+		datapath = mcstate.rdr; break;
+	case 2: case 6: // R_ADM(rawH) ⇒ DP
+		datapath = ((mcstate.memaddr >> 8) & 255) ^ 0xf0; break;
+	case 3: case 7: // R_ADL ⇒ DP
+		datapath = mcstate.memaddr & 255; break;
+	case 8: // R_AddrPH ⇒ DP
+		datapath = pgaddr; break;
+	case 9: // CCR:sense ⇒ DP
+		datapath = ((mcstate.ccr << 4) | sense) ^ 0xf0 /* TODO sense sw */; break;
+	case 10: // R_SysDLatch ⇒ DP
+		datapath = sysdata; break;
+	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
+		datapath = (mcstate.level << 4) | 5 | (mcstate.resetting>0 ? 2 : 0);
+		if(mcstate.resetting != 0) mcstate.resetting--;
+		break;
+	case 12: // R_DLI (int7..4:dipsw3..0[RHIM]) ⇒ DP
+		datapath = (sysint << 4) | dswitch;
+		break;
+	case 13: // RCnst MCv2 ⇒ DP
+		datapath = v2 ^ 0xff; // goes through a ls240
+		break;
+	// __ncE N/C
+	// __ncF N/C
 	}
 	
 	mcstate.aluh.in_data = datapath >> 4;
@@ -1381,28 +1309,23 @@ function mcstep() {
 	mcstate.alul.src = mcstate.aluh.src = v4>>2;
 	mcstate.alul.aop = mcstate.aluh.aop = v4>>5;
 	mcstate.alul.dst = mcstate.aluh.dst = v5;
-	/*/ XXX:OUTPUT */ let d_f6h6 = '';
+
 	switch(x_f6h6) {
-	case 0: /*/ XXX:OUTPUT */ d_f6h6 += 'F6=0   ';
-	mcstate.alul.carry_in = 0; break;
-	case 1: /*/ XXX:OUTPUT */ d_f6h6 += 'F6=1   ';
-	mcstate.alul.carry_in = 1; break;
-	case 2: /*/ XXX:OUTPUT */ d_f6h6 += 'F6=FL.C';
-	mcstate.alul.carry_in = (mcstate.alu_flag >> 3) & 1; break;
-	case 3: /*/ XXX:OUTPUT */ d_f6h6 += 'F6=?3  ';
-	mcstate.alul.carry_in = 0; break;
+	case 0: mcstate.alul.carry_in = 0; break;
+	case 1: mcstate.alul.carry_in = 1; break;
+	case 2: mcstate.alul.carry_in = (mcstate.alu_flag >> 3) & 1; break;
+	case 3: mcstate.alul.carry_in = 0; break;
 	}
 	mcstate.alul.resolve();
 	mcstate.aluh.carry_in = mcstate.alul.carry_out;
 	mcstate.aluh.resolve();
 	let h6a = 0, h6b = 0;
 	switch(x_f6h6) {
-	case 0: h6a = mcstate.aluh.sign; /* TODO h6b= ? */; break;
-	case 1: h6a = h6b =( mcstate.alu_flag >> 3) & 1; /* TODO both get flag.C? */ break;
+	case 0: h6a = mcstate.aluh.sign; h6b = 0; break;
+	case 1: h6a = h6b = ((mcstate.alu_flag >> 3) & 1); /* TODO both get flag.C? */ break;
 	case 2: h6a = mcstate.alul.q0; h6b = mcstate.aluh.sign; break;
-	case 3: h6a = mcstate.aluh.carry_out;/* TODO h6b= ? */; break;
+	case 3: h6a = mcstate.aluh.carry_out; h6b = 1; break;
 	}
-	/*/ XXX:OUTPUT */ d_f6h6 += ' H6:' + (mcstate.alul.is_right ? ['alu.s','?1','q0','alu.c'][x_f6h6] : ['?0','?1','alu.s','?3'][x_f6h6]).padEnd(5);
 	if (mcstate.alul.is_right) {
 		// >> 3.h.0 >> 3.l.0 >>
 		mcstate.alul.q3 = mcstate.aluh.q0;
@@ -1418,67 +1341,45 @@ function mcstep() {
 	}
 	let data_f = (mcstate.aluh.out_f << 4) | mcstate.alul.out_f;
 	if (x_h11 == 6) {// Select MAPROM to F
-		data_f = uc.map.charCodeAt(datapath);
+		data_f = uc.map[datapath];
 	}
 
-	// must be after comb logic resolve
+	// uses ALU flags, so must be after comb logic resolve
 	if (seq_branch == 0) {
-		// ?ALUF.S, RESF.H, ?, ?
 		switch(selJ13) {
-		case 0:
-			/*/ XXX:OUTPUT */ if ((sqd | 1) != sqd) d_branch.push(`|1 IF ALUF.S`);
+		case 0: // |1 IF ALUF.S, |2 IF ALUF.Z
 			seq_or |= ((mcstate.alu_flag & 2)!=0 ?1:0);
-			/*/ XXX:OUTPUT */ if ((sqd | 2) != sqd) d_branch.push(`|2 IF ALUF.Z`);
 			seq_or |= ((mcstate.alu_flag & 1)!=0 ?2:0);
 			break;
-		case 1:
-			/*/ XXX:OUTPUT */ if ((sqd | 1) != sqd) d_branch.push(`|1 IF ALUF.H`);
+		case 1: // |1 IF ALUF.H, |2 IF ALUF.V
 			seq_or |= ((mcstate.alu_flag & 16)!=0 ?1:0);
-			/*/ XXX:OUTPUT */ if ((sqd | 2) != sqd) d_branch.push(`|2 IF ?`);
+			seq_or |= ((mcstate.alu_flag & 4)!=0 ?2:0);
 			break;
-		case 2:
-			/*/ XXX:OUTPUT */ if ((sqd | 1) != sqd) d_branch.push(`|1 IF ?`);
-			/*/ XXX:OUTPUT */ if ((sqd | 2) != sqd) d_branch.push(`|2 IF (!)~MMIO`);
-			//seq_or |= 2; // TODO
+		case 2: // |1 IF ~pbit, |2 IF ~MMIO
+			seq_or |= 1 | (is_mmio << 1); // TODO pbit
 			break;
-		case 3:
-			/*/ XXX:OUTPUT */ if ((sqd | 1) != sqd) d_branch.push(`|1 IF ?`);
-			/*/ XXX:OUTPUT */ if ((sqd | 2) != sqd) d_branch.push(`|2 IF ?`);
-			break;
+		case 3: break; // nop
 		}
 
 		switch(selK13) { // mind the strange order of OR2/3 (|4 |8)
-		case 0:
-			/*/ XXX:OUTPUT */ if ((sqd | 4) != sqd) d_branch.push(`|4 IF ?K13:0b (ALUL.F3?)`);
-			if (mcstate.alul.sign != 0) seq_or |= 4; // TODO: trace
-			/*/ XXX:OUTPUT */ if ((sqd | 8) != sqd) d_branch.push(`|8 IF CCR.L`);
-			// CCR.Carry (link)
+		case 0: // |4 IF INT_EN, |8 IF CCR.Carry (Link)
+			if ((mcstate.busctl & 1) != 0) seq_or |= 4; // TODO: trace
 			if ((mcstate.ccr & CCR.CARRY) != 0) seq_or |= 8;
 			break;
-		case 1:
-			/*/ XXX:OUTPUT */ if ((sqd | 4) != sqd) d_branch.push(`|4 IF ?K13:1b (NOT LVL1 & SW.H)`);
-			//seq_or |= 4; // TODO: trace
-			/*/ XXX:OUTPUT */ if ((sqd | 8) != sqd) d_branch.push(`|8 IF F13.Q0`);
-			//seq_or |= 8; // TODO
+		case 1: // |4 IF DMA_INT, |8 IF INT_REQ
+			seq_or |= 4; // TODO: trace
+			seq_or |= 8; // TODO typically high
 			break;
-		case 2:
-			/*/ XXX:OUTPUT */ if ((sqd | 4) != sqd) d_branch.push(`|4 IF F13.Q3`);
-			//seq_or |= 4; // TODO
-			/*/ XXX:OUTPUT */ if ((sqd | 8) != sqd) d_branch.push(`|8 IF F13.Q1`);
-			//seq_or |= 8; // TODO
+		case 2: // |4 IF MEM_INT, |8 IF DMA.P2.13
+			//seq_or |= 4; // TODO typically low
+			seq_or |= 8; // TODO - typically high if no DMA connection
 			break;
-		case 3:
-			/*/ XXX:OUTPUT */ if ((sqd | 4) != sqd) d_branch.push(`|4 IF ?K13:3b`);
-			/*/ XXX:OUTPUT */ if ((sqd | 8) != sqd) d_branch.push(`|8 IF ?K13:3a(!)`);
-			//if (mcstate.workaddr == 0xffff) seq_or |= 8;
-			//seq_or |= 8;
-			break;
+		case 3: break; // nop
 		}
 
 		seq_or |= mcstate.override_or;
 	}
 
-	let pindex = ((mcstate.memaddr >> 11) & 31) | (mcstate.pta << 5);
 	let rindex;
 	if (x_c14_sel) {
 		rindex = (mcstate.rir & 15) | (mcstate.level << 4);
@@ -1489,51 +1390,83 @@ function mcstep() {
 	// but can be handled as needed because this is the only reference
 	rindex = (rindex | bit(v6,5)); // I elected to not invert it, since the debug dump would have anyways
 
-	/*/ XXX:OUTPUT */ const lh = mcstate.alul.funcstr().padEnd(30); // speculative
-	/*/ XXX:OUTPUT */ const lseq = `S2:${FN_SEQ_SN[seq2_s]} S1:${FN_SEQ_SN[seq1_s]} S0:${FN_SEQ_SN[seq0_s]} ${FN_SEQ_FE[seq_fc]}`;
-	/*/ XXX:OUTPUT */ const l34 = `[${hex(sqd,3)}][${d_branch.join(',')}]`;
-	/*/ XXX:OUTPUT */ const d_ccr =
-	/*/ XXX:OUTPUT */ 	'cV=' + ['. ','Z ','R.V','LZ'][selJ12] +
-	/*/ XXX:OUTPUT */ 	' cM=' + ['. ','S ','R.M','S '][selJ12] +
-	/*/ XXX:OUTPUT */ 	' cF=' + (enaJ11 ? '0' : ['F12a','1','.','?3','F12a','?5','.','?7'][selJ11 | (mcstate.alu_flag & 0x4)]).padEnd(4) +
-	/*/ XXX:OUTPUT */ 	' cL=' + (enaJ10 ? '0' : ['.','~','C','?3','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][selJ10]).padEnd(8);
-	/*/ XXX:OUTPUT */ mcs_op.innerText = `${mcp}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)}: ${lseq} ${k9_fn} ${l34}`;
-	/*/ XXX:OUTPUT */ mcs_op_alu.innerText = `${lh} (${hex(data_f,2)}) ${d_f6h6} ${d_ccr}`;
-
+	if (debug_output) {
+		const k9_fn = 'K9=' + (k9_en == 0) ? 'nop' : [
+			'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
+			'(1)RIR.~0|4',
+			'(2)RIR.0',
+			'(3)Ad=IO/REG',
+			'(4)Ad=REG/pbit', // need to recheck the logic on this one to give it a better name
+			'(5)~DMA_P2.13', // DMA port, no clue otherwise
+			'(6)B15A.~Q', // this one is weird, depends on BusCtl bit 6 being set
+			'(7)F13 most' // this one needs a better name (checks multiple interrupt lines)
+			][v2 & 7];
+		const d_branch = ['','','',''];
+		if (seq_branch == 0) {
+			switch(selJ13) {
+			case 0:
+				if ((sqd | 1) != sqd) d_branch[0] = '|1 IF ALUF.S';
+				if ((sqd | 2) != sqd) d_branch[1] = '|2 IF ALUF.Z';
+				break;
+			case 1:
+				if ((sqd | 1) != sqd) d_branch[0] = '|1 IF ALUF.H';
+				if ((sqd | 2) != sqd) d_branch[1] = '|2 IF ALUF.V';
+				break;
+			case 2:
+				if ((sqd | 1) != sqd) d_branch[0] = '|1 IF (!)~pbit';
+				if ((sqd | 2) != sqd) d_branch[1] = '|2 IF ~MMIO';
+				break;
+			case 3: break; // nop
+			}
+			switch(selK13) {
+			case 0:
+				if ((sqd | 4) != sqd) d_branch[2] = '|4 IF INT_EN';
+				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF CCR.L';
+				break;
+			case 1:
+				if ((sqd | 4) != sqd) d_branch[2] = '|4 IF (!)DMA_INT';
+				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF (!)INT_REQ';
+				break;
+			case 2:
+				if ((sqd | 4) != sqd) d_branch[2] = '|4 IF (!)MEM_INT';
+				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF (!)DMA.P2.13';
+				break;
+			case 3: break; // nop
+			}
+		}
+		const d_f6h6 = ['F6=0   ','F6=1   ','F6=FL.C','F6=?3  '][x_f6h6] +
+		' H6:' + (mcstate.alul.is_right ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
+		const lh = mcstate.alul.funcstr().padEnd(30); // speculative
+		const lseq = `S2:${FN_SEQ_SN[seq2_s]} S1:${FN_SEQ_SN[seq1_s]} S0:${FN_SEQ_SN[seq0_s]} ${FN_SEQ_FE[seq_fc]}`;
+		const l34 = `[${hex(sqd,3)}][${d_branch.join(',')}]`;
+		const d_ccr =
+			'cV=' + ['. ','Z ','R.V','LZ'][selJ12] +
+			' cM=' + ['. ','S ','R.M','S '][selJ12] +
+			' cF=' + (enaJ11 ? '0' : ['Res.5','1','.','0','Res.5','1','.','1'][selJ11 | (mcstate.alu_flag & 0x4)]).padEnd(4) +
+			' cL=' + (enaJ10 ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][selJ10]).padEnd(8);
+		mcs_op.innerText = `${hex(pc)}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)}: ${lseq} ${k9_fn} ${l34}`;
+		mcs_op_alu.innerText = `${lh} (${hex(data_f,2)}) ${d_f6h6} ${d_ccr}`;
+	}
 
 	////////////////////////////// rising clock edge /////////////////////////////
 
-	/*/ XXX:OUTPUT */ let d_k11 = ''; // FN_K11[x_k11]
 	let prevwork = mcstate.workaddr;
-	const busctld = bit(v5,3);
-	const busctla = (v5>>4) & 7;
-	const busctlmask = ~(1 << busctla);
 	switch(x_k11) {
-	case 0: /*/ XXX:OUTPUT */ d_k11 = 'nop';
-	break; // ?K11_0
-	case 1: /*/ XXX:OUTPUT */ d_k11 = '(!)L13A_SET';
-	break; // L13A_SET
-	case 2: /*/ XXX:OUTPUT */ d_k11 = '(!)?2:' + // ?K11_2
-		/*/ XXX:OUTPUT */ ['P2.3','P2.4','RTC','MapDis', // M13?? outputs maybe?, I have no input signals for this
-		/*/ XXX:OUTPUT */ 'fp3.1','RTC.R','fp3.16','intack'][busctla] + '=' + busctld;
+	case 0: break; // nop
+	case 1: break; // L13A_SET
+	case 2: // ?K11_2
 		mcstate.sysctl = (mcstate.sysctl & busctlmask) | (busctld << busctla);
 		break;
 	case 3: // BusCtl
-		/*/ XXX:OUTPUT */ d_k11 = 'BusCtl:' + [
-		/*/ XXX:OUTPUT */ 	'IntEN','AddrToSys','AddrCountEN','AddrU/D',
-		/*/ XXX:OUTPUT */ 	'AddrCtlSel','?oSys29','?iSys64','?DMA_M8i3b'][busctla] + '=' + busctld;
 		mcstate.busctl = (mcstate.busctl & busctlmask) | (busctld << busctla);
 		break;
 	case 4: // REG_WR
-		/*/ XXX:OUTPUT */ d_k11 = x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)';
 		mcstate.file[rindex] = mcstate.result;
 		break;
 	case 5: // PTR_WR
-		/*/ XXX:OUTPUT */ d_k11 = 'PTR_WR';
 		mcstate.page[pindex] = mcstate.result;
 		break;
 	case 6: // WADL_WR
-		/*/ XXX:OUTPUT */ d_k11 = 'WA_LD';
 		if (x_e6 == 5) {
 			mcstate.workaddr = (mcstate.workaddr & 0xff00) | (mcstate.memaddr & 0xff);
 		} else {
@@ -1542,7 +1475,7 @@ function mcstep() {
 		break;
 	case 7: // BusD_WR
 		mcstate.memdata_out = data_f;
-		/*/ XXX:OUTPUT */ d_k11 = '(!)BusD_WR';
+		mcstate.sys_write_latch = true;
 		break;
 	}
 
@@ -1570,20 +1503,21 @@ function mcstep() {
 			break;
 		case 3:
 			fl_v = (mcstate.alu_flag & (mcstate.alu_flag >> 5)) & 1;
-			fl_m = (mcstate.alu_flag >> 1) & 1; break;
+			fl_m = (mcstate.alu_flag >> 1) & 1;
+			break;
 		}
 		let fl_f = 0;
 		let fl_l = 0;
 		if (enaJ11 == 0) {
 			switch(selJ11 | (mcstate.alu_flag & 0x4)) {
-			case 0: fl_f = mcstate.f12a ^ 1; break;
+			case 0: fl_f = (mcstate.result >> 5) & 1; break;
 			case 1: fl_f = 1; break;
 			case 2: fl_f = (mcstate.ccr >> CCR.BIT_F) & 1; break;
-			case 3: break;
-			case 4: fl_f = mcstate.f12a ^ 1; break;
-			case 5: break;
+			case 3: fl_f = 0; break;
+			case 4: fl_f = (mcstate.result >> 5) & 1; break;
+			case 5: fl_f = 1; break;
 			case 6: fl_f = (mcstate.ccr >> CCR.BIT_F) & 1; break;
-			case 7: break;
+			case 7: fl_f = 1; break;
 			}
 		}
 		if (enaJ10 == 0) {
@@ -1603,87 +1537,98 @@ function mcstep() {
 
 	mcstate.rdr = mcstate.file[rindex];
 
-	/*/ XXX:OUTPUT */ let mce7 = 'E7=';
 	switch(x_e7) {
-	case 0: /*/ XXX:OUTPUT */ mce7 += 'nop';
-		break;
-	case 1: /*/ XXX:OUTPUT */ mce7 += '?1';
-		break;
-	case 2:
+	case 0: break; // nop
+	case 1: break; // TODO: BusReady
+	case 2: // ALUFlag_LD
 		mcstate.alu_flag = (mcstate.alul.zero & mcstate.aluh.zero) |
 		(mcstate.aluh.sign << 1) | (mcstate.aluh.over << 2) |
 		(mcstate.aluh.carry_out << 3) | (mcstate.alul.carry_out << 4) | ((mcstate.alu_flag & 1) << 5);
-		/*/ XXX:OUTPUT */ mce7 += 'ALUFlag_LD';
 		break;
-	case 3:
-		/*/ XXX:OUTPUT */ mce7 += '(!)DataRD';
-		mcstate.memdata_in = bpl.readbyte(mcstate.physaddr & 0xffff);
+	case 3: // DataRD
+		if (mcstate.sys_write_latch) {
+			mcstate.memdata_in = mcstate.memdata_out;
+		} else if (in_dbgdat.value != '') {
+			mcstate.memdata_in = parseInt(in_dbgdat.value, 16) & 255;
+		} else {
+			mcstate.memdata_in = bpl.readbyte(mcstate.physaddr & 0xffff);
+		}
+		mcstate.sys_write_latch = false;
 		break;
 	}
-	
 
 	let c = mcstate.s0.step(true, seq0_s, seq_fc, v2 & 15, seq_or, false);
 	c = mcstate.s1.step(c, seq1_s, seq_fc, v2 >> 4, 0, false);
 	mcstate.s2.step(c, seq2_s, seq_fc, v3 & 7, 0, false);
-	/*/ XXX:OUTPUT */ let mch11 = 'H11=';
+
 	switch(x_h11) {
-	case 0: /*/ XXX:OUTPUT */ mch11 += 'nop';
-		break; // nop
-	case 1: // D7B_SET
-		/*/ XXX:OUTPUT */ mch11 += '(!)RD_START'; /* TODO */
-		mcstate.physpre = mcstate.page[pindex] >> 7;
-		mcstate.physaddr = ((mcstate.page[pindex] & 127) << 11) | (mcstate.memaddr & 0x7ff);
+	case 0: break; // nop
+	case 1: // RD_START /* TODO */
+		mcstate.physpre = pgram >> 7;
+		mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
 		break;
-	case 2: // D7A_SET
-		/*/ XXX:OUTPUT */ mch11 += '(!)WT_START'; /* TODO */
-		mcstate.physpre = mcstate.page[pindex] >> 7;
-		mcstate.physaddr = ((mcstate.page[pindex] & 127) << 11) | (mcstate.memaddr & 0x7ff);
+	case 2: // WT_START /* TODO */
+		mcstate.physpre = pgram >> 7;
+		mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
 		bpl.writebyte(mcstate.physaddr & 0xffff, mcstate.memdata_out);
 		break;
-	case 3: /*/ XXX:OUTPUT */ mch11 += 'WorkAddr_LDH';
+	case 3: // WorkAddr_LDH
 		if (x_e6 == 5) {
 			mcstate.workaddr = (mcstate.workaddr & 0x00ff) | (mcstate.memaddr & 0xff00);
 		} else {
 			mcstate.workaddr = (mcstate.workaddr & 0x00ff) | (mcstate.result << 8);
 		}
-		break; // WorkAddr_LDH
-	case 4: /*/ XXX:OUTPUT */ mch11 += '(~!)WorkAddr_Count'; // WorkAddr_Count
+		break;
+	case 4: // WorkAddr_Count
 		mcstate.workaddr = (mcstate.workaddr + 1) & 0xffff;
 		break;
-	case 5: /*/ XXX:OUTPUT */ mch11 += '(~!)MemAddr_Count'; // MemAddr_Count
+	case 5: // MemAddr_Count
 		mcstate.memaddr = (mcstate.memaddr + 1) & 0xffff;
 		break;
-	case 6: /*/ XXX:OUTPUT */ mch11 += 'F=MapROM'; // F=MapROM
-		// handled farther above
-		break;
-	case 7: /*/ XXX:OUTPUT */ mch11 += 'NibSwap'; // NibSwap
+	case 6: break; // F=MapROM - handled farther above
+	case 7: // NibSwap
 		mcstate.swap = ((datapath << 4) | (datapath >> 4)) & 255;
 		break;
 	}
 
-	/*/ XXX:OUTPUT */ let d_e6 = '';
 	switch(x_e6) {
 	// no case 0
 	case 1: mcstate.result = data_f; break; // F⇒Result
 	case 2: mcstate.rir = data_f; break; // F⇒RIdx
 	case 3: mcstate.level = data_f >> 4; break; // F⇒Level
 	case 4: mcstate.pta = data_f & 7; break; // F⇒PTA
-	case 5: { // ASwap
-		let a = mcstate.memaddr;
-		mcstate.memaddr = prevwork;
-	} break;
-	case 6:
+	case 5: mcstate.memaddr = prevwork; break; // ASwap
+	case 6: // SEQ_RE
 		mcstate.s0.h = data_f & 15;
 		mcstate.s1.h = (data_f >> 4) & 15;
-		break; // SEQ_RE
-	case 7:
-		break; //!E6:O7
+		break;
+	case 7: break; //!E6:O7
 	}
-	// '_____','F⇒Result','F⇒RIdx','F⇒Level',
-	// 'F⇒PTA','ASwap','F⇒SEQ','!E6:O7'
-	/*/ XXX:OUTPUT */ const mch = `D4/5:${mcd_d45.padEnd(10)}(${hex(datapath)}) E6=${FN_E6[x_e6].padEnd(12)}`;
-	
-	/*/ XXX:OUTPUT */ mcs_op_bus.innerText = `K11:${d_k11.padEnd(12)} ${mch} ${mce7.padEnd(13)} ${mch11}`;
+
+	if(debug_output) {
+		const d_k11 = [// FN_K11[x_k11]
+		/* 0 */ 'nop',
+		/* 1 */ '(!)L13A_SET',
+		/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
+		/* . */ 'P2.3','P2.4','RTC','MapDis',
+		/* . */ 'FP.Run','RTC.R','FP.ABT','INT_ACK'][busctla] + '=' + busctld,
+		/* 3 */ 'BusCtl:' + [
+		/* . */ 'IntEN','AddrToSys','AddrCountEN','AddrU/D',
+		/* . */ 'AddrCtlSel','?oSys29','?iSys64','?DMA_M8i3b'][busctla] + '=' + busctld,
+		/* 4 */ x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)',
+		/* 5 */ 'PTR_WR',
+		/* 6 */ 'WA_LD',
+		/* 7 */ '(!)BusD_WR'][x_k11]
+		const mce7 = 'E7='+['nop','(!)BusReady','ALUFlag_LD','(!)DataRD'][x_e7];
+		const mch11 = 'H11='+[
+		'nop','(!)RD_START','(!)WT_START','WorkAddr_LDH',
+		'(~!)WorkAddr_Count','(~!)MemAddr_Count','F=MapROM','NibSwap'][x_h11]
+		const mcd_d45 = 'DP=' + [
+		'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
+		'PA','CCR_DSense','SysDAT','(!)R_H14','(!)R_INTDIP','RCnst','',''][v0&15];
+		const mch = `D4/5:${mcd_d45.padEnd(10)}(${hex(datapath)}) E6=${FN_E6[x_e6].padEnd(12)}`;
+		mcs_op_bus.innerText = `K11:${d_k11.padEnd(12)} ${mch} ${mce7.padEnd(13)} ${mch11}`;
+	}
 	mcstate.alul.step();
 	mcstate.aluh.step();
 }
@@ -1691,7 +1636,7 @@ mcshowstate();
 
 class DiagIO {
 	// TOS:1a, Aux:1d, Hawk:17-19, MUXINT:16, DMA:11/13
-	dip = 0x1d;
+	dip = 0x0d;
 	hexout = 0;
 	points = 0;
 	blank = false;
@@ -1814,13 +1759,14 @@ class MMIOMux implements MemAccessR, MemAccessW {
 abstract class MemBase implements MemAccessR {
 	contents:ArrayBuffer;
 	view:DataView;
-	constructor(init?:{hex?:string,bin?:string,addr?:AddressTransform}) {
+	constructor(init?:{hex?:string,bin?:Uint8Array,addr?:AddressTransform}) {
 		this.contents = this.allocate();
 		this.view = new DataView(this.contents);
 		if (init) {
 			if (init.bin !== undefined) {
 				this.loadbin(init.bin, init.addr);
-			} else if (init.hex !== undefined) {
+			}
+			if (init.hex !== undefined) {
 				this.loadhex(init.hex);
 			}
 		}
@@ -1831,11 +1777,11 @@ abstract class MemBase implements MemAccessR {
 	readbyte(address:number):number {
 		return this.view.getUint8(address);
 	}
-	loadbin(v:string, addrfn?:AddressTransform) {
+	loadbin(v:Uint8Array, addrfn?:AddressTransform) {
 		const l = v.length;
 		if (addrfn == null) {
 			for (let a = 0; a < l; a++) {
-				this.view.setUint8(a, v.charCodeAt(a));
+				this.view.setUint8(a, v[a]);
 			}
 		} else {
 			let xm = addrfn.invert ? (l - 1) : 0;
@@ -1850,12 +1796,12 @@ abstract class MemBase implements MemAccessR {
 				};
 				for (let a = 0; a < l; a++) {
 					let txa = aremapfn(a ^ xm);
-					this.view.setUint8(a, v.charCodeAt(txa));
+					this.view.setUint8(a, v[txa]);
 				}
 			} else {
 				for (let a = 0; a < l; a++) {
 					let txa = a ^ xm;
-					this.view.setUint8(a, v.charCodeAt(txa));
+					this.view.setUint8(a, v[txa]);
 				}
 			}
 			
@@ -2865,7 +2811,10 @@ diag3.loadbin(diag.f3);
 diag4.loadbin(diag.f4);
 const mmio_mux = new MMIOMux();
 const mem = new SysMem();
-bpl.configmemory(0xfc00, new ROM512({bin:bpl_rom, addr:{invert:true, remap:[0,1,2,3,4,8,5,6,7]}}), 512);
+bpl.configmemory(0xfc00, new ROM512({
+	bin:bpl_rom, addr:{invert:true, remap:[0,1,2,3,4,8,5,6,7]},
+	// hex:'90 C0 00 5F 90 88 00 5E 71 88 49' // force ins test
+}), 512);
 bpl.configmemory(0xf200, mmio_mux, 256);
 bpl.configmemory(0xf100, new MMIOMulti(), 256);
 bpl.configmemory(0x100, mem, 4096);
@@ -2952,10 +2901,15 @@ run_rate2.addEventListener('click', function(ev) { run_rate = 10; });
 run_rate3.addEventListener('click', function(ev) { run_rate = 1000; });
 run_rate4.addEventListener('click', function(ev) { run_rate = 10000; });
 step_button.addEventListener('click', function(ev) {
-	show_disasm();
+	run_step = 1;
+	run_stop = function() {
+		dis_vpc = mcstate.physaddr & 0xffff;
+		show_disasm();
+	}
+	run_control(true);
 });
 microstep_button.addEventListener('click', function(ev) {
-	mcstep();
+	mcstep(true);
 	mcshowstate();
 });
 btn_cm_import.addEventListener('click', function(ev) {
