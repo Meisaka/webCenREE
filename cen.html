@@ -83,7 +83,19 @@
 				<button id="fp_r">R/F</button>
 				<button id="fp_l">LOAD/OPSYS</button>
 				<button id="fp_s">SELECT</button>
-				
+			</div>
+			<div style="display:flex; align-items:flex-end;">
+				<button id="ss1" class="active">S1</button>
+				<button id="ss2">S2</button>
+				<button id="ss3">S3</button>
+				<button id="ss4">S4</button>
+			</div>
+			<div>Diag Select</div>
+			<div style="display:flex; align-items:flex-end;">
+				<button id="diag8">DT 8</button>
+				<button id="diag4">DT 4</button>
+				<button id="diag2">DT 2</button>
+				<button id="diag1">DT 1</button>
 			</div>
 			<div>Debug Commands / DisAsm Address:</div>
 			<div><input id="dbgcmd"/></div>
@@ -95,7 +107,7 @@
 			<div class="fpl"><div>Level:</div><span id="fp_level">0x0: 0000</span></div>
 			<div class="fpl"><div>Map:</div><span id="fp_flags"><i>ABT</i><i>3</i><i>2</i><i>1</i><i>F</i><i>L</i><i>M</i><i>V</i></span></div>
 			<div class="fpl"><div>Status:</div><span id="fp_runstate"><i>RUN</i><i class="a">HALT</i></span></div>
-			<div class="fpl"><div>Diag:</div><canvas id="fp_diag" class="ils" width="40" height="30"></canvas></div>
+			<div class="fpl"><div>Diag:</div><canvas id="fp_diag" class="ils" width="40" height="30"></canvas><button id="diagrun">&nbsp;</button></div>
 		</div>
 		<div class="regs">
 			<div class="fpl fixed"><div>Reg0/1</div><span id="mcr_file0">----</span></div>

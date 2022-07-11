@@ -14,6 +14,15 @@ const btn_or0 = document.getElementById('or0') as HTMLButtonElement;
 const btn_or1 = document.getElementById('or1') as HTMLButtonElement;
 const btn_or2 = document.getElementById('or2') as HTMLButtonElement;
 const btn_or3 = document.getElementById('or3') as HTMLButtonElement;
+const btn_ss1 = document.getElementById('ss1') as HTMLButtonElement;
+const btn_ss2 = document.getElementById('ss2') as HTMLButtonElement;
+const btn_ss3 = document.getElementById('ss3') as HTMLButtonElement;
+const btn_ss4 = document.getElementById('ss4') as HTMLButtonElement;
+const btn_dt1 = document.getElementById('diag1') as HTMLButtonElement;
+const btn_dt2 = document.getElementById('diag2') as HTMLButtonElement;
+const btn_dt4 = document.getElementById('diag4') as HTMLButtonElement;
+const btn_dt8 = document.getElementById('diag8') as HTMLButtonElement;
+const btn_dtrun = document.getElementById('diagrun') as HTMLButtonElement;
 const fp_rf = document.getElementById('fp_r') as HTMLButtonElement;
 const fp_load = document.getElementById('fp_l') as HTMLButtonElement;
 const fp_select = document.getElementById('fp_s') as HTMLButtonElement;
@@ -162,7 +171,7 @@ cv_term0.addEventListener('keypress', function(ev) {
 	ev.preventDefault();
 });
 cv_term0.addEventListener('keydown', function(ev) {
-	//console.log(ev.key);
+	console.log(ev.key.toUpperCase().charCodeAt(0));
 	if (ev.key.length == 1) {
 		//cx_crt0.write(ev.key.toUpperCase().charCodeAt(0));
 		cx_crt0.input_buf.push(ev.key.toUpperCase().charCodeAt(0));
@@ -1029,7 +1038,7 @@ class Backplane implements MemAccessR, MemAccessW {
 		if(dev) {
 			return dev.dev.readbyte(address - dev.base);
 		}
-		return 0x01;
+		return 0x00;
 	}
 	writebyte(address:number, value:number):void {
 		let aindex = address >> 8;
@@ -1040,6 +1049,8 @@ class Backplane implements MemAccessR, MemAccessW {
 	}
 }
 const bpl = new Backplane();
+
+let sense_switch = 1;
 
 const mcstate = {
 	s0: new Sequencer(),
@@ -1268,7 +1279,7 @@ function mcstep(debug_output:boolean = false) {
 	const seq_fc = seq_pup|((k9_com & bit(v3,3))<<1); // TODO verify FE (v3,3)
 
 	let datapath = 0;
-	const sense = 1; // inverted on bus
+	const sense = sense_switch; // inverted on bus
 	let sysdata = mcstate.memdata_in;
 	const sysint = 0; // inverted on bus
 	const dswitch = 0; // inverted on bus
@@ -1641,6 +1652,7 @@ class DiagIO {
 	points = 0;
 	blank = false;
 	read(f:number):number {
+		let v;
 		switch(f) {
 		case 6: this.blank = false; break;
 		case 7: this.blank = true; break;
@@ -1652,7 +1664,8 @@ class DiagIO {
 		case 13: this.points &= 0xb; break;
 		case 14: this.points |= 8; break;
 		case 15: this.points &= 0x7; break;
-		case 16: return this.dip & 255;
+		case 16: v = this.dip & 255;
+			return v;
 		default: return 0;
 		}
 		cx_diag.clearRect(0, 0, 40, 30);
@@ -2813,7 +2826,7 @@ const mmio_mux = new MMIOMux();
 const mem = new SysMem();
 bpl.configmemory(0xfc00, new ROM512({
 	bin:bpl_rom, addr:{invert:true, remap:[0,1,2,3,4,8,5,6,7]},
-	// hex:'90 C0 00 5F 90 88 00 5E 71 88 49' // force ins test
+	//hex:'90 C0 00 5F 90 88 00 5E 71 88 49' // force ins test
 }), 512);
 bpl.configmemory(0xf200, mmio_mux, 256);
 bpl.configmemory(0xf100, new MMIOMulti(), 256);
@@ -2853,6 +2866,88 @@ in_dbgcmd.addEventListener('input', function(ev) {
 in_dbgcmd.addEventListener('keypress', function(ev) {
 	if (ev.code == 'Enter' || ev.code == 'NumpadEnter') {
 	}
+});
+// sense_switch
+function update_sense() {
+	if ((sense_switch & 1) > 0) {
+		btn_ss1.classList.add('active');
+	} else {
+		btn_ss1.classList.remove('active');
+	}
+	if ((sense_switch & 2) > 0) {
+		btn_ss2.classList.add('active');
+	} else {
+		btn_ss2.classList.remove('active');
+	}
+	if ((sense_switch & 4) > 0) {
+		btn_ss3.classList.add('active');
+	} else {
+		btn_ss3.classList.remove('active');
+	}
+	if ((sense_switch & 8) > 0) {
+		btn_ss4.classList.add('active');
+	} else {
+		btn_ss4.classList.remove('active');
+	}
+}
+function update_diagsw() {
+	if ((cx_diag0.dip & 1) > 0) {
+		btn_dt1.classList.add('active');
+	} else {
+		btn_dt1.classList.remove('active');
+	}
+	if ((cx_diag0.dip & 2) > 0) {
+		btn_dt2.classList.add('active');
+	} else {
+		btn_dt2.classList.remove('active');
+	}
+	if ((cx_diag0.dip & 4) > 0) {
+		btn_dt4.classList.add('active');
+	} else {
+		btn_dt4.classList.remove('active');
+	}
+	if ((cx_diag0.dip & 8) > 0) {
+		btn_dt8.classList.add('active');
+	} else {
+		btn_dt8.classList.remove('active');
+	}
+}
+update_sense();
+update_diagsw();
+btn_ss1.addEventListener('click', function(ev) {
+	sense_switch ^= 1;
+	update_sense();
+});
+btn_ss2.addEventListener('click', function(ev) {
+	sense_switch ^= 2;
+	update_sense();
+});
+btn_ss3.addEventListener('click', function(ev) {
+	sense_switch ^= 4;
+	update_sense();
+});
+btn_ss4.addEventListener('click', function(ev) {
+	sense_switch ^= 8;
+	update_sense();
+});
+btn_dt1.addEventListener('click', function(ev) {
+	cx_diag0.dip ^= 1;
+	update_diagsw();
+});
+btn_dt2.addEventListener('click', function(ev) {
+	cx_diag0.dip ^= 2;
+	update_diagsw();
+});
+btn_dt4.addEventListener('click', function(ev) {
+	cx_diag0.dip ^= 4;
+	update_diagsw();
+});
+btn_dt8.addEventListener('click', function(ev) {
+	cx_diag0.dip ^= 8;
+	update_diagsw();
+});
+btn_dtrun.addEventListener('click', function(ev) {
+	cx_diag0.dip ^= 0x10;
 });
 btn_or0.addEventListener('click', function(ev) {
 	mcstate.override_or ^= 1;
