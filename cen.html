@@ -53,6 +53,12 @@
 	margin-right: 10px;
 	margin-top: 10px;
 	background: #01050c;
+	height: 240px;
+	width: 640px;
+}
+.term.tall {
+	height: 480px;
+	width: 640px;
 }
 .term:focus {
 	border-color: #7af;
@@ -67,14 +73,17 @@
 		<button id="b_run">Run/Stop</button>
 		<button id="b_r1">1</button>
 		<button id="b_r2">10</button>
-		<button id="b_r3">1000</button>
-		<button id="b_r4">10k</button>
+		<button id="b_r3">100</button>
+		<button id="b_r4">1k</button>
+		<button id="b_r5">10k</button>
+		<!-- <button id="b_r6">100k</button> -->
 		<button id="b_micro">&#x03bc;Code</button>
 		<button id="b_mstep">&#x03bc;Step</button>
 		<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
 		<span class="conv-sel"><input type="radio" name="conv" id="conv_mei" value="mei" checked/><label for="conv_mei">Modern Parametric</label></span>
 		<span class="conv-sel" style="display: none"><input type="radio" name="conv" id="conv_uew" value="uew"/><label for="conv_uew">Centurion RE Wiki</label></span>
 		<span class="conv-sel"><input type="checkbox" name="conv_hex" id="conv_hex"/><label for="conv_hex">Hex Prefix in Listing</label></span>
+		<span class="conv-sel"><input type="checkbox" name="crtsize" id="crtsize"/><label for="crtsize">Tall CRT</label></span>
 	</div>
 	<div class="frontpanel">
 		<div>
@@ -167,9 +176,7 @@
 			<div class="regs fixed" id="listing"></div>
 		</div>
 		<div>
-			<canvas id="term0" class="term" width="640" height="340" tabindex="0"></canvas>
-		</div>
-		<div>
+			<canvas id="term0" class="term" width="640" height="240" tabindex="0"></canvas>
 			<div>
 				<button id="cm_imp">Import</button>
 				<button id="cm_impcb">Import from Clipboard</button>

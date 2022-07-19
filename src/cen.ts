@@ -1,5 +1,5 @@
 "use strict";
-window.addEventListener('load', function(){
+window.addEventListener('load', async function(){
 // hi there
 const reset_button = document.getElementById('b_reset') as HTMLButtonElement;
 const step_button = document.getElementById('b_step') as HTMLButtonElement;
@@ -8,6 +8,8 @@ const run_rate1 = document.getElementById('b_r1') as HTMLButtonElement;
 const run_rate2 = document.getElementById('b_r2') as HTMLButtonElement;
 const run_rate3 = document.getElementById('b_r3') as HTMLButtonElement;
 const run_rate4 = document.getElementById('b_r4') as HTMLButtonElement;
+const run_rate5 = document.getElementById('b_r5') as HTMLButtonElement;
+//const run_rate6 = document.getElementById('b_r6') as HTMLButtonElement;
 const micro_button = document.getElementById('b_micro') as HTMLButtonElement;
 const microstep_button = document.getElementById('b_mstep') as HTMLButtonElement;
 const btn_or0 = document.getElementById('or0') as HTMLButtonElement;
@@ -91,110 +93,8 @@ cx_diag.font = '16px monospace';
 cx_term0.fillStyle = '#6ac';
 cx_term0.strokeStyle = '#6ac';
 cx_term0.font = '12px monospace';
-let cx_width = cx_term0.measureText('M').width;
 
-class VTerm {
-	buffer = new Uint8Array(80*24);
-	blink = false;
-	cursor_x = 0;
-	cursor_y = 0;
-	static columns = 80;
-	static rows = 24;
-	static char_height = 14;
-	static char_base = 12;
-	input_buf:number[] = [];
-	update_blink() {
-		const vcx = this.cursor_x * cx_width + 4;
-		const vcy = this.cursor_y * VTerm.char_height;
-		const vca = this.cursor_y * VTerm.columns + this.cursor_x;
-		let vcc = this.buffer[vca];
-		if (vcc < 32) vcc = 32;
-		cx_term0.clearRect(vcx, vcy, 8, VTerm.char_height);
-		if (this.blink) {
-			cx_term0.fillRect(vcx, vcy, 8, VTerm.char_height);
-		} else {
-			cx_term0.strokeText(this.chardec(vcc), vcx, vcy + VTerm.char_base);
-		}
-		this.blink = !this.blink;
-	}
-	chardec(c:number):string {
-		return String.fromCharCode(c);
-	}
-	write(c:number) {
-		const vcx = this.cursor_x * cx_width + 4;
-		const vcy = this.cursor_y * VTerm.char_height;
-		const vca = this.cursor_y * VTerm.columns + this.cursor_x;
-		c = c & 255;
-		if (c < 32) {
-			if (c == 10) { // LF
-				this.cursor_y++;
-				if (this.cursor_y >= VTerm.rows) {
-					this.cursor_y = 0;
-				}
-			} else if (c == 12) { // FF (clear)
-				this.cursor_x = 0;
-				this.cursor_y = 0;
-				cx_term0.clearRect(0, 0, cv_term0.width, cv_term0.height);
-				let limit = VTerm.columns * VTerm.rows;
-				for (let q = 0; q < limit; q++) {
-					this.buffer[q] = 32;
-				}
-				return;
-			} else if (c == 13) { // CR
-				this.cursor_x = 0;
-			} else {
-				this.write(94);
-				this.write(64+c);
-				return;
-			}
-			cx_term0.clearRect(vcx, vcy, 8, VTerm.char_height);
-			cx_term0.strokeText(this.chardec(this.buffer[vca]), vcx, vcy + VTerm.char_base);
-			return;
-		}
-		let vcc = this.buffer[vca] = c & 255;
-		
-		cx_term0.clearRect(vcx, vcy, 8, VTerm.char_height);
-		cx_term0.strokeText(this.chardec(vcc), vcx, vcy + VTerm.char_base);
-		this.cursor_x++;
-		if (this.cursor_x >= VTerm.columns) {
-			this.cursor_x = 0;
-			this.cursor_y++;
-			if (this.cursor_y >= VTerm.rows) {
-				this.cursor_y = 0;
-			}
-		}
-	}
-}
-const cx_crt0 = new VTerm();
-setInterval(function(){ cx_crt0.update_blink(); }, 500);
-cv_term0.addEventListener('keypress', function(ev) {
-	ev.preventDefault();
-});
-cv_term0.addEventListener('keydown', function(ev) {
-	console.log(ev.key.toUpperCase().charCodeAt(0));
-	if (ev.key.length == 1) {
-		//cx_crt0.write(ev.key.toUpperCase().charCodeAt(0));
-		cx_crt0.input_buf.push(ev.key.toUpperCase().charCodeAt(0));
-	} else switch(ev.key) {
-	case 'Enter': cx_crt0.input_buf.push(13); break;
-	}
-	ev.preventDefault();
-});
-cv_term0.addEventListener('keyup', function(ev) {
-	ev.preventDefault();
-});
-(()=>{
-	for(let i = 32; i < 127; i++) {
-		let lw = cx_term0.measureText(String.fromCharCode(i)).width;
-		if (lw > cx_width) cx_width = lw;
-	}
-	for(let c of 'Centurion VI Simulator 2022') {
-		cx_crt0.write(c.charCodeAt(0));
-	}
-})();
-
-
-const listmax = 700;
+const listmax = 100;
 const listing:HTMLDivElement[] = [];
 (function(){
 	for (let i = 0; i < listmax; i++) {
@@ -208,6 +108,10 @@ let run_ctl = 0;
 let run_rate = 1;
 let run_step = 0;
 let run_busy = false;
+let dis_after = false;
+let run_follow = false;
+let dis_vpc = 0x100;
+let dis_vpc_end = 0x200;
 let run_stop:null | (()=>void);
 function run_control(run:boolean):void {
 	if (!run && (run_ctl !== 0)) {
@@ -220,6 +124,7 @@ function run_control(run:boolean):void {
 	if (run && (run_ctl == 0)) {
 		run_ctl = setInterval(function(){
 			run_busy = true;
+			if (run_rate <= 100) run_follow = true;
 			for (let i=0;i<run_rate;i++) {
 				mcstep(i == (run_rate - 1));
 				if (run_ctl == 0) {
@@ -229,6 +134,9 @@ function run_control(run:boolean):void {
 			}
 			run_busy = false;
 			mcshowstate();
+			if (dis_after) {
+				show_disasm();
+			}
 		}, 20);
 	}
 }
@@ -243,6 +151,42 @@ function bload(v:string):Uint8Array {
 	}
 	return a;
 }
+const vtfont = bload(`AAAAAAAAAAAAAAAAAAAAAAAIFBQUQgYEEAQIAAAAAEAACBQUfiUJBAgIKggAAAAgAAgAPhUSCQAE
+EBwIAAAAEAAIABQ+CAYABBAIPgA+AAgACAA+VCQpAAQQHAgAAAAEAAAAFD9SEQAICCoIDAAAAgAI
+ABQUIS4AEAQIAAgADAEAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAA+CBw+ED4YPhwcAAAgAAQcYQwiIBgCBCAiIgAAEAAIIlEIIBAUHgIQIiIMDAgeECBJCBgY
+EiAeCBw8AAAEACAQRQgEID8gIgQiIAwMCB4QCEMIAiIQIiIEIhAACBAACAA+HD4cEBwcBBwIAAQg
+AAQIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHBweHB4+
+PhwiHBwiAkEiHCIiIiIiAgIiIggIEgJjJiI6IiICIgICAiIICAoCVSoiKj4eAiIeHgI+CAgGAkky
+IjoiIgIiAgIyIggICgJBIiICIiIiIgICIiIICBICQSIiPCIeHB4+AhwiHAYiPkEiHAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4cHhw+IkFBQSI+PgE+CAgi
+IiIiCCJBQSIiIAYCMBwEIiIiAggiIkEUIhAGBDAqAh4iHhwIIiJJCBQIBggwSX8CKgogCCIUVRQI
+BAYQMAgCAhISIggiFGMiCAIGIDAIBAIsIhwIHAhBQQg+PkA+CAgAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEHB4cHj4+HCIcHCICQSIcCCIiIiICAiIiCAgS
+AmMmIhAiIgIiAgICIggICgJVKiIAPh4CIh4eAj4ICAYCSTIiACIiAiICAjIiCAgKAkEiIgAiIiIi
+AgIiIggIEgJBIiIAIh4cHj4CHCIcBiI+QSIcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAHhweHD4iQUFBIj4YCAYABiIiIiIIIkFBIiIgBAgIAEkiIiICCCIi
+QRQiEAQICAAwHiIeHAgiIkkIFAgCABAAAAIqCiAIIhRVFAgEBAgIAAACEhIiCCIUYyIIAgQICAAA
+AiwiHAgcCEFBCD4YCAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`);
 const bpl_rom = bload(`9WVL0AyAfUHVvnOhZQmhZUBV0HM1QPoYKUA3BwSASAovewMBcYQVRPGBABx7Ai8f6pAALwABkAYv
 BC/yFFogAMAUGEkFwBkWMUERgA4ZMUEJgCUWSbDAJRRJjcAqFE3n0KAVWgAE0B6UAzt7QfGxOq8U
 WhAA0C2UQPGhuhhJB8BMeUAyom2+R5NMeQOzQZUAiwCMCfoVSgn4wdpzCQEVCL9zAnNicwnmpDFC
@@ -717,6 +661,206 @@ NTU1NTU8VFRUVFSLCTM1NTU1NTU1LGBgYGBgiwk0NjY2NjY2Nj5iYmJiYmuLNDY2NjY2NjYmYGBg
 YGCLCTQ2NjY2NjY2MGJiYmJiixM0NjY2NjY2Ng==`)
 };
 
+const disk_images:{main:ArrayBuffer|null, main_view:DataView|null} = {
+	main: null,
+	main_view: null
+};
+this.document.body.addEventListener('dragstart', function(ev) {
+	const dt = ev.dataTransfer;
+	if(dt) {
+		dt.dropEffect = 'copy';
+	}
+	ev.preventDefault();
+});
+this.document.body.addEventListener('dragover', function(ev) {
+	const dt = ev.dataTransfer;
+	if(dt) {
+		dt.dropEffect = 'copy';
+	}
+	ev.preventDefault();
+})
+this.document.body.addEventListener('drop', function(ev) {
+	const dt = ev.dataTransfer;
+	do {
+		if (dt == null) break;
+		if (dt.files.length < 1) break;
+		if (dt.files[0].name.match(/\.[iI][mM][gG]$/) == null) break;
+		dt.files[0].arrayBuffer().then(function(buf) {
+			disk_images.main = buf;
+			disk_images.main_view = new DataView(buf);
+			console.log('loaded disk image');
+		});
+	} while(false);
+	//console.log('drop!', ev.dataTransfer);
+	ev.preventDefault();
+})
+
+const vt_width = 8;
+const vt_height = 10;
+const vt_font_data = new ImageData(128, 128);
+(()=>{
+	const vtf = new Uint32Array(vt_font_data.data.buffer);
+	for(let y = 0; y < 64; y++) {
+		const line0 = (y) * 128;
+		//const line0 = (y << 1) * 128;
+		//const line1 = ((y << 1) + 1) * 128;
+		const vtline = y * 16;
+		for(let x = 0; x < 128; x++) {
+			let bs = (x & 7);
+			let v = (vtfont[vtline + (x >> 3)] >> bs) & 1;
+			// #66aaf0
+			if (v > 0) {
+				vtf[line0 + x] = 0xcff0aa66;
+				//vtf[line1 + x] = 0xcff0aa66;
+				if (bs > 0) {
+					vtf[line0 + x - 1] |= 0x4ff0aa66;
+					//vtf[line1 + x - 1] |= 0x7cf0aa66;
+				}
+				if (bs < 7) {
+					vtf[line0 + x + 1] |= 0x4ff0aa66;
+					//vtf[line1 + x + 1] |= 0x7cf0aa66;
+				}
+			}
+		}
+	}
+})();
+const vt_font_bmp:ImageBitmap = await createImageBitmap(vt_font_data);
+class VTerm {
+	buffer = new Uint8Array(80*24);
+	blink = false;
+	cursor_x = 0;
+	cursor_y = 0;
+	ctx:CanvasRenderingContext2D;
+	static columns = 80;
+	static rows = 24;
+	static char_base = 0;
+	input_buf:number[] = [];
+	mux:MUXPort | null = null;
+	constructor(c:CanvasRenderingContext2D) {
+		this.ctx = c;
+	}
+	update_blink() {
+		const vcx = this.cursor_x * vt_width;
+		const vcy = this.cursor_y * vt_height;
+		const vca = this.cursor_y * VTerm.columns + this.cursor_x;
+		let vcc = this.buffer[vca];
+		
+		this.ctx.clearRect(vcx, vcy, vt_width, vt_height);
+		if (this.blink) {
+			this.ctx.fillRect(vcx, vcy, vt_width, vt_height);
+		} else if (vcc > 32) {
+			//this.ctx.strokeText(this.chardec(vcc), vcx, vcy + VTerm.char_base);
+			vcc = vcc - 32;
+			this.ctx.drawImage(vt_font_bmp, (vcc & 15) * vt_width, (vcc >> 4) * vt_height, vt_width, vt_height, vcx, vcy, vt_width, vt_height);
+		}
+		this.blink = !this.blink;
+	}
+	chardec(c:number):number {
+		if ((c < 32) || (c > 127)) return 0;
+		return c - 32;
+	}
+	scroll() {
+		this.ctx.clearRect(0, 0, cv_term0.width, cv_term0.height);
+		for(let r = 1; r < VTerm.rows; r++) {
+			const vcy = (r - 1) * vt_height;
+			const vcb = r * VTerm.columns;
+			for(let col = 0; col < VTerm.columns; col++) {
+				const vca = (r - 1) * VTerm.columns + col;
+				const vcx = col * vt_width;
+				let vcc = this.buffer[vca] = this.buffer[vcb + col];
+				vcc = this.chardec(this.buffer[vca]);
+				this.ctx.drawImage(vt_font_bmp, (vcc & 15) * vt_width, (vcc >> 4) * vt_height, vt_width, vt_height, vcx, vcy, vt_width, vt_height);
+			}
+		}
+		for(let vcx = 0; vcx < VTerm.columns; vcx++) {
+			const vca = (VTerm.rows - 1) * VTerm.columns + vcx;
+			this.buffer[vca] = 32;
+		}
+	}
+	advance_line() {
+		this.cursor_y++;
+		if (this.cursor_y >= VTerm.rows) {
+			this.cursor_y = VTerm.rows - 1;
+			this.scroll();
+		}
+	}
+	write(c:number) {
+		const vcx = this.cursor_x * vt_width;
+		const vcy = this.cursor_y * vt_height;
+		const vca = this.cursor_y * VTerm.columns + this.cursor_x;
+		c = c & 255;
+		let vcc:number = 0;
+		if (c < 32) {
+			if (c == 10) { // LF
+				this.advance_line();
+			} else if (c == 12) { // FF (clear)
+				this.cursor_x = 0;
+				this.cursor_y = 0;
+				this.ctx.clearRect(0, 0, cv_term0.width, cv_term0.height);
+				let limit = VTerm.columns * VTerm.rows;
+				for (let q = 0; q < limit; q++) {
+					this.buffer[q] = 32;
+				}
+				return;
+			} else if (c == 13) { // CR
+				this.cursor_x = 0;
+			} else {
+				this.write(94);
+				this.write(64+c);
+				return;
+			}
+			this.ctx.clearRect(vcx, vcy, vt_width, vt_height);
+			vcc = this.chardec(this.buffer[vca]);
+			this.ctx.drawImage(vt_font_bmp, (vcc & 15) * vt_width, (vcc >> 4) * vt_height, vt_width, vt_height, vcx, vcy, vt_width, vt_height);
+			return;
+		}
+		vcc = this.buffer[vca] = c & 255;
+		this.ctx.clearRect(vcx, vcy, vt_width, vt_height);
+		vcc = this.chardec(vcc);
+		this.ctx.drawImage(vt_font_bmp, (vcc & 15) * vt_width, (vcc >> 4) * vt_height, vt_width, vt_height, vcx, vcy, vt_width, vt_height);
+		this.cursor_x++;
+		if (this.cursor_x >= VTerm.columns) {
+			this.cursor_x = 0;
+			this.advance_line();
+		}
+	}
+	receive(c:number) {
+		if (this.input_buf.length < 8)
+			this.input_buf.push(c);
+		if (this.mux != null) {
+			this.mux.receive();
+		}
+	}
+}
+const cx_crt0 = new VTerm(cx_term0);
+setInterval(function(){ cx_crt0.update_blink(); }, 500);
+cv_term0.addEventListener('keypress', function(ev) {
+	ev.preventDefault();
+});
+cv_term0.addEventListener('keydown', function(ev) {
+	//console.log(ev.key.toUpperCase().charCodeAt(0));
+	if (ev.key.length == 1) {
+		//cx_crt0.write(ev.key.toUpperCase().charCodeAt(0));
+		cx_crt0.receive(ev.key.toUpperCase().charCodeAt(0));
+	} else switch(ev.key) {
+	case 'Enter':
+		cx_crt0.receive(13);
+		break;
+	case 'Escape':
+		cx_crt0.receive(27);
+		break;
+	}
+	ev.preventDefault();
+});
+cv_term0.addEventListener('keyup', function(ev) {
+	ev.preventDefault();
+});
+(()=>{
+	for(let c of 'Centurion VI Simulator 2022') {
+		cx_crt0.write(c.charCodeAt(0));
+	}
+})();
+
 const init_program = '79 86 23 C8 E5 EC EC EF F2 EC E4 A1 8D 8A 00 71 80 01';
 const program_rotl = '60 AA AA 60 AA AA 55 40 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 71 01 03';
 const program_rotr = '60 AA AA 60 AA AA 55 40 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 71 01 03';
@@ -1001,8 +1145,12 @@ interface BPLDev {
 }
 class Backplane implements MemAccessR, MemAccessW {
 	decode_hi:BPLDev[] = [];
+	decode_io:IOAccess[] = [];
 	is_write:true = true;
 	constructor() {
+	}
+	configio(id:number, m:IOAccess) {
+		this.decode_io[id] = m;
 	}
 	configmemory(base:number, m:MemAccessR | MemAccessW & MemAccessR, sz:number = 256) {
 		let aval = base & -256;
@@ -1017,10 +1165,32 @@ class Backplane implements MemAccessR, MemAccessW {
 		while (aval < atarget) {
 			let aindex = aval >> 8;
 			if (this.decode_hi[aindex]) {
-				throw new Error('backplane overlap');
+				//throw new Error('backplane overlap');
 			}
 			this.decode_hi[aindex] = dev;
 			aval += 256;
+		}
+	}
+	is_interrupt(cpl:number):boolean {
+		for(let i = 0; this.decode_io[i] != null; i++) {
+			let dev = this.decode_io[i];
+			if (dev.is_interrupt() && (dev.getlevel() > cpl)) return true;
+		}
+		return false;
+	}
+	ack_interrupt(cpl:number):number {
+		for(let i = 0; this.decode_io[i] != null; i++) {
+			let dev = this.decode_io[i];
+			if (dev.is_interrupt() && (dev.getlevel() > cpl)) {
+				dev.acknowledge();
+				return dev.getlevel();
+			}
+		}
+		return 0;
+	}
+	reset() {
+		for (let dev of this.decode_io) {
+			dev.reset();
 		}
 	}
 	is_mmio(address:number):boolean {
@@ -1036,7 +1206,8 @@ class Backplane implements MemAccessR, MemAccessW {
 		let aindex = address >> 8;
 		let dev = this.decode_hi[aindex];
 		if(dev) {
-			return dev.dev.readbyte(address - dev.base);
+			let v = dev.dev.readbyte(address - dev.base);
+			return v;
 		}
 		return 0x00;
 	}
@@ -1045,44 +1216,55 @@ class Backplane implements MemAccessR, MemAccessW {
 		let dev = this.decode_hi[aindex];
 		if(dev && dev.devw) {
 			dev.devw.writebyte(address - dev.base, value);
+			if ((address >= dis_vpc) && (address < dis_vpc_end)) {
+				dis_after = true;
+			}
 		}
 	}
 }
 const bpl = new Backplane();
+type DMAFunc = (atend:boolean, ctrl:DMAControl)=>void;
+let sense_switch = 0;
 
-let sense_switch = 1;
-
-const mcstate = {
-	s0: new Sequencer(),
-	s1: new Sequencer(),
-	s2: new Sequencer(),
-	alul: new ALU(),
-	aluh: new ALU(),
-	alu_flag: 0,
-	ccr: 0,
-	file: new Uint8Array(256),
-	page: new Uint8Array(256),
-	workaddr: 0,
-	memaddr: 0,
-	memdata_in: 0,
-	memdata_out: 0,
-	resetting: 1,
-	physaddr: 0,
-	physpre: 0,
-	busctl: 0,
-	sysctl: 0,
-	sys_write_latch: false,
-	f12a: 0,
-	f12b: 0,
-	b15a: 1,
-	swap: 0,
-	result: 0,
-	level: 0,
-	rir: 0,
-	rdr: 0,
-	pta: 0,
-	override_or: 0,
+class MCState {
+	s0 = new Sequencer();
+	s1 = new Sequencer();
+	s2 = new Sequencer();
+	alul= new ALU();
+	aluh= new ALU();
+	alu_flag = 0;
+	ccr = 0;
+	file = new Uint8Array(256);
+	page = new Uint8Array(256);
+	workaddr = 0;
+	memaddr = 0;
+	memdata_in = 0;
+	memdata_out = 0;
+	resetting = 1;
+	physaddr = 0;
+	physpre = 0;
+	busctl = 0;
+	sysctl = 0;
+	sys_write_latch = false;
+	cycles = 0;
+	rtc = false;
+	f12a = 0;
+	f12b = 0;
+	b15a = 1;
+	dma_12 = 0;
+	dma_13 = 0;
+	dma_func:null|DMAFunc = null;
+	swap = 0;
+	result = 0;
+	level = 0;
+	reqlevel = 0;
+	rir = 0;
+	rdr = 0;
+	pta = 0;
+	override_or = 0;
 };
+const mcstate = new MCState();
+
 function mcreset() {
 	mcstate.s0.reset();
 	mcstate.s1.reset();
@@ -1094,6 +1276,10 @@ function mcreset() {
 	mcstate.busctl = 0;
 	mcstate.resetting = 1;
 	mcstate.sys_write_latch = false;
+	mcstate.dma_12 = 0;
+	mcstate.dma_13 = 0;
+	mcstate.cycles = 0;
+	bpl.reset();
 }
 
 const enum CCR {
@@ -1206,11 +1392,37 @@ function mcshowstate() {
 
 ///////////////////////////////// Microcode stepping ////////////////////////////////////
 
+// fast delay:
+// 3ec 40 1B FFF8 92 800D orig
+//     40 23 FFF8 fc 800D fast
+// 3ed 40 23 7E11E1E00D orig
+//     40 1b 7E11E1E00D fast
+uc.f[0x3ec] = 0x23;
+uc.m[0x3ec] = 0x01;
+uc.f[0x3ed] = 0x1b;
+
+interface DMAControl {
+	read():number
+	write(value:number):void
+	end():void
+}
+
+function dma_request(stepfn:DMAFunc) {
+	mcstate.dma_func = stepfn;
+	mcstate.dma_13 = 1;
+}
+
 function mcstep(debug_output:boolean = false) {
 	const pc = ((mcstate.s2.output << 8) | (mcstate.s1.output << 4) | (mcstate.s0.output)) & 0x7ff;
-	if (run_step > 0 && pc == 0x101) {
-		run_control(false);
-		debug_output = true;
+	if (pc == 0x101) {
+		if (run_step > 0) {
+			run_control(false);
+			debug_output = true;
+		}
+		if (!run_busy || run_follow) {
+			dis_after = true;
+			dis_vpc = mcstate.physaddr & 0x3ffff;
+		}
 	}
 	const v6 = /*A*/uc.k[pc]; // MSB
 	const v5 = /*B*/uc.f[pc];
@@ -1241,6 +1453,7 @@ function mcstep(debug_output:boolean = false) {
 	const k6_imm = (bit(v6,6) & (k6b_a ^ 1)) ^ 1;
 	const busctld = bit(v5,3);
 	const busctla = (v5>>4) & 7;
+	const busctlset = busctld << busctla;
 	const busctlmask = ~(1 << busctla);
 	
 	const pindex = ((mcstate.memaddr >> 11) & 31) | (mcstate.pta << 5);
@@ -1251,7 +1464,13 @@ function mcstep(debug_output:boolean = false) {
 	const is_regmmio = (is_reg & is_mmio) ^ 1;
 	const notpgbit = (pgram >> 7) ^ 1;
 	const is_mem = (is_reg & notpgbit) ^ 1;
-	
+
+	const intena = (mcstate.busctl & 1) != 0;
+	const intreq = intena && bpl.is_interrupt(mcstate.level); // inverted on bus
+	const sysint = mcstate.reqlevel;
+	const dmaint = intena && (mcstate.level < 2) && (mcstate.dma_12 != 0);
+	const count_up = (mcstate.busctl & 8)!=0;
+
 	let k9_com = 1;
 	if (k9_en == 0) {
 		switch(v2 & 7) {
@@ -1262,9 +1481,17 @@ function mcstep(debug_output:boolean = false) {
 		case 3: /* TODO: double check this (mmio/reg addressed) */
 			k9_com = is_regmmio; break;
 		case 4: /* REG/pbit */ k9_com = is_mem; break;
-		case 5: /* TODO DMA P2.13 */ k9_com = 0; break;
+		case 5: /* DMA P2.13 */ k9_com = mcstate.dma_13; break;
 		case 6: /* TODO B15A */ k9_com = mcstate.b15a ^ 1; break;
-		case 7: /* TODO F13->H13A */ k9_com = 0; break;
+		case 7: /* TODO F13->H13A any INT */
+			k9_com = mcstate.dma_13;
+			if (intreq || dmaint) {
+				k9_com = 1;
+			}
+			if (mcstate.rtc && ((mcstate.sysctl & 0x4) != 0)) {
+				k9_com = 1;
+			}
+			break;
 		}
 		k9_com = k9_com ^ 1;
 	}
@@ -1281,8 +1508,7 @@ function mcstep(debug_output:boolean = false) {
 	let datapath = 0;
 	const sense = sense_switch; // inverted on bus
 	let sysdata = mcstate.memdata_in;
-	const sysint = 0; // inverted on bus
-	const dswitch = 0; // inverted on bus
+	const dswitch = 0; // inverted on bus - R H I M
 	// Data Path Control
 	switch(v0&15) {
 	case 0: case 4: // R_SWP ⇒ DP
@@ -1300,11 +1526,16 @@ function mcstep(debug_output:boolean = false) {
 	case 10: // R_SysDLatch ⇒ DP
 		datapath = sysdata; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
-		datapath = (mcstate.level << 4) | 5 | (mcstate.resetting>0 ? 2 : 0);
+		datapath = (mcstate.level << 4) | 4 |
+		(mcstate.resetting>0 ? 2 : 0) | (((pgram & 128) != 0) ? 0 : 1) |
+		(dmaint ? 8 : 0);
 		if(mcstate.resetting != 0) mcstate.resetting--;
 		break;
 	case 12: // R_DLI (int7..4:dipsw3..0[RHIM]) ⇒ DP
-		datapath = (sysint << 4) | dswitch;
+		// if ((mcstate.sysctl & 128) == 128) {
+		// 	console.log('INT?', sysint);
+		// }
+		datapath = ((sysint & 15) << 4) | dswitch;
 		break;
 	case 13: // RCnst MCv2 ⇒ DP
 		datapath = v2 ^ 0xff; // goes through a ls240
@@ -1374,16 +1605,16 @@ function mcstep(debug_output:boolean = false) {
 
 		switch(selK13) { // mind the strange order of OR2/3 (|4 |8)
 		case 0: // |4 IF INT_EN, |8 IF CCR.Carry (Link)
-			if ((mcstate.busctl & 1) != 0) seq_or |= 4; // TODO: trace
+			if (intena) seq_or |= 4; // TODO: trace
 			if ((mcstate.ccr & CCR.CARRY) != 0) seq_or |= 8;
 			break;
 		case 1: // |4 IF DMA_INT, |8 IF INT_REQ
-			seq_or |= 4; // TODO: trace
-			seq_or |= 8; // TODO typically high
+			if (!dmaint) seq_or |= 4; // TODO verify these work
+			if (!intreq) seq_or |= 8; // TODO?
 			break;
 		case 2: // |4 IF MEM_INT, |8 IF DMA.P2.13
 			//seq_or |= 4; // TODO typically low
-			seq_or |= 8; // TODO - typically high if no DMA connection
+			if (mcstate.dma_13 == 0) seq_or |= 8; // TODO - typically high if no DMA connection
 			break;
 		case 3: break; // nop
 		}
@@ -1402,7 +1633,7 @@ function mcstep(debug_output:boolean = false) {
 	rindex = (rindex | bit(v6,5)); // I elected to not invert it, since the debug dump would have anyways
 
 	if (debug_output) {
-		const k9_fn = 'K9=' + (k9_en == 0) ? 'nop' : [
+		const k9_fn = 'K9=' + ((k9_en == 0) ? 'nop' : [
 			'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
 			'(1)RIR.~0|4',
 			'(2)RIR.0',
@@ -1411,7 +1642,7 @@ function mcstep(debug_output:boolean = false) {
 			'(5)~DMA_P2.13', // DMA port, no clue otherwise
 			'(6)B15A.~Q', // this one is weird, depends on BusCtl bit 6 being set
 			'(7)F13 most' // this one needs a better name (checks multiple interrupt lines)
-			][v2 & 7];
+			][v2 & 7]);
 		const d_branch = ['','','',''];
 		if (seq_branch == 0) {
 			switch(selJ13) {
@@ -1466,10 +1697,25 @@ function mcstep(debug_output:boolean = false) {
 	case 0: break; // nop
 	case 1: break; // L13A_SET
 	case 2: // ?K11_2
-		mcstate.sysctl = (mcstate.sysctl & busctlmask) | (busctld << busctla);
+		if ((busctlset == 1) && ((mcstate.sysctl & 1) == 0)) {
+			console.log('DMA1:ON');
+		}
+		if ((busctlset == 2) && ((mcstate.sysctl & 2) == 0)) {
+			console.log('DMA2:ON');
+		}
+		if ((busctlset == 128) && ((mcstate.sysctl & 128) == 0)) {
+			//console.log('IACK:', mcstate.level);
+			mcstate.reqlevel = bpl.ack_interrupt(mcstate.level);
+			//console.log('IACK:', mcstate.level,'->',mcstate.reqlevel);
+		}
+		if ((busctlmask == ~128) && ((mcstate.sysctl & 128) == 128)) {
+			//bpl.ack_interrupt(false);
+			mcstate.reqlevel = 0;
+		}
+		mcstate.sysctl = (mcstate.sysctl & busctlmask) | busctlset;
 		break;
 	case 3: // BusCtl
-		mcstate.busctl = (mcstate.busctl & busctlmask) | (busctld << busctla);
+		mcstate.busctl = (mcstate.busctl & busctlmask) | busctlset;
 		break;
 	case 4: // REG_WR
 		mcstate.file[rindex] = mcstate.result;
@@ -1488,6 +1734,18 @@ function mcstep(debug_output:boolean = false) {
 		mcstate.memdata_out = data_f;
 		mcstate.sys_write_latch = true;
 		break;
+	}
+
+	// timer
+	mcstate.cycles++;
+	if (mcstate.cycles >= 1000) {
+		mcstate.cycles = 0;
+		if ((mcstate.sysctl & 0x20) != 0) {
+			mcstate.rtc = true;
+		}
+	}
+	if ((mcstate.sysctl & 0x20) == 0) {
+		mcstate.rtc = false;
 	}
 
 	// conditions register
@@ -1562,7 +1820,7 @@ function mcstep(debug_output:boolean = false) {
 		} else if (in_dbgdat.value != '') {
 			mcstate.memdata_in = parseInt(in_dbgdat.value, 16) & 255;
 		} else {
-			mcstate.memdata_in = bpl.readbyte(mcstate.physaddr & 0xffff);
+			mcstate.memdata_in = bpl.readbyte(mcstate.physaddr & 0x3ffff);
 		}
 		mcstate.sys_write_latch = false;
 		break;
@@ -1572,6 +1830,27 @@ function mcstep(debug_output:boolean = false) {
 	c = mcstate.s1.step(c, seq1_s, seq_fc, v2 >> 4, 0, false);
 	mcstate.s2.step(c, seq2_s, seq_fc, v3 & 7, 0, false);
 
+	if (((mcstate.busctl & 20) == 16) && mcstate.dma_func != null) {
+		mcstate.dma_func((mcstate.workaddr == 0xffff), {
+			read():number {
+				mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
+				let v = bpl.readbyte(mcstate.physaddr & 0x3ffff);
+				mcstate.workaddr = (mcstate.workaddr + (count_up?1:-1)) & 0xffff;
+				mcstate.memaddr = (mcstate.memaddr + (count_up?1:-1)) & 0xffff;
+				return v;
+			},
+			write(value:number) {
+				mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
+				bpl.writebyte(mcstate.physaddr & 0x3ffff, value);
+				mcstate.workaddr = (mcstate.workaddr + (count_up?1:-1)) & 0xffff;
+				mcstate.memaddr = (mcstate.memaddr + (count_up?1:-1)) & 0xffff;
+			},
+			end():void {
+				mcstate.dma_13 = 0;
+				mcstate.dma_func = null;
+			}
+		});
+	}
 	switch(x_h11) {
 	case 0: break; // nop
 	case 1: // RD_START /* TODO */
@@ -1581,7 +1860,7 @@ function mcstep(debug_output:boolean = false) {
 	case 2: // WT_START /* TODO */
 		mcstate.physpre = pgram >> 7;
 		mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
-		bpl.writebyte(mcstate.physaddr & 0xffff, mcstate.memdata_out);
+		bpl.writebyte(mcstate.physaddr & 0x3ffff, mcstate.memdata_out);
 		break;
 	case 3: // WorkAddr_LDH
 		if (x_e6 == 5) {
@@ -1591,10 +1870,10 @@ function mcstep(debug_output:boolean = false) {
 		}
 		break;
 	case 4: // WorkAddr_Count
-		mcstate.workaddr = (mcstate.workaddr + 1) & 0xffff;
+		mcstate.workaddr = (mcstate.workaddr + (count_up?1:-1)) & 0xffff;
 		break;
 	case 5: // MemAddr_Count
-		mcstate.memaddr = (mcstate.memaddr + 1) & 0xffff;
+		mcstate.memaddr = (mcstate.memaddr + (count_up?1:-1)) & 0xffff;
 		break;
 	case 6: break; // F=MapROM - handled farther above
 	case 7: // NibSwap
@@ -1692,10 +1971,237 @@ interface MemAccessR {
 	is_io?:boolean;
 	is_write?:boolean;
 }
+interface IOAccess {
+	is_interrupt():boolean;
+	getlevel():number;
+	acknowledge():boolean;
+	reset():void;
+}
 interface AddressTransform {
 	remap?:number[];
 	invert?:boolean;
 }
+
+class DSK2Unit {
+	sel_address = 0;
+}
+class DSK2 implements MemAccessR, MemAccessW, IOAccess {
+	is_io = true;
+	is_write:true = true;
+	sel_unit = 0;
+	units = [new DSK2Unit(), new DSK2Unit()];
+	busy = false;
+	busy_time = 0;
+	wpmask = 0;
+	seeking = false;
+	seek_done = false;
+	sect_remain = 0;
+	command = -1;
+	interrupt_en = false;
+	interrupt_pend = false;
+	is_interrupt(): boolean {
+		this.tickbusy();
+		return false;
+	}
+	getlevel():number {
+		return 2; // seems like a good number :)
+	}
+	acknowledge():boolean {
+		console.log('DSK2:IACK');
+		let v = this.interrupt_pend;
+		this.interrupt_pend = false;
+		return v;
+	}
+	reset(): void {
+		this.command = -1;
+		this.seeking = false;
+		this.seek_done = false;
+		this.busy = false;
+		this.busy_time = 0;
+		this.wpmask = 0;
+		this.sel_unit = 0;
+		this.interrupt_en = false;
+		mcstate.dma_12 = 0;
+	}
+	tickbusy() {
+		if (this.busy_time > 0) {
+			this.busy_time--;
+			if (this.busy_time == 0) {
+				this.busy = false;
+				switch(this.command) {
+				case 0:
+				case 1:
+					
+					break;
+				case 2:
+					this.seeking = false;
+					this.seek_done = true;
+					if (this.interrupt_en) mcstate.dma_12 = 1;
+					break;
+				case 3:
+					this.seeking = false;
+					this.seek_done = true;
+					if (this.interrupt_en) mcstate.dma_12 = 1;
+					console.log('DSK2:done:rtz');
+					break;
+				default:
+					if (this.command != -1) {
+						console.log('unknown command');
+					}
+				}
+				this.command = -1;
+			}
+		}
+	}
+	readbyte(address:number):number {
+		let v = 0;
+		let u;
+		switch(address) {
+		case 0:
+			v = this.sel_unit;
+			break;
+		case 1: // cylh
+			u = this.units[this.sel_unit];
+			if (u) {
+				v = u.sel_address >> 8;
+			}
+			break;
+		case 2: // cyll:h:sec
+			u = this.units[this.sel_unit];
+			if (u) {
+				v = u.sel_address & 0xff;
+			}
+			break;
+		case 3: // wpmask?
+			v = this.wpmask;
+			break;
+		case 4: // stat hi / 0 tmo adrerr fmterr | 0 seekerr fault busy
+			if (this.sel_unit == 1 || this.sel_unit == 0) {
+				this.tickbusy();
+				v = ((this.busy || this.seeking) ? 1 : 0);
+			}
+			break;
+		case 5: // stat lo / wtpr wten oncyl ready | seekcom3..0
+			if (this.sel_unit == 1 || this.sel_unit == 0) {
+				this.tickbusy();
+				v = 0x80 /* wp */ | (this.seeking ? 0 : 0x20) /* oncyl */ |
+				(disk_images.main_view != null ? 0x10 : 0) /* ready */ |
+				(this.seek_done ? 0x01 : 0);
+			}
+			break;
+		case 8: // busy?
+			if (this.sel_unit == 1 || this.sel_unit == 0) {
+				this.tickbusy();
+				v = ((this.busy || this.seeking) ? 1 : 0);
+			}
+			break;
+		default:
+			console.log('DSK2:R:', hex(address, 1), hex(v));
+		}
+		return v;
+	}
+	do_dma_read() {
+		const u = this.units[this.sel_unit];
+		if (u == null) return;
+		dma_request((atend, ctrl)=>{
+			if (atend || disk_images.main_view == null) {
+				ctrl.end();
+				this.busy_time = 10;
+			} else {
+				if (this.sect_remain <= 0) {
+					this.sect_remain = 400;
+					u.sel_address++;
+				}
+				const fileaddr = u.sel_address * 512;
+				let b = disk_images.main_view.getUint8(fileaddr + 400 - this.sect_remain);
+				ctrl.write(b);
+				this.sect_remain--;
+			}
+		});
+	}
+	writebyte(address:number, value:number):void {
+		const u = this.units[this.sel_unit];
+		switch(address) {
+		case 0:
+			this.sel_unit = value & 0x7;
+			break;
+		case 1: // cylh
+			if (u) {
+				u.sel_address = (u.sel_address & 0xff) | (value << 8);
+			}
+			break;
+		case 2: // cyll:h:sec
+			if (u) {
+				u.sel_address = (u.sel_address & 0xff00) | (value & 0xff);
+			}
+			break;
+		case 3: // wpmask
+			this.wpmask = value & 0xff;
+			break;
+		case 8: // cmd
+			if (u == null) break;
+			// 0=read
+			// 1=write
+			// 2=seek
+			// 3=rtzcal
+			// 4=format?
+			this.seek_done = false;
+			this.busy = true;
+			this.command = value;
+			switch (value) {
+			case 0:
+				console.log('DSK2:read:', hex(u.sel_address, 4));
+				this.busy_time = 0;
+				this.sect_remain = 400;
+				if (this.interrupt_en) mcstate.dma_12 = 1;
+				this.do_dma_read();
+				break;
+			case 1:
+				console.log('DSK2:write:', hex(u.sel_address, 4));
+				break;
+			case 2:
+				//console.log('DSK2:seek:', hex(this.sel_address, 4));
+				this.busy_time = 40;
+				this.seeking = true;
+				break;
+			case 3:
+				console.log('DSK2:rtz');
+				this.busy_time = 200;
+				this.seeking = true;
+				break;
+			default:
+				console.log('DSK2:cmd:', hex(value));
+				this.busy_time = 10;
+				break;
+			}
+			break;
+		case 12:
+			if (this.interrupt_en) mcstate.dma_12 = 1;
+			console.log('DSK2:W:IFORCE');
+			break;
+		case 13:
+			this.interrupt_en = false;
+			mcstate.dma_12 = 0;
+			console.log('DSK2:W:INTOFF');
+			break;
+		case 14:
+			this.interrupt_en = true;
+			console.log('DSK2:W:INTON');
+			break;
+		case 15:
+			mcstate.dma_12 = 0;
+			console.log('DSK2:W:INTCLEAR');
+			if (this.interrupt_en && (this.command == 0)) {
+				//this.do_dma_read();
+			}
+			break;
+		default:
+			console.log('DSK2:W:', hex(address, 1), hex(value));
+		}
+		return;
+	}
+}
+const dsk2_0 = new DSK2();
 
 class MUXPort {
 	write_busy = false;
@@ -1703,16 +2209,20 @@ class MUXPort {
 	read_busy = false;
 	read_full = false;
 	buf_write = 0;
+	card:MMIOMux;
+	constructor(card:MMIOMux) {
+		this.card = card;
+	}
 	read_status():number {
-		this.read_busy = (cx_crt0.input_buf.length > 0);
-		return (this.write_busy ? 0 : 2) | (this.read_busy ? 1 : 0);
+		return (this.write_busy ? 0 : 2) | (this.read_busy ? 1 : 0) | 0x20;
 	}
 	read_data():number {
 		let vcc = cx_crt0.input_buf.shift();
+		if (cx_crt0.input_buf.length == 0) this.read_busy = false;
 		if (vcc != undefined) {
-			return vcc | 0x80;
+			return vcc;
 		}
-		return 0x00;
+		return 0;
 	}
 	write_control(value:number):void {
 	}
@@ -1724,6 +2234,11 @@ class MUXPort {
 			cx_crt0.write(this.buf_write & 0x7f);
 		//}, 0);
 	}
+	receive():void {
+		this.read_busy = true;
+		this.card.interrupt_pend = true;
+		this.card.mux_cause = true;
+	}
 }
 
 class MMIOMulti implements MemAccessR, MemAccessW {
@@ -1732,19 +2247,49 @@ class MMIOMulti implements MemAccessR, MemAccessW {
 	readbyte(address: number):number {
 		if (address >= 6 && address <= 0x10) {
 			return cx_diag0.read(address);
+		} else if (address >= 0x40 && address < 0x50) {
+			return dsk2_0.readbyte(address - 0x40);
 		}
 		return 0;
 	}
 	writebyte(address: number, value: number):void {
 		if (address >= 6 && address <= 0x10) {
 			return cx_diag0.write(address, value);
+		} else if (address >= 0x40 && address < 0x50) {
+			dsk2_0.writebyte(address - 0x40, value);
 		}
 	}
 }
-class MMIOMux implements MemAccessR, MemAccessW {
-	muxports:MUXPort[] = [new MUXPort()];
+class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
+	is_interrupt():boolean {
+		if (!this.interrupt_en) return false;
+		return this.interrupt_pend;
+	}
+	getlevel():number {
+		return this.interrupt_level;
+	}
+	acknowledge():boolean {
+		//console.log('MUX:IACK');
+		if (this.interrupt_pend) {
+			this.interrupt_pend = false;
+			return true;
+		}
+		return false;
+	}
+	reset():void {
+		this.interrupt_en = false;
+		this.interrupt_level = 0;
+		this.interrupt_pend = false;
+		this.mux_cause = false;
+	}
+	muxports:MUXPort[] = [new MUXPort(this)];
 	is_io = true;
 	is_write:true = true;
+	interrupt_level = 0;
+	interrupt_en = false;
+	interrupt_pend = false;
+	mux_cause = false;
+	tx_int = 0;
 	readbyte(address:number):number {
 		let v = 0;
 		if (address < 8) {
@@ -1753,19 +2298,59 @@ class MMIOMux implements MemAccessR, MemAccessW {
 				if ((address & 1) != 0) v = selmux.read_data();
 				else v = selmux.read_status();
 			}
+		} else if (address == 15) {
+			if (this.mux_cause) {
+				this.mux_cause = false;
+				if (cx_crt0.input_buf.length > 0) {
+					v = 0; // (card_id << 4)
+				} else if (this.tx_int > 0) {
+					v = 0; // (card_id << 4)
+					for(let i = 0; i < 4; i++) {
+						let q = 1 << i;
+						if ((this.tx_int & q) != 0) {
+							v |= (i << 1) | 1;
+							this.tx_int ^= q;
+							break;
+						}
+					}
+				}
+			}
+			//console.log('MUX:R:' + hex(address,1), hex(v));
+		} else {
+			console.log('MUX:R:' + hex(address,1), hex(v));
 		}
-		//console.log('MUX:R:' + hex(address), hex(v));
 		return v;
 	}
 	writebyte(address:number, value:number):void {
 		if (address < 8) {
-			let selmux = this.muxports[address >> 1];
+			let port = address >> 1;
+			let selmux = this.muxports[port];
 			if (selmux) {
-				if ((address & 1) != 0) selmux.write_data(value);
-				else selmux.write_control(value);
+				if ((address & 1) != 0) {
+					selmux.write_data(value);
+					this.tx_int |= 1 << port;
+					this.interrupt_pend = true;
+					this.mux_cause = true;
+				} else {
+					selmux.write_control(value);
+				}
 			}
+		} else if (address == 10) {
+			this.interrupt_level = value & 0xf;
+		} else if (address == 12) {
+			this.tx_int |= (value & 0xf);
+			this.interrupt_pend = true;
+			this.mux_cause = true;
+			console.log('MUX:IFORCE');
+		} else if (address == 13) {
+			this.interrupt_en = false;
+		} else if (address == 14) {
+			this.interrupt_en = true;
+		} else if (address == 15) {
+			this.reset();
+		} else {
+			console.log('MUX:W:' + hex(address), hex(value));
 		}
-		//console.log('MUX:W:' + hex(address), hex(value));
 		return;
 	}
 }
@@ -1821,9 +2406,9 @@ abstract class MemBase implements MemAccessR {
 		}
 	}
 	// load a space/lf delimited list of hex values
-	loadhex(h:string):void {
+	loadhex(h:string, ofs:number = 0):void {
 		let msh = h.split(/[ \n]/);
-		let vpc = 0;
+		let vpc = ofs;
 		msh.forEach(value=>{
 			if (value !== '') {
 				let v = parseInt(value, 16);
@@ -2259,7 +2844,6 @@ function annotation_import(src:string) {
 				let cmd = res[0].toLowerCase();
 				if (cmd_state != null) {
 					if (cmd_state == 'label' || cmd_state == 'code') {
-						console.log(cmd_state, res[0]);
 						parse.label = [res[0]];
 					} else if (cmd_state == 'comment') {
 						parse.comm = [res[0]];
@@ -2316,7 +2900,6 @@ function annotation_import(src:string) {
 			}
 		}
 	}
-	console.log(anno_lines);
 }
 
 interface DisAsmResult {
@@ -2823,43 +3406,56 @@ diag2.loadbin(diag.f2);
 diag3.loadbin(diag.f3);
 diag4.loadbin(diag.f4);
 const mmio_mux = new MMIOMux();
-const mem = new SysMem();
-bpl.configmemory(0xfc00, new ROM512({
+const mem = [
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+	new SysMem(), new SysMem(), new SysMem(), new SysMem(),
+];
+bpl.configmemory(0x3fc00, new ROM512({
 	bin:bpl_rom, addr:{invert:true, remap:[0,1,2,3,4,8,5,6,7]},
 	//hex:'90 C0 00 5F 90 88 00 5E 71 88 49' // force ins test
 }), 512);
-bpl.configmemory(0xf200, mmio_mux, 256);
-bpl.configmemory(0xf100, new MMIOMulti(), 256);
-bpl.configmemory(0x100, mem, 4096);
-bpl.configmemory(0x8000, diag1, 2048);
-bpl.configmemory(0x8800, diag2, 2048);
-bpl.configmemory(0x9000, diag3, 2048);
-bpl.configmemory(0x9800, diag4, 2048);
-bpl.configmemory(0xb800, new RAM2k(), 2048);
+bpl.configmemory(0x3f200, mmio_mux, 256);
+cx_crt0.mux = mmio_mux.muxports[0];
+bpl.configio(1, dsk2_0);
+bpl.configio(0, mmio_mux);
+bpl.configmemory(0x3f100, new MMIOMulti(), 256);
+for(let q = 0; q < 32; q++) {
+	//if (q >= 8 && q < 10) continue;
+	bpl.configmemory(q * 0x1000, mem[q], 4096);
+}
+// bpl.configmemory(0x8000, diag1, 2048);
+// bpl.configmemory(0x8800, diag2, 2048);
+// bpl.configmemory(0x9000, diag3, 2048);
+// bpl.configmemory(0x9800, diag4, 2048);
+//bpl.configmemory(0xb800, new RAM2k(), 2048);
 const cpu = new CPU6(bpl);
 
-mem.loadhex(program_rotr);
+mem[0].loadhex(program_rotr, 0x100);
 //mem.loadbin(wipl_dump);
-
-let dis_vpc = 0x108;
 
 function show_disasm() {
 	let vpc = dis_vpc;
 	for (let i = 0; i < listmax; i++) {
 		try {
 			let res = cpu.disassembly(vpc);
-			listing[i].innerHTML = `${res.pre ? res.pre : ''}<div class="line"><span>${hex(vpc, 4)}: ${res.t}</span><div>${res.post ? res.post : ''}</div></div>`;
-			vpc = (vpc + res.l) & 0xffff;
+			listing[i].innerHTML = `${res.pre ? res.pre : ''}<div class="line"><span>${hex(vpc, 5)}: ${res.t}</span><div>${res.post ? res.post : ''}</div></div>`;
+			vpc = (vpc + res.l) & 0x3ffff;
 		} catch(e) {
-			listing[i].innerHTML = `<div class="line"><span>${hex(vpc, 4)}: {{ERROR}}</span></div>`;
+			listing[i].innerHTML = `<div class="line"><span>${hex(vpc, 5)}: {{ERROR}}</span></div>`;
 			vpc += 1;
 		}
 	}
+	dis_vpc_end = vpc;
 }
 in_dbgcmd.addEventListener('input', function(ev) {
-	console.log(this.value);
-	if (this.value.search(/^[0-9a-fA-F]{1,4}$/) > -1) {
-		dis_vpc = parseInt(this.value, 16) & 0xffff;
+	if (this.value.search(/^[0-9a-fA-F]{1,5}$/) > -1) {
+		dis_vpc = parseInt(this.value, 16) & 0x3ffff;
 		show_disasm();
 	}
 });
@@ -2993,12 +3589,20 @@ run_button.addEventListener('click', function(ev) {
 });
 run_rate1.addEventListener('click', function(ev) { run_rate = 1; });
 run_rate2.addEventListener('click', function(ev) { run_rate = 10; });
-run_rate3.addEventListener('click', function(ev) { run_rate = 1000; });
-run_rate4.addEventListener('click', function(ev) { run_rate = 10000; });
+run_rate3.addEventListener('click', function(ev) { run_rate = 100; });
+run_rate4.addEventListener('click', function(ev) { run_rate = 1000; });
+run_rate5.addEventListener('click', function(ev) { run_rate = 10000; });
+// can't handle this speed ;)
+//run_rate6.addEventListener('click', function(ev) { run_rate = 100000; });
 step_button.addEventListener('click', function(ev) {
 	run_step = 1;
+	run_follow = true;
 	run_stop = function() {
-		dis_vpc = mcstate.physaddr & 0xffff;
+		dis_vpc = mcstate.physaddr & 0x3ffff;
+		//const pindex = ((mcstate.memaddr >> 11) & 31) | (mcstate.pta << 5);
+		//const pgram = mcstate.page[pindex];
+		//const pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
+		//dis_vpc = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
 		show_disasm();
 	}
 	run_control(true);
@@ -3006,6 +3610,9 @@ step_button.addEventListener('click', function(ev) {
 microstep_button.addEventListener('click', function(ev) {
 	mcstep(true);
 	mcshowstate();
+	if (dis_after) {
+		show_disasm();
+	}
 });
 btn_cm_import.addEventListener('click', function(ev) {
 	annotation_import(txt_anno.value);
@@ -3022,17 +3629,14 @@ if ((document.getElementById('conv_uew') as HTMLInputElement).checked) {
 }
 HEX_CONV = (document.getElementById('conv_hex') as HTMLInputElement).checked;
 (document.getElementById('conv_ee') as HTMLInputElement).addEventListener('change', function(ev) {
-	console.log(this.checked, this.value);
 	NAME_CONV = 0;
 	show_disasm();
 });
 (document.getElementById('conv_mei') as HTMLInputElement).addEventListener('change', function(ev) {
-	console.log(this.checked, this.value);
 	NAME_CONV = 1;
 	show_disasm();
 });
 (document.getElementById('conv_uew') as HTMLInputElement).addEventListener('change', function(ev) {
-	console.log(this.checked, this.value);
 	NAME_CONV = 2;
 	show_disasm();
 });
@@ -3040,6 +3644,21 @@ HEX_CONV = (document.getElementById('conv_hex') as HTMLInputElement).checked;
 	HEX_CONV = this.checked;
 	show_disasm();
 });
+const inp_crtsize = document.getElementById('crtsize') as HTMLInputElement;
+let TALL_CRT = inp_crtsize.checked;
+inp_crtsize.addEventListener('change', function(ev) {
+	TALL_CRT = this.checked;
+	if (TALL_CRT) {
+		cv_term0.classList.add('tall');
+	} else {
+		cv_term0.classList.remove('tall');
+	}
+});
+if (TALL_CRT) {
+	cv_term0.classList.add('tall');
+} else {
+	cv_term0.classList.remove('tall');
+}
 
 if (txt_anno.value.length > 0) {
 	annotation_import(txt_anno.value);
