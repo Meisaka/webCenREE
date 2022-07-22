@@ -101,10 +101,10 @@
 			</div>
 			<div>Diag Select</div>
 			<div style="display:flex; align-items:flex-end;">
-				<button id="diag8">DT 8</button>
-				<button id="diag4">DT 4</button>
-				<button id="diag2">DT 2</button>
-				<button id="diag1">DT 1</button>
+				<button id="diag8">D8</button>
+				<button id="diag4">D4</button>
+				<button id="diag2">D2</button>
+				<button id="diag1">D1</button>
 			</div>
 			<div>Debug Commands / DisAsm Address:</div>
 			<div><input id="dbgcmd"/></div>
@@ -115,7 +115,8 @@
 			<div class="fpl"><div>Address:</div><span id="fp_addr">0x0000: 0000 0000 0000 0000</span></div>
 			<div class="fpl"><div>Level:</div><span id="fp_level">0x0: 0000</span></div>
 			<div class="fpl"><div>Map:</div><span id="fp_flags"><i>ABT</i><i>3</i><i>2</i><i>1</i><i>F</i><i>L</i><i>M</i><i>V</i></span></div>
-			<div class="fpl"><div>Status:</div><span id="fp_runstate"><i>RUN</i><i class="a">HALT</i></span></div>
+			<div class="fpl"><div>Status:</div><span id="fp_runstate"><i>RUN</i><i class="a">HALT</i><i>STEP</i></span></div>
+			<div class="fpl"><div>Extended:</div><span id="fp_extstate"><i>SIM</i><i>MF</i></span></div>
 			<div class="fpl"><div>Diag:</div><canvas id="fp_diag" class="ils" width="40" height="30"></canvas><button id="diagrun">&nbsp;</button></div>
 		</div>
 		<div class="regs">
