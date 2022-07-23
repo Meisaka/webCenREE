@@ -134,14 +134,14 @@ function run_control(run:boolean):void {
 			run_busy = true;
 			run_follow = (run_rate <= 100);
 			for (let i=0;i<run_rate;i++) {
-				mcstep(i == (run_rate - 1));
+				mcsim.step(i == (run_rate - 1));
 				if (run_ctl == 0) {
 					if (run_stop) {run_stop(); run_stop = null; }
 					break;
 				}
 			}
 			run_busy = false;
-			mcshowstate();
+			mcsim.showstate();
 			if (dis_after) {
 				show_disasm();
 			}
@@ -1179,7 +1179,7 @@ class ALU {
 }
 const FN_E6 = [
 	'','F=>Result','F=>RIdx','F=>Level',
-	'F=>PTA','ASwap','SEQ_RE','(!)CondRegLD'
+	'F=>PTA','ASwap','SEQ_RE','CondRegLD'
 ];
 const FN_SEQ_SN = ['uPC','AHR','STK','DIR'];
 const FN_SEQ_FE = ['POP','PSH','---','---'];
@@ -1371,67 +1371,83 @@ class Backplane implements MemAccessR, MemAccessW {
 	}
 }
 const bpl = new Backplane();
+interface DMAControl {
+	read():number
+	write(value:number):void
+	end():void
+}
+
 type DMAFunc = (atend:boolean, ctrl:DMAControl)=>void;
 let sense_switch = 0;
 
-class MCState {
-	s0 = new Sequencer();
-	s1 = new Sequencer();
-	s2 = new Sequencer();
-	alul= new ALU();
-	aluh= new ALU();
-	alu_flag = 0;
-	ccr = 0;
-	file = new Uint8Array(256);
-	page = new Uint8Array(256);
-	workaddr = 0;
-	memaddr = 0;
-	memdata_in = 0;
-	memdata_out = 0;
-	resetting = 1;
-	physaddr = 0;
-	physpre = 0;
-	busctl = 0;
+function mcsetup() {
+
+const s0 = new Sequencer();
+const s1 = new Sequencer();
+const s2 = new Sequencer();
+const alul= new ALU();
+const aluh= new ALU();
+let alu_flag = 0;
+let ccr = 0;
+const regfile = new Uint8Array(256);
+const pagetb = new Uint8Array(256);
+let workaddr = 0;
+let memaddr = 0;
+let memdata_in = 0;
+let memdata_out = 0;
+let resetting = 1;
+let physaddr = 0;
+let physpre = 0;
+let busctl = 0;
+let sysctl = 0;
+let sys_write_latch = false;
+let sys_read_in = false;
+let cycles = 0;
+let rtc = false;
+let f12a = 0;
+let f12b = 0;
+let b15a = 1;
+let dma_12 = 0;
+let dma_13 = 0;
+let dma_func:null|DMAFunc = null;
+let swap = 0;
+let result = 0;
+let level = 0;
+let reqlevel = 0;
+let rir = 0;
+let rdr = 0;
+let pta = 0;
+let override_or = 0;
+
+const mco = {
+	step,
+	showstate,
+	reset,
+	dma_request,
+	dma_int(en:boolean) {
+		dma_12 = en ? 1 : 0;
+	},
+	physaddr() { return physaddr; },
+	parity: 0,
+	memfault: 0,
+};
+
+function reset() {
+	s0.reset();
+	s1.reset();
+	s2.reset();
+	result = 0;
+	swap = 0;
+	level = 0;
 	sysctl = 0;
+	busctl = 0;
+	resetting = 1;
 	sys_write_latch = false;
 	sys_read_in = false;
-	cycles = 0;
-	rtc = false;
-	f12a = 0;
-	f12b = 0;
-	b15a = 1;
-	parity = 0;
-	memfault = 0;
+	mco.parity = 0;
 	dma_12 = 0;
 	dma_13 = 0;
-	dma_func:null|DMAFunc = null;
-	swap = 0;
-	result = 0;
-	level = 0;
-	reqlevel = 0;
-	rir = 0;
-	rdr = 0;
-	pta = 0;
-	override_or = 0;
-};
-const mcstate = new MCState();
-
-function mcreset() {
-	mcstate.s0.reset();
-	mcstate.s1.reset();
-	mcstate.s2.reset();
-	mcstate.result = 0;
-	mcstate.swap = 0;
-	mcstate.level = 0;
-	mcstate.sysctl = 0;
-	mcstate.busctl = 0;
-	mcstate.resetting = 1;
-	mcstate.sys_write_latch = false;
-	mcstate.sys_read_in = false;
-	mcstate.parity = 0;
-	mcstate.dma_12 = 0;
-	mcstate.dma_13 = 0;
-	mcstate.cycles = 0;
+	cycles = 0;
 	bpl.reset();
 }
 
@@ -1442,34 +1458,34 @@ const enum CCR {
 	ZERO = 8, V = 8, BIT_V = 3,
 };
 
-function mcshowstate() {
-	let mcp = mcstate.s2.output.toString(16) + mcstate.s1.output.toString(16) + mcstate.s0.output.toString(16);
-	let mpc = mcstate.s2.p.toString(16) + mcstate.s1.p.toString(16) + mcstate.s0.p.toString(16);
-	let mhr = mcstate.s2.h.toString(16) + mcstate.s1.h.toString(16) + mcstate.s0.h.toString(16);
+function showstate() {
+	let mcp = s2.output.toString(16) + s1.output.toString(16) + s0.output.toString(16);
+	let mpc = s2.p.toString(16) + s1.p.toString(16) + s0.p.toString(16);
+	let mhr = s2.h.toString(16) + s1.h.toString(16) + s0.h.toString(16);
 	let mstk = '';
-	let msp0 = mcstate.s0.sp, msp1 = mcstate.s1.sp, msp2 = mcstate.s2.sp;
-	let fl = mcstate.alu_flag;
-	let malu1 = hex((mcstate.aluh.regq << 4) | mcstate.alul.regq, 2) +
+	let msp0 = s0.sp, msp1 = s1.sp, msp2 = s2.sp;
+	let fl = alu_flag;
+	let malu1 = hex((aluh.regq << 4) | alul.regq, 2) +
 	` ${hex(fl,2)} ${(fl&0x20)!=0?'L':'-'}${(fl&0x10)!=0?'H':'-'}${(fl&8)!=0?'C':'-'}${(fl&4)!=0?'V':'-'}${(fl&2)!=0?'S':'-'}${(fl&1)!=0?'Z':'-'}`;
 	let malu2 = '';
 	let malu3 = '';
 	for(let i=0;i<4;i++) {
-		mstk += mcstate.s2.sf[msp2].toString(16) + mcstate.s1.sf[msp1].toString(16) + mcstate.s0.sf[msp0].toString(16) + ' ';
+		mstk += s2.sf[msp2].toString(16) + s1.sf[msp1].toString(16) + s0.sf[msp0].toString(16) + ' ';
 		msp0 = (msp0 - 1) & 3;
 		msp1 = (msp1 - 1) & 3;
 		msp2 = (msp2 - 1) & 3;
 	}
 	for(let i=0;i<8;i++) {
-		malu2 += hex((mcstate.aluh.reg[i] << 4) | mcstate.alul.reg[i], 2) + ' ';
-		malu3 += hex((mcstate.aluh.reg[i+8] << 4) | mcstate.alul.reg[i+8], 2) + ' ';
+		malu2 += hex((aluh.reg[i] << 4) | alul.reg[i], 2) + ' ';
+		malu3 += hex((aluh.reg[i+8] << 4) | alul.reg[i+8], 2) + ' ';
 	}
 	
 	for(let rindex = 0;rindex < 256;rindex += 32) {
 		let rfilel = '';
 		let rfiler = '';
 		for(let i=0;i<16;i+=2) {
-			let reg = (mcstate.file[rindex + i] << 8) | mcstate.file[rindex + i+1];
-			let regr = (mcstate.file[rindex+16 + i] << 8) | mcstate.file[rindex+16 + i+1];
+			let reg = (regfile[rindex + i] << 8) | regfile[rindex + i+1];
+			let regr = (regfile[rindex+16 + i] << 8) | regfile[rindex+16 + i+1];
 			rfilel += hex(reg, 4) + ' ';
 			rfiler += ' ' + hex(regr,4);
 		}
@@ -1480,14 +1496,14 @@ function mcshowstate() {
 	mcs_alu3.innerText = malu3;
 	mcs_p.innerText = `${mcp} ${mpc} ${mhr}`;
 	mcs_s.innerText = mstk;
-	mcr_res.innerText = hex(mcstate.result, 2);
-	mcr_swap.innerText = hex(mcstate.swap, 2);
-	mcr_level.innerText = hex(mcstate.level, 1);
-	mcr_rfir.innerText = hex(mcstate.rir);
-	mcr_rfdr.innerText = hex(mcstate.rdr);
-	mcr_pta.innerText = hex(mcstate.pta, 1);
+	mcr_res.innerText = hex(result, 2);
+	mcr_swap.innerText = hex(swap, 2);
+	mcr_level.innerText = hex(level, 1);
+	mcr_rfir.innerText = hex(rir);
+	mcr_rfdr.innerText = hex(rdr);
+	mcr_pta.innerText = hex(pta, 1);
 
-	if ((mcstate.sysctl & 16) != 0) {
+	if ((sysctl & 16) != 0) {
 		fp_runhalt[0].classList.add('a'); // run
 		fp_runhalt[1].classList.remove('a');
 	} else {
@@ -1499,58 +1515,55 @@ function mcshowstate() {
 	} else {
 		fp_ext[0].classList.remove('a');
 	}
-	if (mcstate.memfault != 0) {
+	if (mco.memfault != 0) {
 		fp_ext[2].classList.add('a');
 	} else {
 		fp_ext[2].classList.remove('a');
 	}
-	if ((mcstate.sysctl & 64) != 0) {
+	if ((sysctl & 64) != 0) {
 		fp_flags[7].classList.add('a');
 	} else {
 		fp_flags[7].classList.remove('a');
 	}
 	for(let i = 0; i < 3; i++) {
-		if ((mcstate.pta & (1<<i)) != 0) {
+		if ((pta & (1<<i)) != 0) {
 			fp_flags[4+i].classList.add('a');
 		} else {
 			fp_flags[4+i].classList.remove('a');
 		}
-		if ((mcstate.ccr & (8>>i)) != 0) {
+		if ((ccr & (8>>i)) != 0) {
 			fp_flags[i].classList.add('a');
 		} else {
 			fp_flags[i].classList.remove('a');
 		}
 	}
-	if ((mcstate.ccr & 1) != 0) {
+	if ((ccr & 1) != 0) {
 		fp_flags[3].classList.add('a');
 	} else {
 		fp_flags[3].classList.remove('a');
 	}
-	const pindex = (mcstate.pta << 5);
+	const pindex = pta << 5;
 	for (let k = 0; k < 4; k++) {
 		let pgt = '';
 		const psubindex = pindex | (k << 3);
 		for (let i = 0; i < 8; i++) {
-			const page = mcstate.page[psubindex | i];
+			const page = pagetb[psubindex | i];
 			const pf = (page & 128) != 0;
 			pgt += (pf ? '*':'.') + hex((page & 127) << 3, 3) + ' ';
 		}
 		mcpage[k].innerText = pgt;
 	}
-	// 'IntEN','AddrToSys','AddrCountEN','AddrU/D',
-	// 'AddrCtlSel','?oSys29','?iSys64','?DMA_M8i3b'
-	// mcstate.busctl
-	
-	const bc = mcstate.busctl;
-	const sc = mcstate.sysctl;
+
+	const bc = busctl;
+	const sc = sysctl;
 	mcr_bus.innerText = `${(bc&1)>0?'I':'-'} ${(bc&2)>0?'--':'AE'} ${(bc&4)>0?'--':'AC'} ${(bc&8)>0?'U':'D'}` +
 	` ${(bc&16)>0?'DA':'--'} ${(bc&32)>0?'PT':'--'} ${(bc&64)>0?'MFE':'---'}${(bc&128)>0?'DMA':'---'}`;
 	mcr_sys.innerText = `${(sc&1)>0?'DM4':'---'} ${(sc&2)>0?'DM3':'---'} ${(sc&4)>0?'TE':'--'} ${(sc&8)>0?'-':'M'}` +
 	` ${(sc&16)>0?'R':'H'} ${(sc&32)>0?'--':'TR'} ${(sc&64)>0?'A':'-'} ${(sc&128)>0?'IA':'--'}`;
-	const mpindex = pindex | ((mcstate.memaddr >> 11) & 31);
-	const mpage = mcstate.page[mpindex];
-	const mpaddress = ((mpage & 127) << 11) | (mcstate.memaddr & 0x7ff);
-	mcr_addr.innerText = hex(mcstate.workaddr, 4) + ' ' + hex(mcstate.memaddr, 4) + ' ' + ((mpage & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(mcstate.physaddr, 5);
+	const mpindex = pindex | ((memaddr >> 11) & 31);
+	const mpage = pagetb[mpindex];
+	const mpaddress = ((mpage & 127) << 11) | (memaddr & 0x7ff);
+	mcr_addr.innerText = hex(workaddr, 4) + ' ' + hex(memaddr, 4) + ' ' + ((mpage & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(physaddr, 5);
 }
 
 ///////////////////////////////// Microcode stepping ////////////////////////////////////
@@ -1564,19 +1577,15 @@ uc.f[0x3ec] = 0x23;
 uc.m[0x3ec] = 0x01;
 uc.f[0x3ed] = 0x1b;
 
-interface DMAControl {
-	read():number
-	write(value:number):void
-	end():void
-}
-
 function dma_request(stepfn:DMAFunc) {
-	mcstate.dma_func = stepfn;
-	mcstate.dma_13 = 1;
+	dma_func = stepfn;
+	dma_13 = 1;
 }
 
-function mcstep(debug_output:boolean = false) {
-	const pc = ((mcstate.s2.output << 8) | (mcstate.s1.output << 4) | (mcstate.s0.output)) & 0x7ff;
+const mccfc = new Uint8Array();
+
+function step(debug_output:boolean = false) {
+	const pc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 	if (pc == 0x101) {
 		if (run_step > 0) {
 			run_control(false);
@@ -1584,7 +1593,7 @@ function mcstep(debug_output:boolean = false) {
 		}
 		if (!run_busy || run_follow) {
 			dis_after = true;
-			dis_vpc = mcstate.physaddr & 0x3ffff;
+			dis_vpc = physaddr & 0x3ffff;
 		}
 	}
 	const v6 = /*A*/uc.k[pc]; // MSB
@@ -1601,8 +1610,22 @@ function mcstep(debug_output:boolean = false) {
 	const x_c14_sel = bit(v6,7)!=0;
 	const x_e7 = (v1 >> 5) & 3;
 	const x_e6 = (v0 >> 4) & 7;
+	const k9_sel = v2 & 7;
 	const k9_en = bit(v1,7);
+	const dp_sel = v0 & 15;
+	const seq0_si = bit(v3,5) | (bit(v3,6) << 1);
+	const seq12_s0i = bit(v3,7); // TODO verify
+	const seq_fe = bit(v3,3) << 1; // TODO verify FE (v3,3)
 	const seq_branch = bit(v4,1);
+	const seq_d0 = v2 & 15;
+	const seq_d1 = v2 >> 4;
+	const seq_d2 = v3 & 7;
+	const aluc_a = ((v6<<1)|(v5>>7)) & 15;
+	const aluc_b = (v5>>3) & 15;
+	const aluc_s = (v4>>2) & 7;
+	const aluc_f = (v4>>5) & 7;
+	const aluc_d = v5 & 7;
+	const rir0 = bit(v6,5);
 	const sqd = v2 | ((v3 & 7)<<8);
 	const selJ11 = (v2>>3) & 3;
 	const enaJ11 = bit(v2,2);
@@ -1619,55 +1642,55 @@ function mcstep(debug_output:boolean = false) {
 	const busctlset = busctld << busctla;
 	const busctlmask = ~(1 << busctla);
 	
-	const pindex = ((mcstate.memaddr >> 11) & 31) | (mcstate.pta << 5);
-	const pgram = mcstate.page[pindex];
+	const pindex = ((memaddr >> 11) & 31) | (pta << 5);
+	const pgram = pagetb[pindex];
 	const pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
 	const is_mmio = ((pgram & 253) == 253) ? 0 : 1;
-	const is_reg = (((pgram & 127) == 0) && ((mcstate.memaddr & 1792) == 0)) ? 0 : 1;
+	const is_reg = (((pgram & 127) == 0) && ((memaddr & 1792) == 0)) ? 0 : 1;
 	const is_regmmio = (is_reg & is_mmio) ^ 1;
 	const notpgbit = (pgram >> 7) ^ 1;
 	const is_mem = (is_reg & notpgbit) ^ 1;
 
-	const intena = (mcstate.busctl & 1) != 0;
-	const intreq = intena && bpl.is_interrupt(mcstate.level); // inverted on bus
-	const sysint = mcstate.reqlevel;
-	const dmaint = intena && (mcstate.level < 2) && (mcstate.dma_12 != 0);
-	const count_up = (mcstate.busctl & 8)!=0;
+	const intena = (busctl & 1) != 0;
+	const intreq = intena && bpl.is_interrupt(level); // inverted on bus
+	const sysint = reqlevel;
+	const dmaint = intena && (level < 2) && (dma_12 != 0);
+	const count_up = (busctl & 8)!=0;
 
 	if(x_e7 == 3) { // DataRD for read cycles
-		if(!mcstate.sys_write_latch && mcstate.sys_read_in) {
-			mcstate.memfault = 0;
+		if(!sys_write_latch && sys_read_in) {
+			mco.memfault = 0;
 			if (in_dbgdat.value != '') {
-				mcstate.memdata_in = parseInt(in_dbgdat.value, 16) & 255;
+				memdata_in = parseInt(in_dbgdat.value, 16) & 255;
 			} else {
-				mcstate.memdata_in = bpl.readbyte(mcstate.physaddr & 0x3ffff);
+				memdata_in = bpl.readbyte(physaddr & 0x3ffff);
 			}
-			if ((mcstate.busctl & 0x40) != 0) {
-				mcstate.b15a = mcstate.memfault ^ 1;
+			if ((busctl & 0x40) != 0) {
+				b15a = mco.memfault ^ 1;
 			} else {
-				mcstate.b15a = 1;
+				b15a = 1;
 			}
 		}
 	}
 	
 	let k9_com = 1;
 	if (k9_en == 0) {
-		switch(v2 & 7) {
-		case 0: /* TODO mcstate.f12b */ k9_com = 1; break;
+		switch(k9_sel) {
+		case 0: /* TODO f12b */ k9_com = 1; break;
 		case 1: /* rir.0 nor 4 */
-			k9_com = ((mcstate.rir | (mcstate.rir >> 4)) & 1)^1; break;
-		case 2: /* rir.0 */ k9_com = mcstate.rir & 1; break;
+			k9_com = ((rir | (rir >> 4)) & 1)^1; break;
+		case 2: /* rir.0 */ k9_com = rir & 1; break;
 		case 3: /* TODO: double check this (mmio/reg addressed) */
 			k9_com = is_regmmio; break;
 		case 4: /* REG/pbit */ k9_com = is_mem; break;
-		case 5: /* DMA P2.13 */ k9_com = mcstate.dma_13; break;
-		case 6: /* TODO B15A */ k9_com = mcstate.b15a ^ 1; break;
+		case 5: /* DMA P2.13 */ k9_com = dma_13; break;
+		case 6: /* TODO B15A */ k9_com = b15a ^ 1; break;
 		case 7: /* TODO F13->H13A any INT */
-			k9_com = mcstate.dma_13;
+			k9_com = dma_13;
 			if (intreq || dmaint) {
 				k9_com = 1;
 			}
-			if (mcstate.rtc && ((mcstate.sysctl & 0x4) != 0)) {
+			if (rtc && ((sysctl & 0x4) != 0)) {
 				k9_com = 1;
 			}
 			break;
@@ -1686,34 +1709,31 @@ function mcstep(debug_output:boolean = false) {
 
 	let datapath = 0;
 	const sense = sense_switch; // inverted on bus
-	let sysdata = mcstate.memdata_in;
+	let sysdata = memdata_in;
 	const dswitch = 0; // inverted on bus - R H I M
 	// Data Path Control
-	switch(v0&15) {
+	switch(dp_sel) {
 	case 0: case 4: // R_SWP ⇒ DP
-		datapath = mcstate.swap; break;
+		datapath = swap; break;
 	case 1: case 5: // R_REG(d13) ⇒ DP
-		datapath = mcstate.rdr; break;
+		datapath = rdr; break;
 	case 2: case 6: // R_ADM(rawH) ⇒ DP
-		datapath = ((mcstate.memaddr >> 8) & 255) ^ 0xf0; break;
+		datapath = ((memaddr >> 8) & 255) ^ 0xf0; break;
 	case 3: case 7: // R_ADL ⇒ DP
-		datapath = mcstate.memaddr & 255; break;
+		datapath = memaddr & 255; break;
 	case 8: // R_AddrPH ⇒ DP
 		datapath = pgaddr; break;
 	case 9: // CCR:sense ⇒ DP
-		datapath = ((mcstate.ccr << 4) | sense) ^ 0xf0 /* TODO sense sw */; break;
+		datapath = ((ccr << 4) | sense) ^ 0xf0 /* sense sw */; break;
 	case 10: // R_SysDLatch ⇒ DP
 		datapath = sysdata; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
-		datapath = (mcstate.level << 4) | 4 |
-		(mcstate.resetting>0 ? 2 : 0) | (((pgram & 128) != 0) ? 0 : 1) |
+		datapath = (level << 4) | 4 |
+		((resetting>0) ? 2 : 0) | notpgbit |
 		(dmaint ? 8 : 0);
-		if(mcstate.resetting != 0) mcstate.resetting--;
+		if(resetting != 0) resetting--;
 		break;
 	case 12: // R_DLI (int7..4:dipsw3..0[RHIM]) ⇒ DP
-		// if ((mcstate.sysctl & 128) == 128) {
-		// 	console.log('INT?', sysint);
-		// }
 		datapath = ((sysint & 15) << 4) | dswitch;
 		break;
 	case 13: // RCnst MCv2 ⇒ DP
@@ -1723,44 +1743,44 @@ function mcstep(debug_output:boolean = false) {
 	// __ncF N/C
 	}
 	
-	mcstate.aluh.in_data = datapath >> 4;
-	mcstate.alul.in_data = datapath & 15;
-	mcstate.alul.sel_a = mcstate.aluh.sel_a = (v6<<1)|(v5>>7);
-	mcstate.alul.sel_b = mcstate.aluh.sel_b = v5>>3;
-	mcstate.alul.src = mcstate.aluh.src = v4>>2;
-	mcstate.alul.aop = mcstate.aluh.aop = v4>>5;
-	mcstate.alul.dst = mcstate.aluh.dst = v5;
+	aluh.in_data = datapath >> 4;
+	alul.in_data = datapath & 15;
+	alul.sel_a = aluh.sel_a = aluc_a;
+	alul.sel_b = aluh.sel_b = aluc_b;
+	alul.src = aluh.src = aluc_s;
+	alul.aop = aluh.aop = aluc_f;
+	alul.dst = aluh.dst = aluc_d;
 
 	switch(x_f6h6) {
-	case 0: mcstate.alul.carry_in = 0; break;
-	case 1: mcstate.alul.carry_in = 1; break;
-	case 2: mcstate.alul.carry_in = (mcstate.alu_flag >> 3) & 1; break;
-	case 3: mcstate.alul.carry_in = 0; break;
+	case 0: alul.carry_in = 0; break;
+	case 1: alul.carry_in = 1; break;
+	case 2: alul.carry_in = (alu_flag >> 3) & 1; break;
+	case 3: alul.carry_in = 0; break;
 	}
-	mcstate.alul.resolve();
-	mcstate.aluh.carry_in = mcstate.alul.carry_out;
-	mcstate.aluh.resolve();
+	alul.resolve();
+	aluh.carry_in = alul.carry_out;
+	aluh.resolve();
 	let h6a = 0, h6b = 0;
 	switch(x_f6h6) {
-	case 0: h6a = mcstate.aluh.sign; h6b = 0; break;
-	case 1: h6a = h6b = ((mcstate.alu_flag >> 3) & 1); /* TODO both get flag.C? */ break;
-	case 2: h6a = mcstate.alul.q0; h6b = mcstate.aluh.sign; break;
-	case 3: h6a = mcstate.aluh.carry_out; h6b = 1; break;
+	case 0: h6a = aluh.sign; h6b = 0; break;
+	case 1: h6a = h6b = ((alu_flag >> 3) & 1); /* TODO both get flag.C? */ break;
+	case 2: h6a = alul.q0; h6b = aluh.sign; break;
+	case 3: h6a = aluh.carry_out; h6b = 1; break;
 	}
-	if (mcstate.alul.is_right) {
+	if (alul.is_right) {
 		// >> 3.h.0 >> 3.l.0 >>
-		mcstate.alul.q3 = mcstate.aluh.q0;
-		mcstate.alul.ram3 = mcstate.aluh.ram0;
-		mcstate.aluh.q3 = mcstate.alul.ram0;
-		mcstate.aluh.ram3 = h6a; // h6.Za
+		alul.q3 = aluh.q0;
+		alul.ram3 = aluh.ram0;
+		aluh.q3 = alul.ram0;
+		aluh.ram3 = h6a; // h6.Za
 	} else {
 		// << 3.h.0 << 3.l.0 <<
-		mcstate.aluh.q0 = mcstate.alul.q3;
-		mcstate.aluh.ram0 = mcstate.alul.ram3;
-		mcstate.alul.q0 = h6b; // h6.Zb
-		mcstate.alul.ram0 = mcstate.aluh.q3;
+		aluh.q0 = alul.q3;
+		aluh.ram0 = alul.ram3;
+		alul.q0 = h6b; // h6.Zb
+		alul.ram0 = aluh.q3;
 	}
-	let data_f = (mcstate.aluh.out_f << 4) | mcstate.alul.out_f;
+	let data_f = (aluh.out_f << 4) | alul.out_f;
 	if (x_h11 == 6) {// Select MAPROM to F
 		data_f = uc.map[datapath];
 	}
@@ -1769,15 +1789,15 @@ function mcstep(debug_output:boolean = false) {
 	if (seq_branch == 0) {
 		switch(selJ13) {
 		case 0: // |1 IF ALUF.S, |2 IF ALUF.Z
-			seq_or |= ((mcstate.alu_flag & 2)!=0 ?1:0);
-			seq_or |= ((mcstate.alu_flag & 1)!=0 ?2:0);
+			seq_or |= ((alu_flag & 2)!=0 ?1:0);
+			seq_or |= ((alu_flag & 1)!=0 ?2:0);
 			break;
 		case 1: // |1 IF ALUF.H, |2 IF ALUF.V
-			seq_or |= ((mcstate.alu_flag & 16)!=0 ?1:0);
-			seq_or |= ((mcstate.alu_flag & 4)!=0 ?2:0);
+			seq_or |= ((alu_flag & 16)!=0 ?1:0);
+			seq_or |= ((alu_flag & 4)!=0 ?2:0);
 			break;
 		case 2: // |1 IF ~pbit, |2 IF ~MMIO
-			seq_or |= 1 | (is_mmio << 1); // TODO pbit
+			seq_or |= notpgbit | (is_mmio << 1);
 			break;
 		case 3: break; // nop
 		}
@@ -1785,31 +1805,31 @@ function mcstep(debug_output:boolean = false) {
 		switch(selK13) { // mind the strange order of OR2/3 (|4 |8)
 		case 0: // |4 IF INT_EN, |8 IF CCR.Carry (Link)
 			if (intena) seq_or |= 4; // TODO: trace
-			if ((mcstate.ccr & CCR.CARRY) != 0) seq_or |= 8;
+			if ((ccr & CCR.CARRY) != 0) seq_or |= 8;
 			break;
 		case 1: // |4 IF DMA_INT, |8 IF INT_REQ
 			if (!dmaint) seq_or |= 4; // TODO verify these work
 			if (!intreq) seq_or |= 8; // TODO?
 			break;
-		case 2: // |4 IF MEM_INT, |8 IF DMA.P2.13
+		case 2: // |4 IF MEM_INT, |8 IF DMA_REQ
 			//seq_or |= 4; // TODO typically low
-			if (mcstate.dma_13 == 0) seq_or |= 8; // TODO - typically high if no DMA connection
+			if (dma_13 == 0) seq_or |= 8; // TODO - typically high if no DMA connection
 			break;
 		case 3: break; // nop
 		}
 
-		seq_or |= mcstate.override_or;
+		seq_or |= override_or;
 	}
 
 	let rindex;
 	if (x_c14_sel) {
-		rindex = (mcstate.rir & 15) | (mcstate.level << 4);
+		rindex = (rir & 15) | (level << 4);
 	} else {
-		rindex = (mcstate.rir & 255);
+		rindex = (rir & 255);
 	}
 	// rindex bit 0, this is technically a NOR
 	// but can be handled as needed because this is the only reference
-	rindex = (rindex | bit(v6,5)); // I elected to not invert it, since the debug dump would have anyways
+	rindex = (rindex | rir0); // I elected to not invert it, since the debug dump would have anyways
 
 	if (debug_output) {
 		const k9_fn = 'K9=' + ((k9_en == 0) ? 'nop' : [
@@ -1818,10 +1838,10 @@ function mcstep(debug_output:boolean = false) {
 			'(2)RIR.0',
 			'(3)Ad=IO/REG',
 			'(4)Ad=REG/pbit', // need to recheck the logic on this one to give it a better name
-			'(5)~DMA_P2.13', // DMA port, no clue otherwise
-			'(6)B15A.~Q', // this one is weird, depends on BusCtl bit 6 being set
+			'(5)DMA_REQ', // DMA port, request start
+			'(6)MemFault', // Memory parity error, must be enabled via BusCtl bit 6
 			'(7)F13 most' // this one needs a better name (checks multiple interrupt lines)
-			][v2 & 7]);
+			][k9_sel]);
 		const d_branch = ['','','',''];
 		if (seq_branch == 0) {
 			switch(selJ13) {
@@ -1834,7 +1854,7 @@ function mcstep(debug_output:boolean = false) {
 				if ((sqd | 2) != sqd) d_branch[1] = '|2 IF ALUF.V';
 				break;
 			case 2:
-				if ((sqd | 1) != sqd) d_branch[0] = '|1 IF (!)~pbit';
+				if ((sqd | 1) != sqd) d_branch[0] = '|1 IF ~pbit';
 				if ((sqd | 2) != sqd) d_branch[1] = '|2 IF ~MMIO';
 				break;
 			case 3: break; // nop
@@ -1845,25 +1865,25 @@ function mcstep(debug_output:boolean = false) {
 				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF CCR.L';
 				break;
 			case 1:
-				if ((sqd | 4) != sqd) d_branch[2] = '|4 IF (!)DMA_INT';
-				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF (!)INT_REQ';
+				if ((sqd | 4) != sqd) d_branch[2] = '|4 IF DMA_INT';
+				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF INT_REQ';
 				break;
 			case 2:
 				if ((sqd | 4) != sqd) d_branch[2] = '|4 IF (!)MEM_INT';
-				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF (!)DMA.P2.13';
+				if ((sqd | 8) != sqd) d_branch[3] = '|8 IF DMA_REQ';
 				break;
 			case 3: break; // nop
 			}
 		}
 		const d_f6h6 = ['F6=0   ','F6=1   ','F6=FL.C','F6=?3  '][x_f6h6] +
-		' H6:' + (mcstate.alul.is_right ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
-		const lh = mcstate.alul.funcstr().padEnd(30); // speculative
+		' H6:' + (alul.is_right ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
+		const lh = alul.funcstr().padEnd(30); // speculative
 		const lseq = `S2:${FN_SEQ_SN[seq2_s]} S1:${FN_SEQ_SN[seq1_s]} S0:${FN_SEQ_SN[seq0_s]} ${FN_SEQ_FE[seq_fc]}`;
 		const l34 = `[${hex(sqd,3)}][${d_branch.join(',')}]`;
 		const d_ccr =
 			'cV=' + ['. ','Z ','R.V','LZ'][selJ12] +
 			' cM=' + ['. ','S ','R.M','S '][selJ12] +
-			' cF=' + (enaJ11 ? '0' : ['Res.5','1','.','0','Res.5','1','.','1'][selJ11 | (mcstate.alu_flag & 0x4)]).padEnd(4) +
+			' cF=' + (enaJ11 ? '0' : ['Res.5','1','.','0','Res.5','1','.','1'][selJ11 | (alu_flag & 0x4)]).padEnd(4) +
 			' cL=' + (enaJ10 ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][selJ10]).padEnd(8);
 		mcs_op.innerText = `${hex(pc)}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)}: ${lseq} ${k9_fn} ${l34}`;
 		mcs_op_alu.innerText = `${lh} (${hex(data_f,2)}) ${d_f6h6} ${d_ccr}`;
@@ -1871,68 +1891,66 @@ function mcstep(debug_output:boolean = false) {
 
 	////////////////////////////// rising clock edge /////////////////////////////
 
-	let prevwork = mcstate.workaddr;
+	let prevwork = workaddr;
 	switch(x_k11) {
 	case 0: break; // nop
 	case 1: break; // L13A_SET
 	case 2: // ?K11_2
-		if ((busctlset == 1) && ((mcstate.sysctl & 1) == 0)) {
+		if ((busctlset == 1) && ((sysctl & 1) == 0)) {
 			console.log('DMA1:ON');
 		}
-		if ((busctlset == 2) && ((mcstate.sysctl & 2) == 0)) {
+		if ((busctlset == 2) && ((sysctl & 2) == 0)) {
 			console.log('DMA2:ON');
 		}
-		if ((busctlset == 128) && ((mcstate.sysctl & 128) == 0)) {
-			//console.log('IACK:', mcstate.level);
-			mcstate.reqlevel = bpl.ack_interrupt(mcstate.level);
-			//console.log('IACK:', mcstate.level,'->',mcstate.reqlevel);
+		if ((busctlset == 128) && ((sysctl & 128) == 0)) {
+			reqlevel = bpl.ack_interrupt(level);
+			//console.log('IACK:', level,'->',reqlevel);
 		}
-		if ((busctlmask == ~128) && ((mcstate.sysctl & 128) == 128)) {
-			//bpl.ack_interrupt(false);
-			mcstate.reqlevel = 0;
+		if ((busctlmask == ~128) && ((sysctl & 128) == 128)) {
+			reqlevel = 0;
 		}
-		mcstate.sysctl = (mcstate.sysctl & busctlmask) | busctlset;
+		sysctl = (sysctl & busctlmask) | busctlset;
 		break;
 	case 3: // BusCtl
-		if ((busctlset == 0x20) && ((mcstate.busctl & 0x20) == 0)) {
+		if ((busctlset == 0x20) && ((busctl & 0x20) == 0)) {
 			//console.log('MEM:TEST');
-			mcstate.parity = 1;
+			mco.parity = 1;
 		}
-		if ((busctlmask == ~0x20) && ((mcstate.busctl & 0x20) != 0)) {
+		if ((busctlmask == ~0x20) && ((busctl & 0x20) != 0)) {
 			//console.log('MEM:NOTEST');
-			mcstate.parity = 0;
+			mco.parity = 0;
 		}
-		mcstate.busctl = (mcstate.busctl & busctlmask) | busctlset;
+		busctl = (busctl & busctlmask) | busctlset;
 		break;
 	case 4: // REG_WR
-		mcstate.file[rindex] = mcstate.result;
+		regfile[rindex] = result;
 		break;
 	case 5: // PTR_WR
-		mcstate.page[pindex] = mcstate.result;
+		pagetb[pindex] = result;
 		break;
 	case 6: // WADL_WR
 		if (x_e6 == 5) {
-			mcstate.workaddr = (mcstate.workaddr & 0xff00) | (mcstate.memaddr & 0xff);
+			workaddr = (workaddr & 0xff00) | (memaddr & 0xff);
 		} else {
-			mcstate.workaddr = (mcstate.workaddr & 0xff00) | mcstate.result;
+			workaddr = (workaddr & 0xff00) | result;
 		}
 		break;
 	case 7: // BusD_WR
-		mcstate.memdata_out = data_f;
-		mcstate.sys_write_latch = true;
+		memdata_out = data_f;
+		sys_write_latch = true;
 		break;
 	}
 
 	// timer
-	mcstate.cycles++;
-	if (mcstate.cycles >= 8333) {
-		mcstate.cycles = 0;
-		if ((mcstate.sysctl & 0x20) != 0) {
-			mcstate.rtc = true;
+	cycles++;
+	if (cycles >= 8333) {
+		cycles = 0;
+		if ((sysctl & 0x20) != 0) {
+			rtc = true;
 		}
 	}
-	if ((mcstate.sysctl & 0x20) == 0) {
-		mcstate.rtc = false;
+	if ((sysctl & 0x20) == 0) {
+		rtc = false;
 	}
 
 	// conditions register
@@ -1946,136 +1964,136 @@ function mcstep(debug_output:boolean = false) {
 		let fl_m = 0;
 		switch(selJ12) {
 		case 0:
-			fl_v = (mcstate.ccr >> CCR.BIT_V) & 1;
-			fl_m = (mcstate.ccr >> CCR.BIT_M) & 1;
+			fl_v = (ccr >> CCR.BIT_V) & 1;
+			fl_m = (ccr >> CCR.BIT_M) & 1;
 			break;
 		case 1:
-			fl_v = (mcstate.alu_flag) & 1;
-			fl_m = (mcstate.alu_flag >> 1) & 1;
+			fl_v = (alu_flag) & 1;
+			fl_m = (alu_flag >> 1) & 1;
 			break;
 		case 2:
-			fl_v = (mcstate.result >> 7) & 1;
-			fl_m = (mcstate.result >> 6) & 1;
+			fl_v = (result >> 7) & 1;
+			fl_m = (result >> 6) & 1;
 			break;
 		case 3:
-			fl_v = (mcstate.alu_flag & (mcstate.alu_flag >> 5)) & 1;
-			fl_m = (mcstate.alu_flag >> 1) & 1;
+			fl_v = (alu_flag & (alu_flag >> 5)) & 1;
+			fl_m = (alu_flag >> 1) & 1;
 			break;
 		}
 		let fl_f = 0;
 		let fl_l = 0;
 		if (enaJ11 == 0) {
-			switch(selJ11 | (mcstate.alu_flag & 0x4)) {
-			case 0: fl_f = (mcstate.result >> 5) & 1; break;
+			switch(selJ11 | (alu_flag & 0x4)) {
+			case 0: fl_f = (result >> 5) & 1; break;
 			case 1: fl_f = 1; break;
-			case 2: fl_f = (mcstate.ccr >> CCR.BIT_F) & 1; break;
+			case 2: fl_f = (ccr >> CCR.BIT_F) & 1; break;
 			case 3: fl_f = 0; break;
-			case 4: fl_f = (mcstate.result >> 5) & 1; break;
+			case 4: fl_f = (result >> 5) & 1; break;
 			case 5: fl_f = 1; break;
-			case 6: fl_f = (mcstate.ccr >> CCR.BIT_F) & 1; break;
+			case 6: fl_f = (ccr >> CCR.BIT_F) & 1; break;
 			case 7: fl_f = 1; break;
 			}
 		}
 		if (enaJ10 == 0) {
 			switch(selJ10) {
-			case 0: fl_l = ((mcstate.ccr >> CCR.BIT_L) & 1); break;
-			case 1: fl_l = ((mcstate.ccr >> CCR.BIT_L) & 1) ^ 1; break;
-			case 2: fl_l = (mcstate.alu_flag >> 3) & 1; break;
+			case 0: fl_l = ((ccr >> CCR.BIT_L) & 1); break;
+			case 1: fl_l = ((ccr >> CCR.BIT_L) & 1) ^ 1; break;
+			case 2: fl_l = (alu_flag >> 3) & 1; break;
 			case 3: fl_l = 1; break;
-			case 4: fl_l = (mcstate.result >> 4) & 1; break;
-			case 5: fl_l = mcstate.aluh.ram3; break;
-			case 6: fl_l = mcstate.alul.ram0; break;
-			case 7: fl_l = mcstate.alul.q0; break;
+			case 4: fl_l = (result >> 4) & 1; break;
+			case 5: fl_l = aluh.ram3; break;
+			case 6: fl_l = alul.ram0; break;
+			case 7: fl_l = alul.q0; break;
 			}
 		}
-		mcstate.ccr = (fl_l << CCR.BIT_L) | (fl_f << CCR.BIT_F) | (fl_m << CCR.BIT_M) | (fl_v << CCR.BIT_V);
+		ccr = (fl_l << CCR.BIT_L) | (fl_f << CCR.BIT_F) | (fl_m << CCR.BIT_M) | (fl_v << CCR.BIT_V);
 	}
 
-	mcstate.rdr = mcstate.file[rindex];
+	rdr = regfile[rindex];
 
 	switch(x_e7) {
 	case 0: break; // nop
 	case 1: break; // TODO: BusReady
 	case 2: // ALUFlag_LD
-		mcstate.alu_flag = (mcstate.alul.zero & mcstate.aluh.zero) |
-		(mcstate.aluh.sign << 1) | (mcstate.aluh.over << 2) |
-		(mcstate.aluh.carry_out << 3) | (mcstate.alul.carry_out << 4) | ((mcstate.alu_flag & 1) << 5);
+		alu_flag = (alul.zero & aluh.zero) |
+		(aluh.sign << 1) | (aluh.over << 2) |
+		(aluh.carry_out << 3) | (alul.carry_out << 4) | ((alu_flag & 1) << 5);
 		break;
 	case 3: // DataRD
-		if (mcstate.sys_write_latch) {
-			mcstate.memdata_in = mcstate.memdata_out;
+		if (sys_write_latch) {
+			memdata_in = memdata_out;
 		}
-		mcstate.sys_write_latch = false;
-		mcstate.sys_read_in = false;
+		sys_write_latch = false;
+		sys_read_in = false;
 		break;
 	}
 
-	let c = mcstate.s0.step(true, seq0_s, seq_fc, v2 & 15, seq_or, false);
-	c = mcstate.s1.step(c, seq1_s, seq_fc, v2 >> 4, 0, false);
-	mcstate.s2.step(c, seq2_s, seq_fc, v3 & 7, 0, false);
+	let c = s0.step(true, seq0_s, seq_fc, seq_d0, seq_or, false);
+	c = s1.step(c, seq1_s, seq_fc, seq_d1, 0, false);
+	s2.step(c, seq2_s, seq_fc, seq_d2, 0, false);
 
-	if (((mcstate.busctl & 20) == 16) && mcstate.dma_func != null) {
-		mcstate.dma_func((mcstate.workaddr == 0xffff), {
+	if (((busctl & 20) == 16) && dma_func != null) {
+		dma_func((workaddr == 0xffff), {
 			read():number {
-				mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
-				let v = bpl.readbyte(mcstate.physaddr & 0x3ffff);
-				mcstate.workaddr = (mcstate.workaddr + (count_up?1:-1)) & 0xffff;
-				mcstate.memaddr = (mcstate.memaddr + (count_up?1:-1)) & 0xffff;
+				physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+				let v = bpl.readbyte(physaddr & 0x3ffff);
+				workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
+				memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
 				return v;
 			},
 			write(value:number) {
-				mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
-				bpl.writebyte(mcstate.physaddr & 0x3ffff, value);
-				mcstate.workaddr = (mcstate.workaddr + (count_up?1:-1)) & 0xffff;
-				mcstate.memaddr = (mcstate.memaddr + (count_up?1:-1)) & 0xffff;
+				physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+				bpl.writebyte(physaddr & 0x3ffff, value);
+				workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
+				memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
 			},
 			end():void {
-				mcstate.dma_13 = 0;
-				mcstate.dma_func = null;
+				dma_13 = 0;
+				dma_func = null;
 			}
 		});
 	}
 	switch(x_h11) {
 	case 0: break; // nop
 	case 1: // RD_START /* TODO */
-		mcstate.physpre = pgram >> 7;
-		mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
-		mcstate.sys_read_in = true;
+		physpre = pgram >> 7;
+		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+		sys_read_in = true;
 		break;
 	case 2: // WT_START /* TODO */
-		mcstate.physpre = pgram >> 7;
-		mcstate.physaddr = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
-		bpl.writebyte(mcstate.physaddr & 0x3ffff, mcstate.memdata_out);
+		physpre = pgram >> 7;
+		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+		bpl.writebyte(physaddr & 0x3ffff, memdata_out);
 		break;
 	case 3: // WorkAddr_LDH
 		if (x_e6 == 5) {
-			mcstate.workaddr = (mcstate.workaddr & 0x00ff) | (mcstate.memaddr & 0xff00);
+			workaddr = (workaddr & 0x00ff) | (memaddr & 0xff00);
 		} else {
-			mcstate.workaddr = (mcstate.workaddr & 0x00ff) | (mcstate.result << 8);
+			workaddr = (workaddr & 0x00ff) | (result << 8);
 		}
 		break;
 	case 4: // WorkAddr_Count
-		mcstate.workaddr = (mcstate.workaddr + (count_up?1:-1)) & 0xffff;
+		workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
 		break;
 	case 5: // MemAddr_Count
-		mcstate.memaddr = (mcstate.memaddr + (count_up?1:-1)) & 0xffff;
+		memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
 		break;
 	case 6: break; // F=MapROM - handled farther above
 	case 7: // NibSwap
-		mcstate.swap = ((datapath << 4) | (datapath >> 4)) & 255;
+		swap = ((datapath << 4) | (datapath >> 4)) & 255;
 		break;
 	}
 
 	switch(x_e6) {
 	// no case 0
-	case 1: mcstate.result = data_f; break; // F⇒Result
-	case 2: mcstate.rir = data_f; break; // F⇒RIdx
-	case 3: mcstate.level = data_f >> 4; break; // F⇒Level
-	case 4: mcstate.pta = data_f & 7; break; // F⇒PTA
-	case 5: mcstate.memaddr = prevwork; break; // ASwap
+	case 1: result = data_f; break; // F⇒Result
+	case 2: rir = data_f; break; // F⇒RIdx
+	case 3: level = data_f >> 4; break; // F⇒Level
+	case 4: pta = data_f & 7; break; // F⇒PTA
+	case 5: memaddr = prevwork; break; // ASwap
 	case 6: // SEQ_RE
-		mcstate.s0.h = data_f & 15;
-		mcstate.s1.h = (data_f >> 4) & 15;
+		s0.h = data_f & 15;
+		s1.h = (data_f >> 4) & 15;
 		break;
 	case 7: break; //!E6:O7
 	}
@@ -2083,31 +2101,34 @@ function mcstep(debug_output:boolean = false) {
 	if(debug_output) {
 		const d_k11 = [// FN_K11[x_k11]
 		/* 0 */ 'nop',
-		/* 1 */ '(!)L13A_SET',
+		/* 1 */ '(!)DMAEndReset',
 		/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
 		/* . */ 'P2.3','P2.4','RTC','MapDis',
 		/* . */ 'FP.Run','RTC.R','FP.ABT','INT_ACK'][busctla] + '=' + busctld,
 		/* 3 */ 'BusCtl:' + [
 		/* . */ 'IntEN','AddrToSys','AddrCountEN','AddrU/D',
-		/* . */ 'AddrCtlSel','?oSys29','?iSys64','?DMA_M8i3b'][busctla] + '=' + busctld,
+		/* . */ 'AddrCtlSel','ParityTest','ParityEN','DMA_EN'][busctla] + '=' + busctld,
 		/* 4 */ x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)',
 		/* 5 */ 'PTR_WR',
 		/* 6 */ 'WA_LD',
 		/* 7 */ '(!)BusD_WR'][x_k11]
-		const mce7 = 'E7='+['nop','(!)BusReady','ALUFlag_LD','(!)DataRD'][x_e7];
-		const mch11 = 'H11='+[
-		'nop','(!)RD_START','(!)WT_START','WorkAddr_LDH',
-		'(~!)WorkAddr_Count','(~!)MemAddr_Count','F=MapROM','NibSwap'][x_h11]
-		const mcd_d45 = 'DP=' + [
+		const mce7 = ['nop','(!)BusReady','ALUFlag_LD','DataRD'][x_e7];
+		const mch11 = [
+		'nop','RD_START','(!)WT_START','WorkAddr_LDH',
+		'WorkAddr_Count','MemAddr_Count','F=MapROM','NibSwap'][x_h11];
+		const mcd_d45 = [
 		'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
-		'PA','CCR_DSense','SysDAT','(!)R_H14','(!)R_INTDIP','RCnst','',''][v0&15];
-		const mch = `D4/5:${mcd_d45.padEnd(10)}(${hex(datapath)}) E6=${FN_E6[x_e6].padEnd(12)}`;
-		mcs_op_bus.innerText = `K11:${d_k11.padEnd(12)} ${mch} ${mce7.padEnd(13)} ${mch11}`;
+		'PA','CCR_DSense','SysDAT','R_H14','(!)R_INTDIP','RCnst','',''][dp_sel];
+		const mch = `D4/5:DP=${mcd_d45.padEnd(10)}(${hex(datapath)}) E6=${FN_E6[x_e6].padEnd(12)}`;
+		mcs_op_bus.innerText = `K11:${d_k11.padEnd(14)} ${mch} E7=${mce7.padEnd(11)} H11=${mch11}`;
 	}
-	mcstate.alul.step();
-	mcstate.aluh.step();
+	alul.step();
+	aluh.step();
 }
-mcshowstate();
+return mco;
+}
+const mcsim = mcsetup();
+mcsim.showstate();
 
 class DiagIO {
 	// TOS:1a, Aux:1d, Hawk:17-19, MUXINT:16, DMA:11/13
@@ -2207,7 +2228,7 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 		this.wpmask = 0;
 		this.sel_unit = 0;
 		this.interrupt_en = false;
-		mcstate.dma_12 = 0;
+		mcsim.dma_int(false);
 	}
 	tickbusy() {
 		if (this.busy_time > 0) {
@@ -2218,17 +2239,17 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 				case 0:
 				case 1:
 				case 4:
-					if (this.interrupt_en) mcstate.dma_12 = 1;
+					if (this.interrupt_en) mcsim.dma_int(true);
 					break;
 				case 2:
 					this.seeking = false;
 					this.seek_done = true;
-					if (this.interrupt_en) mcstate.dma_12 = 1;
+					if (this.interrupt_en) mcsim.dma_int(true);
 					break;
 				case 3:
 					this.seeking = false;
 					this.seek_done = true;
-					if (this.interrupt_en) mcstate.dma_12 = 1;
+					if (this.interrupt_en) mcsim.dma_int(true);
 					console.log('DSK2:done:rtz');
 					break;
 				default:
@@ -2293,7 +2314,7 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 		const u = this.units[this.sel_unit];
 		const unitdata = disk_images[this.sel_unit == 0 ? 'main_view': 'fixed_view'];
 		if (u == null || unitdata == null) return;
-		dma_request((atend, ctrl)=>{
+		mcsim.dma_request((atend, ctrl)=>{
 			if (atend) {
 				ctrl.end();
 				this.busy_time = 10;
@@ -2313,7 +2334,7 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 		const u = this.units[this.sel_unit];
 		const unitdata = disk_images[this.sel_unit == 0 ? 'main_view': 'fixed_view'];
 		if (u == null || unitdata == null) return;
-		dma_request((atend, ctrl)=>{
+		mcsim.dma_request((atend, ctrl)=>{
 			if (atend) {
 				ctrl.end();
 				this.busy_time = 10;
@@ -2363,7 +2384,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 				//console.log('DSK2:read:', hex(u.sel_address, 4));
 				this.busy_time = 0;
 				this.sect_remain = 400;
-				//if (this.interrupt_en) mcstate.dma_12 = 1;
 				this.do_dma_read();
 				break;
 			case 4: // verify?? (typically issued after cmd 1)
@@ -2396,19 +2416,19 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 			break;
 		case 12:
 			if (this.interrupt_en) {
-				mcstate.dma_12 = 1;
+				mcsim.dma_int(true);
 				//console.log('DSK2:W:IFORCE');
 			}
 			break;
 		case 13:
 			this.interrupt_en = false;
-			mcstate.dma_12 = 0;
+			mcsim.dma_int(false);
 			break;
 		case 14:
 			this.interrupt_en = true;
 			break;
 		case 15:
-			mcstate.dma_12 = 0;
+			mcsim.dma_int(false);
 			break;
 		default:
 			console.log('DSK2:W:', hex(address, 1), hex(value));
@@ -2654,13 +2674,13 @@ class SysMem extends RamBase {
 		pval = (pval ^ (pval >> 1)) & 1;
 		const bit = (address & 7);
 		const pv = (this.pview.getUint8(address >> 3) >> bit) & 1;
-		mcstate.memfault = pv ^ pval;
+		mcsim.memfault = pv ^ pval;
 		return value;
 	}
 	writebyte(address: number, value: number): void {
 		let pval = value ^ (value >> 4);
 		pval = pval ^ (pval >> 2);
-		pval = (pval ^ (pval >> 1) ^ mcstate.parity) & 1;
+		pval = (pval ^ (pval >> 1) ^ mcsim.parity) & 1;
 		const bit = (address & 7);
 		const pv = (this.pview.getUint8(address >> 3) & ((1 << bit) ^ 255)) | (pval << bit);
 		this.pview.setUint8(address >> 3, pv);
@@ -3778,40 +3798,8 @@ btn_dt8.addEventListener('click', function(ev) {
 btn_dtrun.addEventListener('click', function(ev) {
 	cx_diag0.dip ^= 0x10;
 });
-btn_or0.addEventListener('click', function(ev) {
-	mcstate.override_or ^= 1;
-	if ((mcstate.override_or & 1) > 0) {
-		this.classList.add('active');
-	} else {
-		this.classList.remove('active');
-	}
-});
-btn_or1.addEventListener('click', function(ev) {
-	mcstate.override_or ^= 2;
-	if ((mcstate.override_or & 2) > 0) {
-		this.classList.add('active');
-	} else {
-		this.classList.remove('active');
-	}
-});
-btn_or2.addEventListener('click', function(ev) {
-	mcstate.override_or ^= 4;
-	if ((mcstate.override_or & 4) > 0) {
-		this.classList.add('active');
-	} else {
-		this.classList.remove('active');
-	}
-});
-btn_or3.addEventListener('click', function(ev) {
-	mcstate.override_or ^= 8;
-	if ((mcstate.override_or & 8) > 0) {
-		this.classList.add('active');
-	} else {
-		this.classList.remove('active');
-	}
-});
 reset_button.addEventListener('click', function(ev) {
-	mcreset();
+	mcsim.reset();
 })
 micro_button.addEventListener('click', function(ev) {
 	mcdump();
@@ -3831,18 +3819,14 @@ step_button.addEventListener('click', function(ev) {
 	run_step = 1;
 	run_follow = true;
 	run_stop = function() {
-		dis_vpc = mcstate.physaddr & 0x3ffff;
-		//const pindex = ((mcstate.memaddr >> 11) & 31) | (mcstate.pta << 5);
-		//const pgram = mcstate.page[pindex];
-		//const pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
-		//dis_vpc = (pgaddr << 11) | (mcstate.memaddr & 0x7ff);
+		dis_vpc = mcsim.physaddr() & 0x3ffff;
 		show_disasm();
 	}
 	run_control(true);
 });
 microstep_button.addEventListener('click', function(ev) {
-	mcstep(true);
-	mcshowstate();
+	mcsim.step(true);
+	mcsim.showstate();
 	if (dis_after) {
 		show_disasm();
 	}
