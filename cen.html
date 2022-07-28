@@ -48,10 +48,30 @@
 	margin-right: 10px;
 	margin-top: 10px;
 }
+.termcon {
+	margin-top: 10px;
+	margin-right: 10px;
+}
+.termcon > div:first-child {
+	display: flex;
+}
+.termcon > div:first-child > button {
+	font-size: 16px;
+	padding: 2px 14px 2px 14px;
+}
+.termcon > div:first-child > span {
+	font-size: 16px;
+	padding: 2px 14px 2px 14px;
+	border: 2px solid #337;
+	background: #01050c;
+	color: #444;
+}
+.termcon > div:first-child > span.a {
+	background: #35f2af;
+	color: #090009;
+}
 .term {
 	border: 2px solid #77e;
-	margin-right: 10px;
-	margin-top: 10px;
 	background: #01050c;
 	height: 240px;
 	width: 640px;
@@ -67,8 +87,19 @@
 </style>
 </head>
 <body>
+	<div class="popwin" id="wset" style="display:none;top:40px;right:3%;float:right;">
+		<div style="display:flex; flex-direction: column;">
+			<div>Disassembly</div>
+			<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
+			<span class="conv-sel"><input type="radio" name="conv" id="conv_mei" value="mei" checked/><label for="conv_mei">Modern Parametric</label></span>
+			<span class="conv-sel" style="display: none"><input type="radio" name="conv" id="conv_uew" value="uew"/><label for="conv_uew">Centurion RE Wiki</label></span>
+			<span class="conv-sel"><input type="checkbox" name="conv_hex" id="conv_hex"/><label for="conv_hex">Hex Prefix in Listing</label></span>
+			<div>Terminal</div>
+			<span class="conv-sel"><input type="checkbox" name="crtsize" id="crtsize"/><label for="crtsize">Tall CRT</label></span>
+		</div>
+	</div>
 	<div style="display:flex">
-		<button id="b_reset">Full Reset</button>
+		<button id="b_reset">Reset</button>
 		<button id="b_step">Step</button>
 		<button id="b_run">Run/Stop</button>
 		<button id="b_r1">1</button>
@@ -76,25 +107,22 @@
 		<button id="b_r3">100</button>
 		<button id="b_r4">1k</button>
 		<button id="b_r5">10k</button>
-		<!-- <button id="b_r6">100k</button> -->
+		<button id="b_r6">50k</button>
 		<button id="b_micro">&#x03bc;Code</button>
 		<button id="b_mstep">&#x03bc;Step</button>
-		<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
-		<span class="conv-sel"><input type="radio" name="conv" id="conv_mei" value="mei" checked/><label for="conv_mei">Modern Parametric</label></span>
-		<span class="conv-sel" style="display: none"><input type="radio" name="conv" id="conv_uew" value="uew"/><label for="conv_uew">Centurion RE Wiki</label></span>
-		<span class="conv-sel"><input type="checkbox" name="conv_hex" id="conv_hex"/><label for="conv_hex">Hex Prefix in Listing</label></span>
-		<span class="conv-sel"><input type="checkbox" name="crtsize" id="crtsize"/><label for="crtsize">Tall CRT</label></span>
+		<div style="flex-grow: 1"></div>
+		<button id="b_settings">Settings</button>
 	</div>
 	<div class="frontpanel">
 		<div>
 			<div>Front Panel Display:</div>
 			<div style="display:flex; align-items:flex-end;">
 				<button id="fp_r">R/F</button>
-				<button id="fp_l">LOAD/OPSYS</button>
+				<button id="fp_l">LOAD OPSYS</button>
 				<button id="fp_s">SELECT</button>
 			</div>
 			<div style="display:flex; align-items:flex-end;">
-				<button id="ss1" class="active">S1</button>
+				<button id="ss1">S1</button>
 				<button id="ss2">S2</button>
 				<button id="ss3">S3</button>
 				<button id="ss4">S4</button>
@@ -105,19 +133,20 @@
 				<button id="diag4">D4</button>
 				<button id="diag2">D2</button>
 				<button id="diag1">D1</button>
+				<button id="diagrun">&nbsp;</button>
 			</div>
 			<div>Debug Commands / DisAsm Address:</div>
-			<div><input id="dbgcmd"/></div>
-			<div>Debug Data:</div>
-			<div><input id="dbgdat"/></div>
+			<div class="fpl"><div>[View]</div><input id="dbgcmd"/></div>
 		</div>
 		<div class="regs">
 			<div class="fpl"><div>Address:</div><span id="fp_addr">0x0000: 0000 0000 0000 0000</span></div>
 			<div class="fpl"><div>Level:</div><span id="fp_level">0x0: 0000</span></div>
 			<div class="fpl"><div>Map:</div><span id="fp_flags"><i>ABT</i><i>3</i><i>2</i><i>1</i><i>F</i><i>L</i><i>M</i><i>V</i></span></div>
+			<div class="fpl"><div>Map:</div><Canvas id="fp_flagsc" class="ils" height="30" width="250"></Canvas></div>
 			<div class="fpl"><div>Status:</div><span id="fp_runstate"><i>RUN</i><i class="a">HALT</i><i>STEP</i></span></div>
 			<div class="fpl"><div>Extended:</div><span id="fp_extstate"><i>SIM</i><i>MF</i></span></div>
-			<div class="fpl"><div>Diag:</div><canvas id="fp_diag" class="ils" width="40" height="30"></canvas><button id="diagrun">&nbsp;</button></div>
+			<div class="fpl"><div>Diag:</div><canvas id="fp_diag" class="ils" width="40" height="30"></canvas></div>
+			<div class="fpl"><div>Perf:</div><span id="fp_perf"></span></div>
 		</div>
 		<div class="regs">
 			<div class="fpl fixed"><div>Reg0/1</div><span id="mcr_file0">----</span></div>
@@ -172,7 +201,8 @@
 			<div class="regs fixed" id="micro"></div>
 			<div class="regs fixed" id="listing"></div>
 		</div>
-		<div>
+		<div class="termcon">
+			<div><button id="vctrl">CTRL</button><span id="vbel">BEL</span></div>
 			<canvas id="term0" class="term" width="640" height="240" tabindex="0"></canvas>
 			<div>
 				<button id="cm_imp">Import</button>
