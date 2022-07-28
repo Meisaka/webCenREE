@@ -57,6 +57,13 @@ textarea {
 	padding: 2px 16px 2px 10px;
 	font-size: 20px;
 }
+input.conv-sel {
+	background: #aaaaaa;
+}
+input.conv-sel:focus {
+	border-color: #7af;
+	box-shadow: 0px 0px 3px 1px #eeeeee;
+}
 .conv-sel input[type=radio] {
 	margin-top: 6px;
 	width: 18px;

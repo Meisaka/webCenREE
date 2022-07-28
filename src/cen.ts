@@ -26,6 +26,8 @@ const btn_dtrun = document.getElementById('diagrun') as HTMLButtonElement;
 const fp_rf = document.getElementById('fp_r') as HTMLButtonElement;
 const fp_load = document.getElementById('fp_l') as HTMLButtonElement;
 const fp_select = document.getElementById('fp_s') as HTMLButtonElement;
+const fp_addr = document.getElementById('fp_addr') as HTMLSpanElement;
+const fp_level = document.getElementById('fp_level') as HTMLSpanElement;
 const fp_perf = document.getElementById('fp_perf') as HTMLSpanElement;
 const mcs_p = document.getElementById('mcs_p') as HTMLSpanElement;
 const mcs_s = document.getElementById('mcs_s') as HTMLSpanElement;
@@ -37,17 +39,6 @@ const mcr_bus = document.getElementById('mcr_bus') as HTMLSpanElement;
 const mcr_sys = document.getElementById('mcr_sys') as HTMLSpanElement;
 const mcr_addr = document.getElementById('mcr_addr') as HTMLSpanElement;
 const mcr_swap = document.getElementById('mcr_swap') as HTMLSpanElement;
-const fp_flags_con = document.getElementById('fp_flags') as HTMLSpanElement;
-const fp_flags = [
-	fp_flags_con.children[7] as HTMLElement,
-	fp_flags_con.children[6] as HTMLElement,
-	fp_flags_con.children[4] as HTMLElement,
-	fp_flags_con.children[5] as HTMLElement,
-	fp_flags_con.children[3] as HTMLElement,
-	fp_flags_con.children[2] as HTMLElement,
-	fp_flags_con.children[1] as HTMLElement,
-	fp_flags_con.children[0] as HTMLElement,
-];
 const fp_runhalt = [
 	(document.getElementById('fp_runstate') as HTMLElement).children[0],
 	(document.getElementById('fp_runstate') as HTMLElement).children[1],
@@ -82,15 +73,83 @@ const mcs_op_alu = document.getElementById('mcs_op_alu') as HTMLSpanElement;
 const mcs_op_bus = document.getElementById('mcs_op_bus') as HTMLSpanElement;
 const d_listing = document.getElementById('listing') as HTMLDivElement;
 const d_micro = document.getElementById('micro') as HTMLDivElement;
+const in_softcaps = document.getElementById('softcaps') as HTMLInputElement;
+const in_diagins = document.getElementById('diagins') as HTMLInputElement;
 const in_dbgcmd = document.getElementById('dbgcmd') as HTMLInputElement;
 const btn_cm_import = document.getElementById('cm_imp') as HTMLButtonElement;
-const btn_cm_importclip = document.getElementById('cm_impcb') as HTMLButtonElement;
 const btn_cm_clear = document.getElementById('cm_clear') as HTMLButtonElement;
 const txt_anno = document.getElementById('anno') as HTMLTextAreaElement;
 const cv_diag = document.getElementById('fp_diag') as HTMLCanvasElement;
 const cx_diag = cv_diag.getContext('2d') as CanvasRenderingContext2D;
 const btn_vctrl = document.getElementById('vctrl') as HTMLButtonElement;
 const span_vbel = document.getElementById('vbel') as HTMLSpanElement;
+const dskui = [{
+	sta: document.getElementById('dsk0_sta') as HTMLSpanElement,
+	wp: document.getElementById('dsk0wp') as HTMLInputElement
+},{
+	sta: document.getElementById('dsk1_sta') as HTMLSpanElement,
+	wp: document.getElementById('dsk1wp') as HTMLInputElement
+}];
+interface LoadResponse {
+	kind: string,
+	address: number,
+}
+const win_load = (function() {
+	let accept_fn:null | ((v:LoadResponse)=>void) = null;
+	let cancel_fn:null | (()=>void) = null;
+	function do_cancel() {
+		let f = cancel_fn;
+		accept_fn = null;
+		cancel_fn = null;
+		if (f != null) {
+			f();
+		}
+	}
+	const o = {
+		con: document.getElementById('wload') as HTMLDivElement,
+		file_name: document.getElementById('wload_fn') as HTMLSpanElement,
+		file_type: document.getElementById('wload_ft') as HTMLSpanElement,
+		file_size: document.getElementById('wload_fs') as HTMLSpanElement,
+		load_addr: document.getElementById('wload_addr') as HTMLInputElement,
+		load_opt: [
+			document.getElementById('wload_lt0') as HTMLInputElement,
+			document.getElementById('wload_lt1') as HTMLInputElement
+		],
+		show() {
+			this.con.style.display = '';
+			do_cancel();
+			return new Promise<LoadResponse>(function(resolve, reject) {
+				accept_fn = resolve;
+				cancel_fn = reject;
+			});
+		},
+		hide() {
+			this.con.style.display = 'none';
+		}
+	};
+	(document.getElementById('wload_h') as HTMLButtonElement).addEventListener('click', function(ev) {
+		o.hide();
+		let f = accept_fn;
+		accept_fn = null;
+		cancel_fn = null;
+		if (f != null) {
+			let address = parseInt(o.load_addr.value, 16);
+			if (isNaN(address)) {
+				address = 0x100;
+			}
+			let r = {address, kind:''};
+			if (o.load_opt[0].checked) {
+				r.kind = 'raw';
+			}
+			f(r);
+		}
+	});
+	(document.getElementById('wload_c') as HTMLButtonElement).addEventListener('click', function(ev) {
+		o.hide();
+		do_cancel();
+	});
+	return o;
+})();
 const cv_term0 = document.getElementById('term0') as HTMLCanvasElement;
 const cx_term0 = cv_term0.getContext('2d') as CanvasRenderingContext2D;
 const cv_map = document.getElementById('fp_flagsc') as HTMLCanvasElement;
@@ -124,13 +183,22 @@ let dis_vpc_end = 0x200;
 let run_accu = 0;
 let run_accutime = 0;
 let run_stop:null | (()=>void);
+function do_run_stop():void {
+	if (run_stop) {
+		run_stop();
+		run_stop = null;
+	}
+}
 function run_control(run:boolean):void {
 	if (!run && (run_ctl !== 0)) {
 		clearInterval(run_ctl);
 		fp_ext[1].classList.remove('a');
 		run_ctl = 0;
 		run_step = 0;
-		if (!run_busy && run_stop) {run_stop(); run_stop = null; }
+		if (!run_busy) {
+			do_run_stop();
+			mcsim.showstate(true);
+		}
 		return;
 	}
 	if (run && (run_ctl == 0)) {
@@ -144,7 +212,7 @@ function run_control(run:boolean):void {
 				for (let i=0;i<hsr;i++) {
 					mcsim.hsstep();
 					if (run_ctl == 0) {
-						if (run_stop) {run_stop(); run_stop = null; }
+						do_run_stop();
 						break;
 					}
 				}
@@ -152,7 +220,7 @@ function run_control(run:boolean):void {
 				for (let i=0;i<run_rate;i++) {
 					mcsim.step(i == (run_rate - 1));
 					if (run_ctl == 0) {
-						if (run_stop) {run_stop(); run_stop = null; }
+						do_run_stop();
 						break;
 					}
 				}
@@ -702,41 +770,6 @@ const disk_images:{main:ArrayBuffer|null, main_view:DataView|null, fixed:ArrayBu
 	fixed: null,
 	fixed_view: null,
 };
-this.document.body.addEventListener('dragstart', function(ev) {
-	const dt = ev.dataTransfer;
-	if(dt) {
-		dt.dropEffect = 'copy';
-	}
-	ev.preventDefault();
-});
-this.document.body.addEventListener('dragover', function(ev) {
-	const dt = ev.dataTransfer;
-	if(dt) {
-		dt.dropEffect = 'copy';
-	}
-	ev.preventDefault();
-})
-this.document.body.addEventListener('drop', function(ev) {
-	const dt = ev.dataTransfer;
-	do {
-		if (dt == null) break;
-		if (dt.files.length < 1) break;
-		if (dt.files[0].name.match(/\.[iI][mM][gG]$/) == null) break;
-		dt.files[0].arrayBuffer().then(function(buf) {
-			if (disk_images.fixed == null) {
-				disk_images.fixed = buf;
-				disk_images.fixed_view = new DataView(buf);
-				console.log('loaded disk image as fixed');
-			} else {
-				disk_images.main = buf;
-				disk_images.main_view = new DataView(buf);
-				console.log('loaded disk image as removable');
-			}
-		});
-	} while(false);
-	//console.log('drop!', ev.dataTransfer);
-	ev.preventDefault();
-})
 
 const vt_width = 8;
 const vt_height = 10;
@@ -1030,8 +1063,11 @@ cv_term0.addEventListener('keydown', function(ev) {
 		vcontrol = false;
 		btn_vctrl.classList.remove('active');
 	} else if (ev.key.length == 1) {
-		//cx_crt0.receive(ev.key.toUpperCase().charCodeAt(0));
-		cx_crt0.receive(ev.key.charCodeAt(0));
+		if (in_softcaps.checked) {
+			cx_crt0.receive(ev.key.toUpperCase().charCodeAt(0));
+		} else {
+			cx_crt0.receive(ev.key.charCodeAt(0));
+		}
 	} else switch(ev.key) {
 	case 'Backspace':
 		cx_crt0.receive(8);
@@ -1346,7 +1382,8 @@ function seqencer_selftest() {
 	test.step(true, 3, 1, 14, 0, false);
 	seqencer_display(test);
 }
-seqencer_selftest();
+// @ts-ignore
+window.seqencer_selftest = seqencer_selftest;
 
 interface BPLDev {
 	dev: MemAccessR,
@@ -1361,6 +1398,15 @@ class Backplane implements MemAccessR, MemAccessW {
 	}
 	configio(id:number, m:IOAccess) {
 		this.decode_io[id] = m;
+	}
+	clearmemory(base:number, sz:number = 256) {
+		let aval = base & -256;
+		let atarget = aval + sz;
+		while (aval < atarget) {
+			let aindex = aval >> 8;
+			delete this.decode_hi[aindex];
+			aval += 256;
+		}
 	}
 	configmemory(base:number, m:MemAccessR | MemAccessW & MemAccessR, sz:number = 256) {
 		let aval = base & -256;
@@ -1572,6 +1618,7 @@ function showstate(in_halt:boolean) {
 	mcr_res.innerText = hex(result, 2);
 	mcr_swap.innerText = hex(swap, 2);
 	mcr_level.innerText = hex(level, 1);
+	fp_level.innerText = `${hex(level, 1)} [${bin(level,4)}]`;
 	mcr_rfir.innerText = hex(rir);
 	mcr_rfdr.innerText = hex(rdr);
 	mcr_pta.innerText = hex(pta, 1);
@@ -1594,21 +1641,14 @@ function showstate(in_halt:boolean) {
 		fp_ext[2].classList.remove('a');
 	}
 	cx_map.clearRect(0, 0, cv_map.width, cv_map.height);
-	cx_map.strokeStyle = '#bb3838';
+	const baseline = 22;
 	cx_map.fillStyle = '#ff3232';
 	if ((sysctl & 64) != 0) {
-		fp_flags[7].classList.add('a');
-	} else {
-		fp_flags[7].classList.remove('a');
+		cx_map.fillRect(0, 0, 48, 30);
 	}
-	for(let i = 0; i < 3; i++) {
-		if ((pta & (1<<i)) != 0) {
-			fp_flags[4+i].classList.add('a');
-		} else {
-			fp_flags[4+i].classList.remove('a');
-		}
-		
-	}
+	cx_map.fillStyle = '#aeaeae';
+	cx_map.fillText('ABT', 8, baseline);
+
 	let hrr2 = run_rate >> 1;
 	if (in_halt) {
 		hrr2 = 0;
@@ -1633,38 +1673,19 @@ function showstate(in_halt:boolean) {
 			} else {
 				cx_map.fillStyle = '#400c0c';
 			}
-			cx_map.fillRect(x, 0, 28, 30);
+			cx_map.fillRect(x, 0, 27, 30);
 		}
 		cx_map.fillStyle = '#aeaeae';
-		cx_map.fillText(t, x + 10, 22);
+		cx_map.fillText(t, x + 7, baseline);
 	}
-	drawfill(pta3a, 40, '3');
-	drawfill(pta2a, 70, '2');
-	drawfill(pta1a, 100, '1');
-	drawfill(ccr_fa, 130, 'F');
-	drawfill(ccr_la, 160, 'L');
-	drawfill(ccr_ma, 190, 'M');
-	drawfill(ccr_va, 220, 'V');
-	if (ccr_v != 0) {
-		fp_flags[0].classList.add('a');
-	} else {
-		fp_flags[0].classList.remove('a');
-	}
-	if (ccr_m != 0) {
-		fp_flags[1].classList.add('a');
-	} else {
-		fp_flags[1].classList.remove('a');
-	}
-	if (ccr_f != 0) {
-		fp_flags[2].classList.add('a');
-	} else {
-		fp_flags[2].classList.remove('a');
-	}
-	if (ccr_l != 0) {
-		fp_flags[3].classList.add('a');
-	} else {
-		fp_flags[3].classList.remove('a');
-	}
+	drawfill(pta3a, 49, '3');
+	drawfill(pta2a, 77, '2');
+	drawfill(pta1a, 105, '1');
+	drawfill(ccr_fa, 133, 'F');
+	drawfill(ccr_la, 161, 'L');
+	drawfill(ccr_ma, 189, 'M');
+	drawfill(ccr_va, 217, 'V');
+
 	ccr_va = 0;
 	ccr_fa = 0;
 	ccr_la = 0;
@@ -1695,6 +1716,7 @@ function showstate(in_halt:boolean) {
 	const mpage = pagetb[mpindex];
 	const mpaddress = ((mpage & 127) << 11) | (memaddr & 0x7ff);
 	mcr_addr.innerText = hex(workaddr, 4) + ' ' + hex(memaddr, 4) + ' ' + ((mpage & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(physaddr, 5);
+	fp_addr.innerText = `${hex(memaddr, 4)} [${bin((memaddr>>12) & 15,4)} ${bin((memaddr>>8) & 15,4)} ${bin((memaddr>>4) & 15,4)} ${bin(memaddr & 15,4)}]`
 }
 
 ///////////////////////////////// Microcode stepping ////////////////////////////////////
@@ -2486,7 +2508,7 @@ function step(debug_output:boolean = false) {
 	rindex = (rindex | rir0); // I elected to not invert it, since the debug dump would have anyways
 
 	if (debug_output) {
-		const k9_fn = 'K9=' + (k9_en ? 'nop' : [
+		const k9_fn = (k9_en ? 'nop' : [
 			'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
 			'(1)RIR.~0|4',
 			'(2)RIR.0',
@@ -2496,35 +2518,38 @@ function step(debug_output:boolean = false) {
 			'(6)MemFault', // Memory parity error, must be enabled via BusCtl bit 6
 			'(7)F13 most' // this one needs a better name (checks multiple interrupt lines)
 			][k9_sel]);
-		const d_branch = ['','','',''];
+		let d_branch0 = '         ';
+		let d_branch1 = '         ';
+		let d_branch2 = '          ';
+		let d_branch3 = '          ';
 		if (seq_branch == 0) {
 			switch(j13_sel) {
 			case 0:
-				if ((seq_d0 | 1) != seq_d0) d_branch[0] = '|1 IF ALUF.S';
-				if ((seq_d0 | 2) != seq_d0) d_branch[1] = '|2 IF ALUF.Z';
+				if ((seq_d0 | 1) != seq_d0) d_branch0 = '|1:ALUF.S';
+				if ((seq_d0 | 2) != seq_d0) d_branch1 = '|2:ALUF.Z';
 				break;
 			case 1:
-				if ((seq_d0 | 1) != seq_d0) d_branch[0] = '|1 IF ALUF.H';
-				if ((seq_d0 | 2) != seq_d0) d_branch[1] = '|2 IF ALUF.V';
+				if ((seq_d0 | 1) != seq_d0) d_branch0 = '|1:ALUF.H';
+				if ((seq_d0 | 2) != seq_d0) d_branch1 = '|2:ALUF.V';
 				break;
 			case 2:
-				if ((seq_d0 | 1) != seq_d0) d_branch[0] = '|1 IF ~pbit';
-				if ((seq_d0 | 2) != seq_d0) d_branch[1] = '|2 IF ~MMIO';
+				if ((seq_d0 | 1) != seq_d0) d_branch0 = '|1:~pbit ';
+				if ((seq_d0 | 2) != seq_d0) d_branch1 = '|2:~MMIO ';
 				break;
 			case 3: break; // nop
 			}
 			switch(k13_sel) {
 			case 0:
-				if ((seq_d0 | 4) != seq_d0) d_branch[2] = '|4 IF INT_EN';
-				if ((seq_d0 | 8) != seq_d0) d_branch[3] = '|8 IF CCR.L';
+				if ((seq_d0 | 4) != seq_d0) d_branch2 = '|4:INT_ENA';
+				if ((seq_d0 | 8) != seq_d0) d_branch3 = '|8:CCR.L  ';
 				break;
 			case 1:
-				if ((seq_d0 | 4) != seq_d0) d_branch[2] = '|4 IF DMA_INT';
-				if ((seq_d0 | 8) != seq_d0) d_branch[3] = '|8 IF INT_REQ';
+				if ((seq_d0 | 4) != seq_d0) d_branch2 = '|4:DMA_INT';
+				if ((seq_d0 | 8) != seq_d0) d_branch3 = '|8:INT_REQ';
 				break;
 			case 2:
-				if ((seq_d0 | 4) != seq_d0) d_branch[2] = '|4 IF (!)MEM_INT';
-				if ((seq_d0 | 8) != seq_d0) d_branch[3] = '|8 IF DMA_REQ';
+				if ((seq_d0 | 4) != seq_d0) d_branch2 = '|4:MEM_INT';
+				if ((seq_d0 | 8) != seq_d0) d_branch3 = '|8:DMA_REQ';
 				break;
 			case 3: break; // nop
 			}
@@ -2533,13 +2558,13 @@ function step(debug_output:boolean = false) {
 		' H6:' + (alul.is_right ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
 		const lh = alul.funcstr().padEnd(30); // speculative
 		const lseq = `S2:${FN_SEQ_SN[seq2_s]} S1:${FN_SEQ_SN[seq1_s]} S0:${FN_SEQ_SN[seq0_s]} ${FN_SEQ_FE[seq_fc]}`;
-		const l34 = `[${hex(seqjmp,3)}][${d_branch.join(',')}]`;
+		const l34 = `[${hex(seqjmp,3)}][${d_branch0}${d_branch1}${d_branch2}${d_branch3}]`;
 		const d_ccr =
 			'cV=' + ['. ','Z ','R.V','LZ'][j12_sel] +
 			' cM=' + ['. ','S ','R.M','S '][j12_sel] +
 			' cF=' + (j11_en ? '0' : ['Res.5','1','.','0','Res.5','1','.','1'][j11_sel | (alu_flag & 0x4)]).padEnd(4) +
 			' cL=' + (j10_en ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][j10_sel]).padEnd(8);
-		mcs_op.innerText = `${hex(pc)}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)}: ${lseq} ${k9_fn} ${l34}`;
+		mcs_op.innerText = `${hex(pc,3)}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)}: ${lseq} K9:${k9_fn.padEnd(14)} ${l34}`;
 		mcs_op_alu.innerText = `${lh} (${hex(data_f,2)}) ${d_f6h6} ${d_ccr}`;
 	}
 
@@ -2870,7 +2895,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 	command = -1;
 	interrupt_en = false;
 	interrupt_pend = false;
-	write_prot = false;
 	is_interrupt(): boolean {
 		this.tickbusy();
 		return false;
@@ -2879,7 +2903,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 		return 2; // not used, but seems like a good number :)
 	}
 	acknowledge():boolean {
-		console.log('DSK2:IACK');
 		let v = this.interrupt_pend;
 		this.interrupt_pend = false;
 		return v;
@@ -2915,7 +2938,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 					this.seeking = false;
 					this.seek_done = true;
 					if (this.interrupt_en) mcsim.dma_int(true);
-					console.log('DSK2:done:rtz');
 					break;
 				default:
 					if (this.command != -1) {
@@ -2957,7 +2979,7 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 		case 5: // stat lo / wtpr wten oncyl ready | seekcom3..0
 			if (this.sel_unit == 1 || this.sel_unit == 0) {
 				this.tickbusy();
-				v = (this.write_prot ? 0x80 : 0) /* wp */ |
+				v = ((dskui[this.sel_unit].wp.checked !== false) ? 0x80 : 0) /* wp */ |
 				((this.wpmask & (1 << this.sel_unit)) ? 0x40 : 0) |
 				(this.seeking ? 0 : 0x20) /* oncyl */ |
 				(disk_images.main_view != null ? 0x10 : 0) /* ready */ |
@@ -3055,9 +3077,9 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 			case 1:
 				this.busy_time = 1;
 				this.sect_remain = 400;
-				if ((this.wpmask & (1 << this.sel_unit)) != 0) {
+				if (((this.wpmask & (1 << this.sel_unit)) != 0) && !(dskui[this.sel_unit]?.wp?.checked !== false)) {
 					this.busy_time = 0;
-					console.log('DSK2:do_write:', hex(u.sel_address, 4));
+					//console.log('DSK2:do_write:', hex(u.sel_address, 4));
 					this.do_dma_write();
 				} else {
 					console.log('DSK2:wp_write:', hex(u.sel_address, 4));
@@ -3069,7 +3091,7 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 				this.seeking = true;
 				break;
 			case 3:
-				console.log('DSK2:rtz');
+				//console.log('DSK2:rtz');
 				this.busy_time = 200;
 				this.seeking = true;
 				break;
@@ -3280,11 +3302,14 @@ abstract class MemBase implements MemAccessR {
 	readbyte(address:number):number {
 		return this.view.getUint8(address);
 	}
+	writebyte(address: number, value: number):void {
+		this.view.setUint8(address, value & 255);
+	}
 	loadbin(v:Uint8Array, addrfn?:AddressTransform) {
 		const l = v.length;
 		if (addrfn == null) {
 			for (let a = 0; a < l; a++) {
-				this.view.setUint8(a, v[a]);
+				this.writebyte(a, v[a]);
 			}
 		} else {
 			let xm = addrfn.invert ? (l - 1) : 0;
@@ -3299,12 +3324,12 @@ abstract class MemBase implements MemAccessR {
 				};
 				for (let a = 0; a < l; a++) {
 					let txa = aremapfn(a ^ xm);
-					this.view.setUint8(a, v[txa]);
+					this.writebyte(a, v[txa]);
 				}
 			} else {
 				for (let a = 0; a < l; a++) {
 					let txa = a ^ xm;
-					this.view.setUint8(a, v[txa]);
+					this.writebyte(a, v[txa]);
 				}
 			}
 			
@@ -3317,7 +3342,7 @@ abstract class MemBase implements MemAccessR {
 		msh.forEach(value=>{
 			if (value !== '') {
 				let v = parseInt(value, 16);
-				this.view.setUint8(vpc, v & 0xff);
+				this.writebyte(vpc, v & 0xff);
 				vpc++;
 			}
 		});
@@ -3326,9 +3351,6 @@ abstract class MemBase implements MemAccessR {
 abstract class RamBase extends MemBase implements MemAccessR, MemAccessW {
 	is_io = false;
 	is_write = true;
-	writebyte(address: number, value: number): void {
-		this.view.setUint8(address, value & 255);
-	}
 }
 class SysMem extends RamBase {
 	pram = new ArrayBuffer(0x800);
@@ -4340,22 +4362,27 @@ const mem = [
 ];
 bpl.configmemory(0x3fc00, new ROM512({
 	bin:bpl_rom, addr:{invert:true, remap:[0,1,2,3,4,8,5,6,7]},
-	//hex:'90 C0 00 5F 90 88 00 5E 71 88 49' // force ins test
 }), 512);
 bpl.configmemory(0x3f200, mmio_mux, 256);
 cx_crt0.mux = mmio_mux.muxports[0];
 bpl.configio(1, dsk2_0);
 bpl.configio(0, mmio_mux);
 bpl.configmemory(0x3f100, new MMIOMulti(), 256);
-for(let q = 0; q < 8; q++) {
-	//if (q == 2) continue;
-	bpl.configmemory(q * 0x4000, mem[q], 0x4000);
+function setupmemory() {
+	for(let q = 0; q < 8; q++) {
+		bpl.configmemory(q * 0x4000, mem[q], 0x4000);
+	}
+	if (in_diagins.checked) {
+		bpl.clearmemory(0x8000, 0x4000);
+		bpl.configmemory(0x8000, diag1, 2048);
+		bpl.configmemory(0x8800, diag2, 2048);
+		bpl.configmemory(0x9000, diag3, 2048);
+		bpl.configmemory(0x9800, diag4, 2048);
+		bpl.configmemory(0xb800, new RAM2k(), 2048);
+	}
 }
-// bpl.configmemory(0x8000, diag1, 2048);
-// bpl.configmemory(0x8800, diag2, 2048);
-// bpl.configmemory(0x9000, diag3, 2048);
-// bpl.configmemory(0x9800, diag4, 2048);
-//bpl.configmemory(0xb800, new RAM2k(), 2048);
+setupmemory();
+
 const cpu = new CPU6(bpl);
 
 mem[0].loadhex(program_rotr, 0x100);
@@ -4384,6 +4411,9 @@ in_dbgcmd.addEventListener('input', function(ev) {
 in_dbgcmd.addEventListener('keypress', function(ev) {
 	if (ev.code == 'Enter' || ev.code == 'NumpadEnter') {
 	}
+});
+in_diagins.addEventListener('change', function(ev) {
+	setupmemory();
 });
 // sense_switch
 function update_sense() {
@@ -4567,6 +4597,78 @@ if (TALL_CRT) {
 } else {
 	cv_term0.classList.remove('tall');
 }
+
+document.body.addEventListener('dragstart', function(ev) {
+	const dt = ev.dataTransfer;
+	if(dt) {
+		dt.dropEffect = 'copy';
+	}
+	ev.preventDefault();
+});
+document.body.addEventListener('dragover', function(ev) {
+	const dt = ev.dataTransfer;
+	if(!dt) {
+		ev.preventDefault();
+		return;
+	}
+	if(dt && dt.items.length > 0 && dt.items[0].kind == 'file') {
+		dt.dropEffect = 'copy';
+	} else {
+		dt.dropEffect = 'none';
+	}
+	ev.preventDefault();
+});
+document.body.addEventListener('drop', function(ev) {
+	const dt = ev.dataTransfer;
+	if (dt == null || dt.files.length < 1) {
+		ev.preventDefault();
+		return;
+	}
+	let file = dt.files[0];
+	let accept = false;
+	if (file.name.match(/\.img$/i) != null) {
+		file.arrayBuffer().then(function(buf) {
+			if (disk_images.fixed == null) {
+				disk_images.fixed = buf;
+				disk_images.fixed_view = new DataView(buf);
+				dskui[1].sta.innerText = file.name;
+				console.log('loaded disk image as fixed');
+			} else {
+				disk_images.main = buf;
+				disk_images.main_view = new DataView(buf);
+				dskui[0].sta.innerText = file.name;
+				console.log('loaded disk image as removable');
+			}
+		});
+		accept = true;
+	}
+	if (!accept && (
+		file.name.match(/\.bin$/i) != null ||
+		file.type === '' ||
+		file.type == 'application/octet-stream'
+	)) {
+		win_load.file_name.innerText = file.name;
+		win_load.file_type.innerText = file.type;
+		win_load.file_size.innerText = `${file.size} (0x${hex(file.size,1)}) bytes`;
+		win_load.show().then(function(res) {
+			console.log('load file', file.name, 'at', res.address, 'as', res.kind);
+			const address = res.address;
+			const kind = res.kind;
+			file.arrayBuffer().then(function(b) {
+				let bv = new DataView(b);
+				const l = b.byteLength;
+				for(let ofs = 0; ofs < l; ofs++) {
+					bpl.writebyte((address + ofs) & 0x3ffff, bv.getUint8(ofs));
+				}
+			});
+		}, function() {console.log('cancel file', file.name);});
+		accept = true;
+	}
+	if (!accept) {
+		console.log('unknown drop!', file.name, file.type);
+	}
+	ev.preventDefault();
+});
 
 if (txt_anno.value.length > 0) {
 	annotation_import(txt_anno.value);
