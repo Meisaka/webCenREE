@@ -6,6 +6,19 @@
 <link rel="stylesheet" href="main.css">
 <script src="js/cen.js"></script>
 <style>
+.mcl > div {
+	display: flex;
+}
+.mcl > div > div {
+	border: solid 1px #000;
+	display: inline-block;
+	padding: 0px 4px 0px 4px;
+}
+.mcl > div > div:nth-child(1) {
+	width: 6em;
+	text-align: right;
+	padding: 2px 4px 2px 4px;
+}
 .fpl {
 	display: flex;
 }
@@ -85,7 +98,9 @@
 }
 .term.tall {
 	height: 480px;
-	width: 640px;
+}
+.term.wide {
+	width: 1280px;
 }
 .term:focus {
 	border-color: #7af;
@@ -102,7 +117,8 @@
 			<span class="conv-sel" style="display: none"><input type="radio" name="conv" id="conv_uew" value="uew"/><label for="conv_uew">Centurion RE Wiki</label></span>
 			<span class="conv-sel"><input type="checkbox" name="conv_hex" id="conv_hex"/><label for="conv_hex">Hex Prefix in Listing</label></span>
 			<div>Terminal</div>
-			<span class="conv-sel"><input type="checkbox" name="crtsize" id="crtsize"/><label for="crtsize">Tall CRT</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crtsize"/>Tall CRT</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crtwide"/>Wide CRT</label></span>
 		</div>
 	</div>
 	<div class="popwin" id="wload" style="display:none;top:100px;right:45%;padding:10px 20px 20px 20px;float:right">
@@ -124,6 +140,11 @@
 			</div>
 		</div>
 	</div>
+	<div class="popwin" id="mclisting" style="display:none;top:100px;right:0%;float:right">
+		<div style="overflow-y: scroll;height:700px;width:1200px;margin:10px;border:2px solid;">
+			<div class="regs fixed mcl" id="micro"></div>
+		</div>
+	</div>
 	<div style="display:flex">
 		<button id="b_reset">Reset</button>
 		<button id="b_step">Step</button>
@@ -134,9 +155,10 @@
 		<button id="b_r4">1k</button>
 		<button id="b_r5">10k</button>
 		<button id="b_r6">50k</button>
-		<button id="b_micro">&#x03bc;Code</button>
 		<button id="b_mstep">&#x03bc;Step</button>
 		<div style="flex-grow: 1"></div>
+		<button id="b_micro">&#x03bc;Code</button>
+		<button id="b_local">Local</button>
 		<button id="b_settings">Settings</button>
 	</div>
 	<div class="prow">
@@ -241,11 +263,14 @@
 	</div>
 	<div style="display: flex;">
 		<div style="overflow-y: scroll;height: 700px;margin: 10px;border: 2px solid;width: 75%;">
-			<div class="regs fixed" id="micro"></div>
 			<div class="regs fixed" id="listing"></div>
 		</div>
 		<div class="termcon">
-			<div><button id="vctrl">CTRL</button><span id="vbel">BEL</span><input type="checkbox" name="softcaps" id="softcaps" checked/><label for="softcaps">Caps Lock</label></div>
+			<div>
+				<button id="vctrl">CTRL</button><span id="vbel">BEL</span><label><input type="checkbox" id="softcaps" checked/>Caps Lock</label>
+				<button id="vcf1">F1</button><button id="vcf2">F2</button><button id="vcf3">F3</button><button id="vcf4">F4</button>
+				<button id="vcf5">F5</button><button id="vcf6">F6</button><button id="vcf7">F7</button><button id="vcf8">F8</button>
+			</div>
 			<canvas id="term0" class="term" width="640" height="240" tabindex="0"></canvas>
 			<div>
 				<button id="cm_imp">Import</button>

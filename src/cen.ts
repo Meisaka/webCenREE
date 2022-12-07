@@ -11,6 +11,7 @@ const run_rate4 = document.getElementById('b_r4') as HTMLButtonElement;
 const run_rate5 = document.getElementById('b_r5') as HTMLButtonElement;
 const run_rate6 = document.getElementById('b_r6') as HTMLButtonElement;
 const micro_button = document.getElementById('b_micro') as HTMLButtonElement;
+const win_micro = document.getElementById('mclisting') as HTMLDivElement;
 const microstep_button = document.getElementById('b_mstep') as HTMLButtonElement;
 const btn_ss1 = document.getElementById('ss1') as HTMLButtonElement;
 const btn_ss2 = document.getElementById('ss2') as HTMLButtonElement;
@@ -83,6 +84,16 @@ const cv_diag = document.getElementById('fp_diag') as HTMLCanvasElement;
 const cx_diag = cv_diag.getContext('2d') as CanvasRenderingContext2D;
 const btn_vctrl = document.getElementById('vctrl') as HTMLButtonElement;
 const span_vbel = document.getElementById('vbel') as HTMLSpanElement;
+const vt_fkeys = [
+	document.getElementById('vcf1') as HTMLButtonElement,
+	document.getElementById('vcf2') as HTMLButtonElement,
+	document.getElementById('vcf3') as HTMLButtonElement,
+	document.getElementById('vcf4') as HTMLButtonElement,
+	document.getElementById('vcf5') as HTMLButtonElement,
+	document.getElementById('vcf6') as HTMLButtonElement,
+	document.getElementById('vcf7') as HTMLButtonElement,
+	document.getElementById('vcf8') as HTMLButtonElement
+];
 const dskui = [{
 	sta: document.getElementById('dsk0_sta') as HTMLSpanElement,
 	wp: document.getElementById('dsk0wp') as HTMLInputElement
@@ -90,6 +101,14 @@ const dskui = [{
 	sta: document.getElementById('dsk1_sta') as HTMLSpanElement,
 	wp: document.getElementById('dsk1wp') as HTMLInputElement
 }];
+function style_if(elem:Element, domclass:string, cond: boolean) {
+	if (cond) {
+		elem.classList.add(domclass);
+	} else {
+		elem.classList.remove(domclass);
+	}
+}
+
 interface LoadResponse {
 	kind: string,
 	address: number,
@@ -162,19 +181,9 @@ cx_term0.strokeStyle = '#6ac';
 cx_term0.font = '12px monospace';
 cx_map.font = '20px monospace';
 
-const listmax = 100;
-const listing:HTMLDivElement[] = [];
-(function(){
-	for (let i = 0; i < listmax; i++) {
-		let listnode = document.createElement('div');
-		listing.push(listnode);
-		d_listing.appendChild(listnode);
-	}
-})();
-
 let run_ctl = 0;
 let run_rate = 1;
-let run_step = 0;
+let run_step:boolean = false;
 let run_busy = false;
 let dis_after = false;
 let run_follow = false;
@@ -182,6 +191,7 @@ let dis_vpc = 0x100;
 let dis_vpc_end = 0x200;
 let run_accu = 0;
 let run_accutime = 0;
+let run_once = false;
 let run_stop:null | (()=>void);
 function do_run_stop():void {
 	if (run_stop) {
@@ -194,14 +204,16 @@ function run_control(run:boolean):void {
 		clearInterval(run_ctl);
 		fp_ext[1].classList.remove('a');
 		run_ctl = 0;
-		run_step = 0;
+		run_step = false;
 		if (!run_busy) {
 			do_run_stop();
+			mcsim.step(true);
 			mcsim.showstate(true);
 		}
 		return;
 	}
 	if (run && (run_ctl == 0)) {
+		run_once = true;
 		fp_ext[1].classList.add('a');
 		run_ctl = setInterval(function(){
 			run_busy = true;
@@ -229,6 +241,7 @@ function run_control(run:boolean):void {
 			run_accutime += runtime;
 			run_accu += run_rate;
 			run_busy = false;
+			mcsim.step(run_ctl == 0);
 			mcsim.showstate(run_ctl == 0);
 			if (dis_after) {
 				show_disasm();
@@ -764,6 +777,8 @@ NTU1NTU8VFRUVFSLCTM1NTU1NTU1LGBgYGBgiwk0NjY2NjY2Nj5iYmJiYmuLNDY2NjY2NjYmYGBg
 YGCLCTQ2NjY2NjY2MGJiYmJiixM0NjY2NjY2Ng==`)
 };
 
+const mclisting:MicroListing[] = [];
+
 const disk_images:{main:ArrayBuffer|null, main_view:DataView|null, fixed:ArrayBuffer|null, fixed_view:DataView|null} = {
 	main: null,
 	main_view: null,
@@ -1043,13 +1058,23 @@ setInterval(function(){ cx_crt0.update_blink(); }, 500);
 let vcontrol = false;
 btn_vctrl.addEventListener('click', function(ev) {
 	vcontrol = !vcontrol;
-	if (vcontrol) {
-		this.classList.add('active');
-	} else {
-		this.classList.remove('active');
-	}
+	style_if(this, 'active', vcontrol);
 	cv_term0.focus();
 });
+function send_fn(a:string) {
+	cx_crt0.receive(2);
+	cx_crt0.receive(a.charCodeAt(0));
+	cx_crt0.receive(13);
+	cv_term0.focus();
+}
+vt_fkeys[0].addEventListener('click', function(ev) { send_fn('1'); });
+vt_fkeys[1].addEventListener('click', function(ev) { send_fn('2'); });
+vt_fkeys[2].addEventListener('click', function(ev) { send_fn('3'); });
+vt_fkeys[3].addEventListener('click', function(ev) { send_fn('4'); });
+vt_fkeys[4].addEventListener('click', function(ev) { send_fn('5'); });
+vt_fkeys[5].addEventListener('click', function(ev) { send_fn('6'); });
+vt_fkeys[6].addEventListener('click', function(ev) { send_fn('7'); });
+vt_fkeys[7].addEventListener('click', function(ev) { send_fn('8'); });
 cv_term0.addEventListener('keypress', function(ev) {
 	ev.preventDefault();
 });
@@ -1271,7 +1296,14 @@ class ALU {
 		const dst = ALU_D[dsti];
 		const ia = this.sel_a&15;
 		const ib = this.sel_b&15;
-		let r = `(sfd:${srci}${fni}${dsti})${dst}${fn.ivr?'~':' '}${ALU_RN[src[0]]}${ALU_FN[fn.on]}${fn.ivs?'~':' '}${ALU_RN[src[1]]}`;
+		let r = `SFD:${srci}${fni}${dsti} ${dst}${fn.ivr?'~':' '}${ALU_RN[src[0]]}${ALU_FN[fn.on]}${fn.ivs?'~':' '}${ALU_RN[src[1]]}`;
+		return r.replace(/[ABb]/g,ss=>{if(ss=='b')return'B';return ss=='A'? `[${hex(ia,1)}]`:`[${hex(ib,1)}]`;});
+	}
+	static trace_str(srci:number,fni:number,dsti:number,ia:number,ib:number) {
+		const src = ALU_S[srci];
+		const fn = ALU_F[fni];
+		const dst = ALU_D[dsti];
+		let r = `SFD:${srci}${fni}${dsti} ${dst}${fn.ivr?'~':' '}${ALU_RN[src[0]]}${ALU_FN[fn.on]}${fn.ivs?'~':' '}${ALU_RN[src[1]]}`;
 		return r.replace(/[ABb]/g,ss=>{if(ss=='b')return'B';return ss=='A'? `[${hex(ia,1)}]`:`[${hex(ib,1)}]`;});
 	}
 }
@@ -1282,15 +1314,13 @@ const FN_E6 = [
 const FN_SEQ_SN = ['uPC','AHR','STK','DIR'];
 const FN_SEQ_FE = ['POP','---','PSH','---']; // FE:0 | (PUSH:1/POP:0) << 1
 
-function mcdump() {
-	// TODO rewrite
-}
 class Sequencer {
 	p:number = 0;
 	h:number = 0;
 	sf:[number,number,number,number] = [0,0,0,0];
 	sp:number = 0;
 	output:number = 0;
+	next:number = 0; // incrementer output to pc
 	reset() {
 		this.p = 0;
 		this.h = 0;
@@ -1300,9 +1330,9 @@ class Sequencer {
 		this.sf[3] = 0;
 		this.sp = 0;
 		this.output = 0;
+		this.next = 0;
 	}
-	step(cin:boolean, sel_s:number, fc:number, d:number, or:number, zero:boolean):boolean {
-		let c = false;
+	resolve(cin:boolean, sel_s:number, d:number, or:number, zero:boolean):boolean {
 		let out = 0;
 		switch(sel_s & 3) {
 		case 0: out = this.p; break;
@@ -1311,19 +1341,27 @@ class Sequencer {
 		case 3: out = d; break;
 		}
 		out = zero ? 0 : (out | or) & 15;
-		if (fc == 0) this.sp = (this.sp + 1) & 3;
-		if (fc == 2) this.sp = (this.sp - 1) & 3;
 		this.output = out;
 		if (cin) {
-			out = out + 1;
-			if (out > 15) {
-				out = 0;
-				c = true;
+			if (out >= 15) {
+				this.next = 0;
+				return true;
+			} else {
+				this.next = out + 1;
+				return false;
 			}
 		}
-		if (fc == 2) this.sf[this.sp] = this.p;
-		this.p = out;
-		return c;
+		this.next = out;
+		return false;
+	}
+	commit(fc:number):void {
+		if (fc == 0) {
+			this.sp = (this.sp + 1) & 3;
+		} else if (fc == 2) {
+			this.sp = (this.sp - 1) & 3;
+			this.sf[this.sp] = this.p;
+		}
+		this.p = this.next;
 	}
 }
 function seqencer_selftest() {
@@ -1343,43 +1381,55 @@ function seqencer_selftest() {
 		console.log('seq', 'pc',ilu[v.p], 'h',ilu[v.h], 'stk0', ilu[v.sf[v.sp]], 'stk1', ilu[v.sf[(v.sp + 1) & 3]], 'stk2', ilu[v.sf[(v.sp + 2) & 3]], 'stk3', ilu[v.sf[(v.sp + 3) & 3]], 'out', ilu[v.output]);
 	}
 	let test = seqencer_initial();
-	test.step(true, 0, 0, 14, 0, false);
+	test.resolve(true, 0, 14, 0, false);
+	test.commit(0);
 	seqencer_display(test);
 	test = seqencer_initial();
-	test.step(true, 0, 2, 14, 0, false);
+	test.resolve(true, 0, 14, 0, false);
+	test.commit(2);
 	seqencer_display(test);
 	test = seqencer_initial();
-	test.step(true, 0, 1, 14, 0, false);
-	seqencer_display(test);
-
-	test = seqencer_initial();
-	test.step(true, 1, 0, 14, 0, false);
-	seqencer_display(test);
-	test = seqencer_initial();
-	test.step(true, 1, 2, 14, 0, false);
-	seqencer_display(test);
-	test = seqencer_initial();
-	test.step(true, 1, 1, 14, 0, false);
+	test.resolve(true, 0, 14, 0, false);
+	test.commit(1);
 	seqencer_display(test);
 
 	test = seqencer_initial();
-	test.step(true, 2, 0, 14, 0, false);
+	test.resolve(true, 1, 14, 0, false);
+	test.commit(0);
 	seqencer_display(test);
 	test = seqencer_initial();
-	test.step(true, 2, 2, 14, 0, false);
+	test.resolve(true, 1, 14, 0, false);
+	test.commit(2);
 	seqencer_display(test);
 	test = seqencer_initial();
-	test.step(true, 2, 1, 14, 0, false);
+	test.resolve(true, 1, 14, 0, false);
+	test.commit(1);
 	seqencer_display(test);
 
 	test = seqencer_initial();
-	test.step(true, 3, 0, 14, 0, false);
+	test.resolve(true, 2, 14, 0, false);
+	test.commit(0);
 	seqencer_display(test);
 	test = seqencer_initial();
-	test.step(true, 3, 2, 14, 0, false);
+	test.resolve(true, 2, 14, 0, false);
+	test.commit(2);
 	seqencer_display(test);
 	test = seqencer_initial();
-	test.step(true, 3, 1, 14, 0, false);
+	test.resolve(true, 2, 14, 0, false);
+	test.commit(1);
+	seqencer_display(test);
+
+	test = seqencer_initial();
+	test.resolve(true, 3, 14, 0, false);
+	test.commit(0);
+	seqencer_display(test);
+	test = seqencer_initial();
+	test.resolve(true, 3, 14, 0, false);
+	test.commit(2);
+	seqencer_display(test);
+	test = seqencer_initial();
+	test.resolve(true, 3, 14, 0, false);
+	test.commit(1);
 	seqencer_display(test);
 }
 // @ts-ignore
@@ -1495,6 +1545,7 @@ const s1 = new Sequencer();
 const s2 = new Sequencer();
 const alul= new ALU();
 const aluh= new ALU();
+let mcpc = 0; // not a "true" register, simulates the microcode pipeline registers
 let alu_flag = 0;
 let ccr_f = 0;
 let ccr_l = 0;
@@ -1510,7 +1561,7 @@ let workaddr = 0;
 let memaddr = 0;
 let memdata_in = 0;
 let memdata_out = 0;
-let resetting = 1;
+let resetting:boolean = true;
 let physaddr = 0;
 let physpre = 0;
 let busctl = 0;
@@ -1555,12 +1606,13 @@ function reset() {
 	s0.reset();
 	s1.reset();
 	s2.reset();
+	mcpc = 0;
 	result = 0;
 	swap = 0;
 	level = 0;
 	sysctl = 0;
 	busctl = 0;
-	resetting = 1;
+	resetting = true;
 	sys_write_latch = false;
 	sys_read_in = false;
 	mco.parity = 0;
@@ -1623,23 +1675,13 @@ function showstate(in_halt:boolean) {
 	mcr_rfdr.innerText = hex(rdr);
 	mcr_pta.innerText = hex(pta, 1);
 
-	if ((sysctl & 16) != 0) {
-		fp_runhalt[0].classList.add('a'); // run
-		fp_runhalt[1].classList.remove('a');
-	} else {
-		fp_runhalt[0].classList.remove('a'); // halt
-		fp_runhalt[1].classList.add('a');
-	}
-	if (run_step > 0) {
-		fp_ext[0].classList.add('a');
-	} else {
-		fp_ext[0].classList.remove('a');
-	}
-	if (mco.memfault != 0) {
-		fp_ext[2].classList.add('a');
-	} else {
-		fp_ext[2].classList.remove('a');
-	}
+	const is_running = (sysctl & 16) != 0;
+	style_if(fp_runhalt[0],'a',is_running); // run
+	style_if(fp_runhalt[1],'a',!is_running); // halt
+
+	style_if(fp_ext[0],'a',run_step);
+	style_if(fp_ext[2],'a',mco.memfault != 0);
+
 	cx_map.clearRect(0, 0, cv_map.width, cv_map.height);
 	const baseline = 22;
 	cx_map.fillStyle = '#ff3232';
@@ -1868,15 +1910,8 @@ loadcache();
 // this function is a variant that favours speed
 function hsstep() {
 	for (let ql = 0; ql < 100; ql++) {
-	const pc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
-	if (pc == 0x101) {
-		if (run_step > 0) {
-			run_control(false);
-			ql = 100;
-		}
-	}
 
-	const mci = mpscache[pc];
+	const mci = mpscache[mcpc];
 
 	const pindex = ((memaddr >> 11) & 31) | (pta << 5);
 	const pgram = pagetb[pindex];
@@ -1893,18 +1928,16 @@ function hsstep() {
 	const dmaint = intena && (level < 2) && (dma_12 != 0);
 	const count_up = (busctl & 8)!=0;
 
-	if(mci.x_e7 == 3) { // DataRD for read cycles
-		if(!sys_write_latch && sys_read_in) {
-			mco.memfault = 0;
-			memdata_in = bpl.readbyte(physaddr & 0x3ffff);
-			if ((busctl & 0x40) != 0) {
-				b15a = mco.memfault ^ 1;
-			} else {
-				b15a = 1;
-			}
-		}
+	if (run_once) {
+		run_once = false;
+	} else if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
+		run_control(false);
+		dis_after = true;
+		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+		dis_vpc = physaddr & 0x3ffff;
+		return;
 	}
-	
+
 	let k9_com = 1;
 	if (mci.k9_en) {
 		switch(mci.k9_sel) {
@@ -1942,7 +1975,7 @@ function hsstep() {
 	let datapath = 0;
 	const sense = sense_switch; // inverted on bus
 	let sysdata = memdata_in;
-	const dswitch = 0; // inverted on bus - R H I M
+	const dswitch = 0; // inverted on bus - R H I 0
 	// Data Path Control
 	switch(mci.dp_sel) {
 	case 0: case 4: // R_SWP ⇒ DP
@@ -1961,12 +1994,12 @@ function hsstep() {
 		datapath = sysdata; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
 		datapath = (level << 4) | 4 |
-		((resetting>0) ? 2 : 0) | notpgbit |
+		(resetting ? 2 : 0) | notpgbit |
 		(dmaint ? 8 : 0);
-		if(resetting != 0) resetting--;
+		if(resetting) resetting = false;
 		break;
-	case 12: // R_DLI (int7..4:dipsw3..0[RHIM]) ⇒ DP
-		datapath = ((sysint & 15) << 4) | dswitch;
+	case 12: // R_DLI (int7..4:dipsw3..1[RHI]:RTINT) ⇒ DP
+		datapath = ((sysint & 15) << 4) | dswitch | ((rtc && ((sysctl & 0x4) != 0)) ? 1 : 0);
 		break;
 	case 13: // RCnst MCv2 ⇒ DP
 		datapath = mci.mpconst_m6;
@@ -2055,15 +2088,16 @@ function hsstep() {
 	if (mci.x_c14_sel) {
 		rindex = (rir & 15) | (level << 4);
 	} else {
-		rindex = (rir & 255);
+		rindex = rir & 255;
 	}
 	// rindex bit 0, this is technically a NOR
 	// but can be handled as needed because this is the only reference
-	rindex = (rindex | mci.rir0); // I elected to not invert it, since the debug dump would have anyways
+	rindex = rindex | mci.rir0; // I elected to not invert it, since the debug dump would have anyways
 
 	////////////////////////////// rising clock edge /////////////////////////////
 
-	let prevwork = workaddr;
+	const prevwork = workaddr;
+	const prevflag = alu_flag;
 	switch(mci.x_k11) {
 	case 0: break; // nop
 	case 1: break; // L13A_SET
@@ -2121,22 +2155,22 @@ function hsstep() {
 			fl_m = ccr_m;
 			break;
 		case 1:
-			fl_v = (alu_flag) & 1;
-			fl_m = (alu_flag >> 1) & 1;
+			fl_v = prevflag & 1;
+			fl_m = (prevflag >> 1) & 1;
 			break;
 		case 2:
 			fl_v = (result >> 7) & 1;
 			fl_m = (result >> 6) & 1;
 			break;
 		case 3:
-			fl_v = (alu_flag & (alu_flag >> 5)) & 1;
-			fl_m = (alu_flag >> 1) & 1;
+			fl_v = (prevflag & (prevflag >> 5)) & 1;
+			fl_m = (prevflag >> 1) & 1;
 			break;
 		}
 		let fl_f = 0;
 		let fl_l = 0;
 		if (mci.j11_en == 0) {
-			switch(mci.j11_sel | (alu_flag & 0x4)) {
+			switch(mci.j11_sel | (prevflag & 0x4)) {
 			case 0: fl_f = (result >> 5) & 1; break;
 			case 1: fl_f = 1; break;
 			case 2: fl_f = ccr_f; break;
@@ -2151,7 +2185,7 @@ function hsstep() {
 			switch(mci.j10_sel) {
 			case 0: fl_l = ccr_l; break;
 			case 1: fl_l = ccr_l ^ 1; break;
-			case 2: fl_l = (alu_flag >> 3) & 1; break;
+			case 2: fl_l = (prevflag >> 3) & 1; break;
 			case 3: fl_l = 1; break;
 			case 4: fl_l = (result >> 4) & 1; break;
 			case 5: fl_l = aluh.ram3; break;
@@ -2177,20 +2211,31 @@ function hsstep() {
 	case 2: // ALUFlag_LD
 		alu_flag = (alul.zero & aluh.zero) |
 		(aluh.sign << 1) | (aluh.over << 2) |
-		(aluh.carry_out << 3) | (alul.carry_out << 4) | ((alu_flag & 1) << 5);
+		(aluh.carry_out << 3) | (alul.carry_out << 4) | ((prevflag & 1) << 5);
 		break;
 	case 3: // DataRD
 		if (sys_write_latch) {
 			memdata_in = memdata_out;
+		} else if(sys_read_in) {
+			mco.memfault = 0;
+			memdata_in = bpl.readbyte(physaddr & 0x3ffff);
+			if ((busctl & 0x40) != 0) {
+				b15a = mco.memfault ^ 1;
+			} else {
+				b15a = 1;
+			}
 		}
 		sys_write_latch = false;
 		sys_read_in = false;
 		break;
 	}
 
-	let c = s0.step(true, seq0_s, seq_fc, mci.seq_d0, seq_or, false);
-	c = s1.step(c, seq1_s, seq_fc, mci.seq_d1, 0, false);
-	s2.step(c, seq2_s, seq_fc, mci.seq_d2, 0, false);
+	let c = s0.resolve(true, seq0_s, mci.seq_d0, seq_or, false);
+	c = s1.resolve(c, seq1_s, mci.seq_d1, 0, false);
+	s2.resolve(c, seq2_s, mci.seq_d2, 0, false);
+	s0.commit(seq_fc);
+	s1.commit(seq_fc);
+	s2.commit(seq_fc);
 
 	if (((busctl & 20) == 16) && dma_func != null) {
 		dma_func((workaddr == 0xffff), {
@@ -2263,28 +2308,18 @@ function hsstep() {
 
 	alul.step();
 	aluh.step();
+	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 	}
 }
 
 function step(debug_output:boolean = false) {
-	const pc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
-	if (pc == 0x101) {
-		if (run_step > 0) {
-			run_control(false);
-			debug_output = true;
-		}
-		if (!run_busy || run_follow) {
-			dis_after = true;
-			dis_vpc = physaddr & 0x3ffff;
-		}
-	}
-	const v6 = /*A*/uc.k[pc]; // MSB
-	const v5 = /*B*/uc.f[pc];
-	const v4 = /*C*/uc.h[pc];
-	const v3 = /*D*/uc.l[pc];
-	const v2 = /*E*/uc.m[pc];
-	const v1 = /*F*/uc.j[pc];
-	const v0 = /*H*/uc.e[pc]; // LSB
+	const v6 = /*A*/uc.k[mcpc]; // MSB
+	const v5 = /*B*/uc.f[mcpc];
+	const v4 = /*C*/uc.h[mcpc];
+	const v3 = /*D*/uc.l[mcpc];
+	const v2 = /*E*/uc.m[mcpc];
+	const v1 = /*F*/uc.j[mcpc];
+	const v0 = /*H*/uc.e[mcpc]; // LSB
 
 	const dp_sel = v0 & 15;
 	const x_e6 = (v0 >> 4) & 7;
@@ -2323,7 +2358,7 @@ function step(debug_output:boolean = false) {
 	const busctlmask = (1 << busctla) ^ 255;
 	const aluc_b = (v5>>3) & 15;
 	const aluc_a = ((v6<<1)|(v5>>7)) & 15;
-	
+
 	const pindex = ((memaddr >> 11) & 31) | (pta << 5);
 	const pgram = pagetb[pindex];
 	const pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
@@ -2339,18 +2374,6 @@ function step(debug_output:boolean = false) {
 	const dmaint = intena && (level < 2) && (dma_12 != 0);
 	const count_up = (busctl & 8)!=0;
 
-	if(x_e7 == 3) { // DataRD for read cycles
-		if(!sys_write_latch && sys_read_in) {
-			mco.memfault = 0;
-			memdata_in = bpl.readbyte(physaddr & 0x3ffff);
-			if ((busctl & 0x40) != 0) {
-				b15a = mco.memfault ^ 1;
-			} else {
-				b15a = 1;
-			}
-		}
-	}
-	
 	let k9_com = 1;
 	if (k9_en) {
 		switch(k9_sel) {
@@ -2388,7 +2411,7 @@ function step(debug_output:boolean = false) {
 	let datapath = 0;
 	const sense = sense_switch; // inverted on bus
 	let sysdata = memdata_in;
-	const dswitch = 0; // inverted on bus - R H I M
+	const dswitch = 0; // inverted on bus - R H I 0
 	// Data Path Control
 	switch(dp_sel) {
 	case 0: case 4: // R_SWP ⇒ DP
@@ -2407,12 +2430,11 @@ function step(debug_output:boolean = false) {
 		datapath = sysdata; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
 		datapath = (level << 4) | 4 |
-		((resetting>0) ? 2 : 0) | notpgbit |
+		(resetting ? 2 : 0) | notpgbit |
 		(dmaint ? 8 : 0);
-		if(resetting != 0) resetting--;
 		break;
-	case 12: // R_DLI (int7..4:dipsw3..0[RHIM]) ⇒ DP
-		datapath = ((sysint & 15) << 4) | dswitch;
+	case 12: // R_DLI (int7..4:dipsw3..1[RHI]:RTINT) ⇒ DP
+		datapath = ((sysint & 15) << 4) | dswitch | ((rtc && ((sysctl & 0x4) != 0)) ? 1 : 0);
 		break;
 	case 13: // RCnst MCv2 ⇒ DP
 		datapath = mpconst_m6;
@@ -2507,8 +2529,30 @@ function step(debug_output:boolean = false) {
 	// but can be handled as needed because this is the only reference
 	rindex = (rindex | rir0); // I elected to not invert it, since the debug dump would have anyways
 
+	let c = s0.resolve(true, seq0_s, seq_d0, seq_or, false);
+	c = s1.resolve(c, seq1_s, seq_d1, 0, false);
+	s2.resolve(c, seq2_s, seq_d2, 0, false);
+
+	////////////////////////////// rising clock edge /////////////////////////////
+
+	const prevwork = workaddr;
+	const prevflag = alu_flag;
+
+	if (!debug_output) {
+		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+		if (mcpc == 0x101) {
+			dis_after = true;
+			dis_vpc = physaddr & 0x3ffff;
+		}
+		if (run_once) {
+			run_once = false
+		} else if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
+			run_control(false);
+			debug_output = true;
+		}
+	}
 	if (debug_output) {
-		const k9_fn = (k9_en ? 'nop' : [
+		const k9_fn = (!k9_en ? 'nop' : [
 			'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
 			'(1)RIR.~0|4',
 			'(2)RIR.0',
@@ -2554,23 +2598,50 @@ function step(debug_output:boolean = false) {
 			case 3: break; // nop
 			}
 		}
-		const d_f6h6 = ['F6=0   ','F6=1   ','F6=FL.C','F6=?3  '][x_f6h6] +
-		' H6:' + (alul.is_right ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
-		const lh = alul.funcstr().padEnd(30); // speculative
-		const lseq = `S2:${FN_SEQ_SN[seq2_s]} S1:${FN_SEQ_SN[seq1_s]} S0:${FN_SEQ_SN[seq0_s]} ${FN_SEQ_FE[seq_fc]}`;
-		const l34 = `[${hex(seqjmp,3)}][${d_branch0}${d_branch1}${d_branch2}${d_branch3}]`;
-		const d_ccr =
-			'cV=' + ['. ','Z ','R.V','LZ'][j12_sel] +
-			' cM=' + ['. ','S ','R.M','S '][j12_sel] +
-			' cF=' + (j11_en ? '0' : ['Res.5','1','.','0','Res.5','1','.','1'][j11_sel | (alu_flag & 0x4)]).padEnd(4) +
-			' cL=' + (j10_en ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][j10_sel]).padEnd(8);
-		mcs_op.innerText = `${hex(pc,3)}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)}: ${lseq} K9:${k9_fn.padEnd(14)} ${l34}`;
-		mcs_op_alu.innerText = `${lh} (${hex(data_f,2)}) ${d_f6h6} ${d_ccr}`;
+		const d_f6h6 = ['0   ','1   ','FL.C','0!  '][x_f6h6] +
+		' SIn:' + (alul.is_right ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
+		const lh = alul.funcstr().padEnd(30);
+		const d_ccr = (x_e6 == 7) ? ( // only for CCR load
+			'cV=' + ['.  ','Z  ','R.V','LZ '][j12_sel] +
+			' cM=' + ['.  ','S  ','R.M','S  '][j12_sel] +
+			' cF=' + (j11_en ? '0' : ['Res.5','1','.','0','Res.5','1','.','1'][j11_sel | (prevflag & 0x4)]).padEnd(5) +
+			' cL=' + (j10_en ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][j10_sel]).padEnd(8)
+			) : '                                  ';
+		mcs_op.innerText = `${hex(mcpc,3)}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)
+		}: ${FN_SEQ_SN[seq2_s]
+		} ${FN_SEQ_SN[seq1_s]
+		} ${FN_SEQ_SN[seq0_s]
+		} ${FN_SEQ_FE[seq_fc]} K9:${k9_fn.padEnd(14)
+		} [${hex(seqjmp,3)}][${d_branch0}${d_branch1}${d_branch2}${d_branch3}]`;
+		mcs_op_alu.innerText = `${lh} CIn=${d_f6h6} (${hex(data_f,2)}:${hex(aluh.y,1)}${hex(alul.y,1)}) ${d_ccr}`;
+		const d_k11 = [// FN_K11[x_k11]
+		/* 0 */ 'nop',
+		/* 1 */ 'DMAEndReset',
+		/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
+		/* . */ 'P2.3','P2.4','RTC','MapDis',
+		/* . */ 'FP.Run','RTC.R','FP.ABT','INT_ACK'][busctla] + '=' + busctld,
+		/* 3 */ 'BusCtl:' + [
+		/* . */ 'IntEN','AddrToSys','DMACountDIS','AddrU/D',
+		/* . */ 'AddrCtlSel','ParityTest','ParityEN','DMA_EN'][busctla] + '=' + busctld,
+		/* 4 */ x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)',
+		/* 5 */ 'PTR_WR',
+		/* 6 */ 'WA_LD',
+		/* 7 */ 'SysDatOut_WR'][x_k11]
+		const mce7 = ['nop','BusReady','ALUFlag_LD','DataRD'][x_e7];
+		const mch11 = [
+		'nop','RD_START','WT_START','WorkAddr_LDH',
+		'WorkAddr_Count','MemAddr_Count','F=MapROM','NibSwap'][x_h11];
+		const mcd_d45 = [
+		'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
+		'PA','CCR_DSense','SysDatIn','R_H14','R_INTDIP','RCnst','',''][dp_sel];
+		mcs_op_bus.innerText = `D4/5:DP(${hex(datapath)})=${mcd_d45.padEnd(10)
+		} K11:${d_k11.padEnd(18)} E6:${FN_E6[x_e6].padEnd(12)
+		} E7:${mce7.padEnd(11)} H11:${mch11}`;
+		return;
 	}
 
-	////////////////////////////// rising clock edge /////////////////////////////
+	if(dp_sel == 11) resetting = false;
 
-	let prevwork = workaddr;
 	switch(x_k11) {
 	case 0: break; // nop
 	case 1: break; // L13A_SET
@@ -2647,22 +2718,22 @@ function step(debug_output:boolean = false) {
 			fl_m = ccr_m;
 			break;
 		case 1:
-			fl_v = (alu_flag) & 1;
-			fl_m = (alu_flag >> 1) & 1;
+			fl_v = prevflag & 1;
+			fl_m = (prevflag >> 1) & 1;
 			break;
 		case 2:
 			fl_v = (result >> 7) & 1;
 			fl_m = (result >> 6) & 1;
 			break;
 		case 3:
-			fl_v = (alu_flag & (alu_flag >> 5)) & 1;
-			fl_m = (alu_flag >> 1) & 1;
+			fl_v = (prevflag & (prevflag >> 5)) & 1;
+			fl_m = (prevflag >> 1) & 1;
 			break;
 		}
 		let fl_f = 0;
 		let fl_l = 0;
 		if (j11_en == 0) {
-			switch(j11_sel | (alu_flag & 0x4)) {
+			switch(j11_sel | (prevflag & 0x4)) {
 			case 0: fl_f = (result >> 5) & 1; break;
 			case 1: fl_f = 1; break;
 			case 2: fl_f = ccr_f; break;
@@ -2677,7 +2748,7 @@ function step(debug_output:boolean = false) {
 			switch(j10_sel) {
 			case 0: fl_l = ccr_l; break;
 			case 1: fl_l = ccr_l ^ 1; break;
-			case 2: fl_l = (alu_flag >> 3) & 1; break;
+			case 2: fl_l = (prevflag >> 3) & 1; break;
 			case 3: fl_l = 1; break;
 			case 4: fl_l = (result >> 4) & 1; break;
 			case 5: fl_l = aluh.ram3; break;
@@ -2703,20 +2774,29 @@ function step(debug_output:boolean = false) {
 	case 2: // ALUFlag_LD
 		alu_flag = (alul.zero & aluh.zero) |
 		(aluh.sign << 1) | (aluh.over << 2) |
-		(aluh.carry_out << 3) | (alul.carry_out << 4) | ((alu_flag & 1) << 5);
+		(aluh.carry_out << 3) | (alul.carry_out << 4) | ((prevflag & 1) << 5);
 		break;
 	case 3: // DataRD
 		if (sys_write_latch) {
 			memdata_in = memdata_out;
+		} else if(sys_read_in) {
+			mco.memfault = 0;
+			memdata_in = bpl.readbyte(physaddr & 0x3ffff);
+			if ((busctl & 0x40) != 0) {
+				b15a = mco.memfault ^ 1;
+			} else {
+				b15a = 1;
+			}
 		}
+
 		sys_write_latch = false;
 		sys_read_in = false;
 		break;
 	}
 
-	let c = s0.step(true, seq0_s, seq_fc, seq_d0, seq_or, false);
-	c = s1.step(c, seq1_s, seq_fc, seq_d1, 0, false);
-	s2.step(c, seq2_s, seq_fc, seq_d2, 0, false);
+	s0.commit(seq_fc);
+	s1.commit(seq_fc);
+	s2.commit(seq_fc);
 
 	if (((busctl & 20) == 16) && dma_func != null) {
 		dma_func((workaddr == 0xffff), {
@@ -2787,45 +2867,224 @@ function step(debug_output:boolean = false) {
 	pta2a += (pta >> 1) & 1;
 	pta3a += (pta >> 2) & 1;
 
-	if(debug_output) {
-		const d_k11 = [// FN_K11[x_k11]
-		/* 0 */ 'nop',
-		/* 1 */ '(!)DMAEndReset',
-		/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
-		/* . */ 'P2.3','P2.4','RTC','MapDis',
-		/* . */ 'FP.Run','RTC.R','FP.ABT','INT_ACK'][busctla] + '=' + busctld,
-		/* 3 */ 'BusCtl:' + [
-		/* . */ 'IntEN','AddrToSys','AddrCountEN','AddrU/D',
-		/* . */ 'AddrCtlSel','ParityTest','ParityEN','DMA_EN'][busctla] + '=' + busctld,
-		/* 4 */ x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)',
-		/* 5 */ 'PTR_WR',
-		/* 6 */ 'WA_LD',
-		/* 7 */ '(!)BusD_WR'][x_k11]
-		const mce7 = ['nop','(!)BusReady','ALUFlag_LD','DataRD'][x_e7];
-		const mch11 = [
-		'nop','RD_START','(!)WT_START','WorkAddr_LDH',
-		'WorkAddr_Count','MemAddr_Count','F=MapROM','NibSwap'][x_h11];
-		const mcd_d45 = [
-		'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
-		'PA','CCR_DSense','SysDAT','R_H14','(!)R_INTDIP','RCnst','',''][dp_sel];
-		const mch = `D4/5:DP=${mcd_d45.padEnd(10)}(${hex(datapath)}) E6=${FN_E6[x_e6].padEnd(12)}`;
-		mcs_op_bus.innerText = `K11:${d_k11.padEnd(14)} ${mch} E7=${mce7.padEnd(11)} H11=${mch11}`;
-	}
 	alul.step();
 	aluh.step();
+	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 }
+
 return mco;
 }
 const mcsim = mcsetup();
-mcsim.showstate(true);
+
+function mc_listing(address:number) {
+	const v6 = /*A*/uc.k[address]; // MSB
+	const v5 = /*B*/uc.f[address];
+	const v4 = /*C*/uc.h[address];
+	const v3 = /*D*/uc.l[address];
+	const v2 = /*E*/uc.m[address];
+	const v1 = /*F*/uc.j[address];
+	const v0 = /*H*/uc.e[address]; // LSB
+
+	const dp_sel = v0 & 15;
+	const x_e6 = (v0 >> 4) & 7;
+	const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
+	const x_h11 = (v1 >> 2) & 7;
+	const x_e7 = (v1 >> 5) & 3;
+	const k9_en = bit(v1,7) == 0;
+	const k9_sel = v2 & 7;
+	const mpconst_m6 = v2 ^ 0xff; // goes through a 74ls240
+	const j12_sel = v2 & 3;
+	const j11_en = bit(v2,2);
+	const j11_sel = (v2>>3) & 3;
+	const j13_sel = (v2>>4) & 3;
+	const j10_en = bit(v2,5);
+	const j10_sel = ((v2>>6) & 3) | (bit(v3,0) << 2);
+	const k13_sel = (v2>>6) & 3;
+	const seqjmp = (v2 | (v3<<8)) & 0x7ff; // for debug output
+	const seq_fci = (v3 >> 3) & 3; // TODO verify FE/PUP
+	const seq0_si = (v3 >> 5) & 3;
+	const seq12_s0i = bit(v3,7); // TODO verify
+	const seq2_si_k6b = seq12_s0i | (bit(v4,0) << 1); // TODO verify
+	const seq1_si_k6dc = seq12_s0i | (((bit(v6,6) << 1) & (seq2_si_k6b ^ 2)) ^ 2);
+	const seq_branch = bit(v4,1);
+	const rir0 = bit(v6,5);
+	const x_f6h6 = (v6 >> 3) & 3;
+	const x_c14_sel = bit(v6,7)!=0;
+	const aluc_s = (v4>>2) & 7;
+	const aluc_f = (v4>>5) & 7;
+	const aluc_d = v5 & 7;
+	const busctld = bit(v5,3);
+	const busctla = (v5>>4) & 7;
+	const aluc_b = (v5>>3) & 15;
+	const aluc_a = ((v6<<1)|(v5>>7)) & 15;
+
+	const k9_fn = (!k9_en ? 'nop' : [
+		'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
+		'(1)RIR.~0|4',
+		'(2)RIR.0',
+		'(3)Ad=IO/REG',
+		'(4)Ad=REG/pbit', // need to recheck the logic on this one to give it a better name
+		'(5)DMA_REQ', // DMA port, request start
+		'(6)MemFault', // Memory parity error, must be enabled via BusCtl bit 6
+		'(7)F13 most' // this one needs a better name (checks multiple interrupt lines)
+		][k9_sel]);
+	let d_branch0 = '';
+	let d_branch1 = '';
+	let d_branch2 = '';
+	let d_branch3 = '';
+	if (seq_branch == 0) {
+		switch(j13_sel) {
+		case 0:
+			if ((seqjmp | 1) != seqjmp) d_branch0 = ' |1:ALUF.S';
+			if ((seqjmp | 2) != seqjmp) d_branch1 = ' |2:ALUF.Z';
+			break;
+		case 1:
+			if ((seqjmp | 1) != seqjmp) d_branch0 = ' |1:ALUF.H';
+			if ((seqjmp | 2) != seqjmp) d_branch1 = ' |2:ALUF.V';
+			break;
+		case 2:
+			if ((seqjmp | 1) != seqjmp) d_branch0 = ' |1:~pbit ';
+			if ((seqjmp | 2) != seqjmp) d_branch1 = ' |2:~MMIO ';
+			break;
+		case 3: break; // nop
+		}
+		switch(k13_sel) {
+		case 0:
+			if ((seqjmp | 4) != seqjmp) d_branch2 = ' |4:INT_ENA';
+			if ((seqjmp | 8) != seqjmp) d_branch3 = ' |8:CCR.L  ';
+			break;
+		case 1:
+			if ((seqjmp | 4) != seqjmp) d_branch2 = ' |4:DMA_INT';
+			if ((seqjmp | 8) != seqjmp) d_branch3 = ' |8:INT_REQ';
+			break;
+		case 2:
+			if ((seqjmp | 4) != seqjmp) d_branch2 = ' |4:MEM_INT';
+			if ((seqjmp | 8) != seqjmp) d_branch3 = ' |8:DMA_REQ';
+			break;
+		case 3: break; // nop
+		}
+	}
+	const seq0_s = seq0_si ^ 3;
+	const seq1_s = seq1_si_k6dc ^ 3;
+	const seq2_s = seq2_si_k6b ^ 3;
+	const seq_fc = seq_fci;
+
+	const d_f6h6 = ['0   ','1   ','FL.C','0!  '][x_f6h6] +
+	' SIn:' + (((aluc_d & 2) == 0) ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
+	const lh = ALU.trace_str(aluc_s, aluc_f, aluc_d, aluc_a, aluc_b).padEnd(30);
+	const d_ccr = (x_e6 == 7) ? ( // only for CCR load
+		'cV=' + ['.  ','Z  ','R.V','LZ '][j12_sel] +
+		' cM=' + ['.  ','S  ','R.M','S  '][j12_sel] +
+		' cF=' + (j11_en ? '0' : ['Res.5','1','.','alu.o','Res.5','1','.','alu.o'][j11_sel]).padEnd(5) +
+		' cL=' + (j10_en ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][j10_sel]).padEnd(8)
+	) : '                                  ';
+
+	const d_k11 = [// FN_K11[x_k11]
+	/* 0 */ 'nop',
+	/* 1 */ 'DMAEndReset',
+	/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
+	/* . */ 'P2.3','P2.4','RTC','MapDis',
+	/* . */ 'FP.Run','RTC.R','FP.ABT','INT_ACK'][busctla] + '=' + busctld,
+	/* 3 */ 'BusCtl:' + [
+	/* . */ 'IntEN','AddrToSys','DMACountDIS','AddrU/D',
+	/* . */ 'AddrCtlSel','ParityTest','ParityEN','DMA_EN'][busctla] + '=' + busctld,
+	/* 4 */ x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)',
+	/* 5 */ 'PTR_WR',
+	/* 6 */ 'WA_LD',
+	/* 7 */ 'SysDatOut_WR'][x_k11]
+	const mce7 = ['nop','BusReady','ALUFlag_LD','DataRD'][x_e7];
+	const mch11 = [
+	'nop','RD_START','WT_START','WorkAddr_LDH',
+	'WorkAddr_Count','MemAddr_Count','F=MapROM','NibSwap'][x_h11];
+	const mcd_d45 = [
+	'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
+	'PA','CCR_DSense','SysDatIn','R_H14','R_INTDIP',`RCnst(${hex(mpconst_m6)})`,'',''][dp_sel];
+	return {
+		seq: `${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)
+	} ${FN_SEQ_SN[seq2_s]
+	} ${FN_SEQ_SN[seq1_s]
+	} ${FN_SEQ_SN[seq0_s]
+	} ${FN_SEQ_FE[seq_fc]} K9:${k9_fn.padEnd(14)
+	} [${hex(seqjmp,3)}]${d_branch0}${d_branch1}${d_branch2}${d_branch3}`,
+		alu: `${lh} CIn=${d_f6h6} ${d_ccr}`,
+		bus: `D4/5:DP=${mcd_d45.padEnd(10)
+		} K11:${d_k11.padEnd(18)} E6:${FN_E6[x_e6].padEnd(12)
+		} E7:${mce7.padEnd(11)} H11:${mch11}`
+	};
+}
+
+const listmax = 100;
+const listing:HTMLDivElement[] = [];
+interface MicroListing {
+	line: HTMLDivElement;
+	mc1: HTMLDivElement;
+	mc2: HTMLDivElement;
+	mc3: HTMLDivElement;
+	bp: boolean;
+	bpc: HTMLInputElement;
+}
+(function(){
+	for (let i = 0; i < listmax; i++) {
+		let listnode = document.createElement('div');
+		listing.push(listnode);
+		d_listing.appendChild(listnode);
+	}
+	for (let i = 0; i < 2048; i++) {
+		const listnode = document.createElement('div');
+		listnode.classList.add('regs');
+		const leftnode = document.createElement('div');
+		const rightnode = document.createElement('div');
+		const addrnode = document.createElement('div');
+		const bpnode = document.createElement('div');
+		addrnode.innerHTML = `&#x03bc;Op ${hex(i,3)}`;
+		leftnode.appendChild(addrnode);
+		leftnode.appendChild(bpnode);
+		const bplnode = document.createElement('label');
+		const bpcnode = document.createElement('input');
+		bpcnode.type = 'checkbox';
+		bplnode.appendChild(bpcnode);
+		bplnode.append('break');
+		bpnode.appendChild(bplnode);
+		listnode.appendChild(leftnode);
+		listnode.appendChild(rightnode);
+		const listobj:MicroListing = {
+			line: listnode,
+			mc1: document.createElement('div'),
+			mc2: document.createElement('div'),
+			mc3: document.createElement('div'),
+			bp: false,
+			bpc: bpcnode,
+		};
+		bpcnode.addEventListener('click', function(ev) {
+			const lst = listobj;
+			lst.bp = this.checked;
+		});
+		rightnode.appendChild(listobj.mc1);
+		rightnode.appendChild(listobj.mc2);
+		rightnode.appendChild(listobj.mc3);
+		let lo = mc_listing(i);
+		listobj.mc1.innerText = lo.seq;
+		listobj.mc2.innerText = lo.alu;
+		listobj.mc3.innerText = lo.bus;
+		mclisting.push(listobj);
+		d_micro.appendChild(listnode);
+	}
+})();
+function update_microlist() {
+	for (let i = 0; i < 2048; i++) {
+		const m = mclisting[i];
+		m.bpc.checked = m.bp;
+	}
+}
 
 class DiagIO {
+	is_write = true;
 	// TOS:1a, Aux:1d, Hawk:17-19, MUXINT:16, DMA:11/13
 	dip = 0x0d;
 	hexout = 0;
 	points = 0;
 	blank = false;
-	read(f:number):number {
+	readbyte(f:number):number {
 		let v;
 		switch(f) {
 		case 6: this.blank = false; break;
@@ -2850,9 +3109,9 @@ class DiagIO {
 		if ((this.points & 8) != 0) cx_diag.fillText('.', 25, 25);
 		return 0;
 	}
-	write(f:number, v:number):void {
+	writebyte(f:number, v:number):void {
 		if (f == 16) this.hexout = v;
-		this.read(f);
+		this.readbyte(f);
 	}
 }
 const cx_diag0 = new DiagIO();
@@ -3140,7 +3399,8 @@ class MUXPort {
 	}
 	read_data():number {
 		let vcc = cx_crt0.input_buf.shift();
-		if (cx_crt0.input_buf.length == 0) this.read_busy = false;
+		this.read_busy = false;
+		if (cx_crt0.input_buf.length != 0) this.receive();
 		if (vcc != undefined) {
 			return vcc;
 		}
@@ -3162,23 +3422,38 @@ class MUXPort {
 		this.card.mux_cause = true;
 	}
 }
-
+class MMIOTrace implements MemAccessR, MemAccessW {
+	readbyte(address: number): number {
+		console.log('IOTrace-R', address);
+		return 0;
+	}
+	is_io = true;
+	writebyte(address: number, value: number): void {
+		console.log('IOTrace-W', address, value);
+	}
+	is_write = true;
+}
 class MMIOMulti implements MemAccessR, MemAccessW {
 	is_io = true;
 	is_write:true = true;
+	devices:{address:number,end:number,dev:MemAccessR & MemAccessW}[] = [];
+	adddev(subaddr:number, size:number, dev:MemAccessR & MemAccessW) {
+		this.devices.push({address:subaddr, end:subaddr+size, dev});
+	}
 	readbyte(address: number):number {
-		if (address >= 6 && address <= 0x10) {
-			return cx_diag0.read(address);
-		} else if (address >= 0x40 && address < 0x50) {
-			return dsk2_0.readbyte(address - 0x40);
+		for (const devlist of this.devices) {
+			if ((address >= devlist.address) && (address < devlist.end)) {
+				return devlist.dev.readbyte(address - devlist.address);
+			}
 		}
 		return 0;
 	}
 	writebyte(address: number, value: number):void {
-		if (address >= 6 && address <= 0x10) {
-			return cx_diag0.write(address, value);
-		} else if (address >= 0x40 && address < 0x50) {
-			dsk2_0.writebyte(address - 0x40, value);
+		for (const devlist of this.devices) {
+			if ((address >= devlist.address) && (address < devlist.end)) {
+				devlist.dev.writebyte(address - devlist.address, value);
+				return;
+			}
 		}
 	}
 }
@@ -4367,7 +4642,12 @@ bpl.configmemory(0x3f200, mmio_mux, 256);
 cx_crt0.mux = mmio_mux.muxports[0];
 bpl.configio(1, dsk2_0);
 bpl.configio(0, mmio_mux);
-bpl.configmemory(0x3f100, new MMIOMulti(), 256);
+const mmio_0 = new MMIOMulti();
+const mmio_1 = new MMIOMulti();
+bpl.configmemory(0x3f000, mmio_0, 256);
+bpl.configmemory(0x3f100, mmio_1, 256);
+mmio_1.adddev(0, 0x10, cx_diag0);
+mmio_1.adddev(0x40, 0x10, dsk2_0);
 function setupmemory() {
 	for(let q = 0; q < 8; q++) {
 		bpl.configmemory(q * 0x4000, mem[q], 0x4000);
@@ -4382,6 +4662,10 @@ function setupmemory() {
 	}
 }
 setupmemory();
+
+update_microlist();
+mcsim.step(true);
+mcsim.showstate(true);
 
 const cpu = new CPU6(bpl);
 
@@ -4417,48 +4701,16 @@ in_diagins.addEventListener('change', function(ev) {
 });
 // sense_switch
 function update_sense() {
-	if ((sense_switch & 1) > 0) {
-		btn_ss1.classList.add('active');
-	} else {
-		btn_ss1.classList.remove('active');
-	}
-	if ((sense_switch & 2) > 0) {
-		btn_ss2.classList.add('active');
-	} else {
-		btn_ss2.classList.remove('active');
-	}
-	if ((sense_switch & 4) > 0) {
-		btn_ss3.classList.add('active');
-	} else {
-		btn_ss3.classList.remove('active');
-	}
-	if ((sense_switch & 8) > 0) {
-		btn_ss4.classList.add('active');
-	} else {
-		btn_ss4.classList.remove('active');
-	}
+	style_if(btn_ss1,'active',(sense_switch & 1) > 0);
+	style_if(btn_ss2,'active',(sense_switch & 2) > 0);
+	style_if(btn_ss3,'active',(sense_switch & 4) > 0);
+	style_if(btn_ss4,'active',(sense_switch & 8) > 0);
 }
 function update_diagsw() {
-	if ((cx_dip & 1) > 0) {
-		btn_dt1.classList.add('active');
-	} else {
-		btn_dt1.classList.remove('active');
-	}
-	if ((cx_dip & 2) > 0) {
-		btn_dt2.classList.add('active');
-	} else {
-		btn_dt2.classList.remove('active');
-	}
-	if ((cx_dip & 4) > 0) {
-		btn_dt4.classList.add('active');
-	} else {
-		btn_dt4.classList.remove('active');
-	}
-	if ((cx_dip & 8) > 0) {
-		btn_dt8.classList.add('active');
-	} else {
-		btn_dt8.classList.remove('active');
-	}
+	style_if(btn_dt1,'active',(cx_dip & 1) > 0);
+	style_if(btn_dt2,'active',(cx_dip & 2) > 0);
+	style_if(btn_dt4,'active',(cx_dip & 4) > 0);
+	style_if(btn_dt8,'active',(cx_dip & 8) > 0);
 }
 update_sense();
 update_diagsw();
@@ -4515,21 +4767,36 @@ fp_select.addEventListener('click', function(ev) {
 	mcsim.reset();
 });
 micro_button.addEventListener('click', function(ev) {
-	mcdump();
+	if (win_micro.style.display == 'none') {
+		win_micro.style.display = '';
+	} else {
+		win_micro.style.display = 'none';
+	}
 });
 
 run_button.addEventListener('click', function(ev) {
 	run_control(run_ctl == 0);
 });
-run_rate1.addEventListener('click', function(ev) { run_rate = 1; });
-run_rate2.addEventListener('click', function(ev) { run_rate = 10; });
-run_rate3.addEventListener('click', function(ev) { run_rate = 100; });
-run_rate4.addEventListener('click', function(ev) { run_rate = 1000; });
-run_rate5.addEventListener('click', function(ev) { run_rate = 10000; });
+function update_runrate(new_rate:number) {
+	run_rate = new_rate;
+	style_if(run_rate1,'active',run_rate == 1);
+	style_if(run_rate2,'active',run_rate == 10);
+	style_if(run_rate3,'active',run_rate == 100);
+	style_if(run_rate4,'active',run_rate == 1000);
+	style_if(run_rate5,'active',run_rate == 10000);
+	style_if(run_rate6,'active',run_rate == 50000);
+}
+update_runrate(run_rate);
+run_rate1.addEventListener('click', function(ev) { update_runrate(1); });
+run_rate2.addEventListener('click', function(ev) { update_runrate(10); });
+run_rate3.addEventListener('click', function(ev) { update_runrate(100); });
+run_rate4.addEventListener('click', function(ev) { update_runrate(1000); });
+run_rate5.addEventListener('click', function(ev) { update_runrate(10000); });
 // can't handle this speed ;)
-run_rate6.addEventListener('click', function(ev) { run_rate = 50000; });
+run_rate6.addEventListener('click', function(ev) { update_runrate(50000); });
 step_button.addEventListener('click', function(ev) {
-	run_step = 1;
+	run_once = true;
+	run_step = true;
 	run_follow = true;
 	run_stop = function() {
 		dis_vpc = mcsim.physaddr() & 0x3ffff;
@@ -4538,6 +4805,8 @@ step_button.addEventListener('click', function(ev) {
 	run_control(true);
 });
 microstep_button.addEventListener('click', function(ev) {
+	run_once = true;
+	mcsim.step(false);
 	mcsim.step(true);
 	mcsim.showstate(true);
 	if (dis_after) {
@@ -4583,20 +4852,17 @@ HEX_CONV = (document.getElementById('conv_hex') as HTMLInputElement).checked;
 	show_disasm();
 });
 const inp_crtsize = document.getElementById('crtsize') as HTMLInputElement;
-let TALL_CRT = inp_crtsize.checked;
-inp_crtsize.addEventListener('change', function(ev) {
-	TALL_CRT = this.checked;
-	if (TALL_CRT) {
-		cv_term0.classList.add('tall');
-	} else {
-		cv_term0.classList.remove('tall');
-	}
-});
-if (TALL_CRT) {
-	cv_term0.classList.add('tall');
-} else {
-	cv_term0.classList.remove('tall');
+function update_crt_tall() {
+	style_if(cv_term0,'tall',inp_crtsize.checked);
 }
+inp_crtsize.addEventListener('change', update_crt_tall);
+update_crt_tall();
+const inp_crtwide = document.getElementById('crtwide') as HTMLInputElement;
+function update_crt_wide() {
+	style_if(cv_term0,'wide',inp_crtwide.checked);
+}
+inp_crtwide.addEventListener('change', update_crt_wide);
+update_crt_wide();
 
 document.body.addEventListener('dragstart', function(ev) {
 	const dt = ev.dataTransfer;
@@ -4673,7 +4939,7 @@ document.body.addEventListener('drop', function(ev) {
 if (txt_anno.value.length > 0) {
 	annotation_import(txt_anno.value);
 }
-mcdump();
+
 show_disasm();
 
 });
