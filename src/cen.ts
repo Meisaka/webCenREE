@@ -17,6 +17,9 @@ const btn_ss1 = document.getElementById('ss1') as HTMLButtonElement;
 const btn_ss2 = document.getElementById('ss2') as HTMLButtonElement;
 const btn_ss3 = document.getElementById('ss3') as HTMLButtonElement;
 const btn_ss4 = document.getElementById('ss4') as HTMLButtonElement;
+const btn_ssR = document.getElementById('ssR') as HTMLButtonElement;
+const btn_ssH = document.getElementById('ssH') as HTMLButtonElement;
+const btn_ssI = document.getElementById('ssI') as HTMLButtonElement;
 const btn_dt1 = document.getElementById('diag1') as HTMLButtonElement;
 const btn_dt2 = document.getElementById('diag2') as HTMLButtonElement;
 const btn_dt4 = document.getElementById('diag4') as HTMLButtonElement;
@@ -1537,6 +1540,7 @@ interface DMAControl {
 
 type DMAFunc = (atend:boolean, ctrl:DMAControl)=>void;
 let sense_switch = 0;
+let dswitch = 0; // inverted on bus - R H I 0
 
 function mcsetup() {
 
@@ -1973,9 +1977,7 @@ function hsstep() {
 	const seq_fc = (2|k9_com) & mci.seq_fci;
 
 	let datapath = 0;
-	const sense = sense_switch; // inverted on bus
 	let sysdata = memdata_in;
-	const dswitch = 0; // inverted on bus - R H I 0
 	// Data Path Control
 	switch(mci.dp_sel) {
 	case 0: case 4: // R_SWP ⇒ DP
@@ -1989,7 +1991,8 @@ function hsstep() {
 	case 8: // R_AddrPH ⇒ DP
 		datapath = pgaddr; break;
 	case 9: // CCR:sense ⇒ DP
-		datapath = ((ccr_l << 4) | (ccr_f << 5) | (ccr_m << 6) | (ccr_v << 7) | sense) ^ 0xf0 /* sense sw */; break;
+		// sense_switch inverted on bus
+		datapath = ((ccr_l << 4) | (ccr_f << 5) | (ccr_m << 6) | (ccr_v << 7) | sense_switch) ^ 0xf0 /* sense sw */; break;
 	case 10: // R_SysDLatch ⇒ DP
 		datapath = sysdata; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
@@ -2409,9 +2412,7 @@ function step(debug_output:boolean = false) {
 	const seq_fc = (2|k9_com) & seq_fci;
 
 	let datapath = 0;
-	const sense = sense_switch; // inverted on bus
 	let sysdata = memdata_in;
-	const dswitch = 0; // inverted on bus - R H I 0
 	// Data Path Control
 	switch(dp_sel) {
 	case 0: case 4: // R_SWP ⇒ DP
@@ -2425,7 +2426,8 @@ function step(debug_output:boolean = false) {
 	case 8: // R_AddrPH ⇒ DP
 		datapath = pgaddr; break;
 	case 9: // CCR:sense ⇒ DP
-		datapath = ((ccr_l << 4) | (ccr_f << 5) | (ccr_m << 6) | (ccr_v << 7) | sense) ^ 0xf0 /* sense sw */; break;
+		// inverted on bus
+		datapath = ((ccr_l << 4) | (ccr_f << 5) | (ccr_m << 6) | (ccr_v << 7) | sense_switch) ^ 0xf0 /* sense sw */; break;
 	case 10: // R_SysDLatch ⇒ DP
 		datapath = sysdata; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
@@ -3681,7 +3683,7 @@ const enum TXS {
 }
 const enum OPL_EXT {
 	MPUSH, MPOP,
-	DMA,
+	PAGE, DMA,
 }
 interface OPLEntry {
 	n:string,
@@ -3758,11 +3760,14 @@ const oplist:OPLEntry[] = [
 	{n:'SF',md:OPM.IMPL},{n:'RF',md:OPM.IMPL},
 	{n:'EI',md:OPM.IMPL},{n:'DI',md:OPM.IMPL},
 	{n:'SL',md:OPM.IMPL},{n:'RL',md:OPM.IMPL},
-	{n:'CL',nm:'COML',md:OPM.IMPL},{n:'RSR',nm:'RET',md:OPM.IMPL},
-	{n:'RI',nm:'RTI',md:OPM.IMPL},{n:'RIM',nm:'RTIM',md:OPM.IMPL},
-	{n:'ELO',md:OPM.IMPL},
+	{n:'CL',nm:'COML',md:OPM.IMPL},
+	{n:'RSR',nm:'RET',md:OPM.IMPL},
+	{n:'RI',nm:'RETI',md:OPM.IMPL},
+	{n:'!ill0B',md:OPM.IMPL},
+	{n:'SYN',md:OPM.IMPL}, // TODO
 	{n:'PCX',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.PC,dr:REG.X},
-	{n:'DLY',nm:'DELAY',md:OPM.IMPL},{n:'SYSRET',md:OPM.IMPL},
+	{n:'DLY',nm:'DELAY',md:OPM.IMPL},
+	{n:'RSV',nm:'SPVRET',md:OPM.IMPL},
 	// 0x1H
 	{n:'BL',md:OPM.PCO,w:TXS.F},{n:'BNL',md:OPM.PCO,w:TXS.F},
 	{n:'BF',md:OPM.PCO,w:TXS.F},{n:'BNF',md:OPM.PCO,w:TXS.F},
@@ -3771,7 +3776,8 @@ const oplist:OPLEntry[] = [
 	{n:'BGE',md:OPM.PCO,w:TXS.F},{n:'BLE',md:OPM.PCO,w:TXS.F},
 	{n:'BS1',md:OPM.PCO,w:TXS.F},{n:'BS2',md:OPM.PCO,w:TXS.F},
 	{n:'BS3',md:OPM.PCO,w:TXS.F},{n:'BS4',md:OPM.PCO,w:TXS.F},
-	{n:'?BTM?',md:OPM.IMPL},{n:'?BEP?',md:OPM.IMPL},
+	{n:'?BTM?',md:OPM.IMPL},
+	{n:'?BEP?',md:OPM.IMPL},
 	// 0x2H
 	{n:'INRB',nm:'INC',md:OPM.RC,w:TXS.B,i:1},{n:'DCRB',nm:'DEC',md:OPM.RC,w:TXS.B,i:1},
 	{n:'CLRB',md:OPM.RC,w:TXS.B},{n:'IVR',nm:'NOT',md:OPM.RC,w:TXS.B},
@@ -3783,7 +3789,7 @@ const oplist:OPLEntry[] = [
 	{n:'IVAB',nm:'NOT',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'SRAB',nm:'SRA',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'SLAB',nm:'SLL',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'sX:',l:2,md:OPM.IMPL},
+	{n:'page',md:OPM.IMPL,x:OPL_EXT.PAGE}, // TODO
 	{n:'dma.',md:OPM.IMPL,x:OPL_EXT.DMA}, // TODO
 	// 0x3H
 	{n:'INR',nm:'INC',md:OPM.RC,w:TXS.W,i:1},{n:'DCR',nm:'DEC',md:OPM.RC,w:TXS.W,i:1},
@@ -3803,7 +3809,8 @@ const oplist:OPLEntry[] = [
 	{n:'ANDB',md:OPM.RR,w:TXS.B},{n:'ORIB',nm:'OR',md:OPM.RR,w:TXS.B},
 	{n:'OREB',nm:'XOR',md:OPM.RR,w:TXS.B},
 	{n:'XFRB',nm:'MOV',md:OPM.RR,w:TXS.B},
-	{n:'?X46',md:OPM.IMPL},{n:'?X47',md:OPM.IMPL},
+	{n:'big',md:OPM.IMPL}, // TODO
+	{n:'mem',md:OPM.IMPL}, // TODO
 	{n:'AABB',nm:'ADD',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
 	{n:'SABB',nm:'SUB',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
 	{n:'NABB',nm:'AND',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
@@ -3816,7 +3823,8 @@ const oplist:OPLEntry[] = [
 	{n:'ADD',md:OPM.RRX,w:TXS.W},{n:'SUB',md:OPM.RRX,w:TXS.W},
 	{n:'AND',md:OPM.RRX,w:TXS.W},{n:'ORI',nm:'OR',md:OPM.RRX,w:TXS.W},
 	{n:'ORE',nm:'XOR',md:OPM.RRX,w:TXS.W},{n:'XFR',nm:'MOV',md:OPM.RRX,w:TXS.W},
-	{n:'?X56',md:OPM.IMPL},{n:'?X57',md:OPM.IMPL},
+	{n:'EAO',md:OPM.IMPL}, // TODO
+	{n:'DAO',md:OPM.IMPL}, // TODO
 	{n:'AAB',nm:'ADD',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'SAB',nm:'SUB',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'NAB',nm:'AND',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
@@ -3832,25 +3840,27 @@ const oplist:OPLEntry[] = [
 	{n:'LDX',nm:'LD',ms:OPM.PCO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
 	{n:'LDX',nm:'LD',ms:OPM.IPO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
 	{n:'LDX',nm:'LD',ms:OPM.MOD,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'?X66',md:OPM.IMPL},{n:'?X67',md:OPM.IMPL},
+	{n:'SVC',md:OPM.IMPL}, // TODO
+	{n:'mem',md:OPM.IMPL}, // TODO
 	{n:'STX',nm:'ST',md:OPM.IMM,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.DIR,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.IND,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.PCO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.IPO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.MOD,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'?X6E',md:OPM.IMPL},{n:'?X6F',md:OPM.IMPL},
+	{n:'LST',md:OPM.IMPL}, // TODO
+	{n:'SST',md:OPM.IMPL}, // TODO
 	// 0x7H
-	{n:'JMP',md:OPM.IMM,w:TXS.F},{n:'JMP',md:OPM.DIR,w:TXS.F},
+	{n:'!ill',md:OPM.IMM,w:TXS.F},{n:'JMP',md:OPM.DIR,w:TXS.F},
 	{n:'JMP',md:OPM.IND,w:TXS.F},{n:'JMP',md:OPM.PCO,w:TXS.F},
 	{n:'JMP',md:OPM.IPO,w:TXS.F},{n:'JMP',md:OPM.MOD,w:TXS.F},
-	{n:'?SYSCALL',md:OPM.IMPL},
-	{n:'?X77',md:OPM.RRX,w:TXS.F},
+	{n:'EPE',md:OPM.IMPL}, // TODO
+	{n:'MUL',md:OPM.RRX,w:TXS.F}, // TODO
 	{n:'JSR',nm:'CALL',md:OPM.RRX,w:TXS.F},{n:'JSR',nm:'CALL',md:OPM.DIR,w:TXS.F},
 	{n:'JSR',nm:'CALL',md:OPM.IND,w:TXS.F},{n:'JSR',nm:'CALL',md:OPM.PCO,w:TXS.F},
 	{n:'JSR',nm:'CALL',md:OPM.IPO,w:TXS.F},{n:'JSR',nm:'CALL',md:OPM.MOD,w:TXS.F},
-	{n:'?X7E',md:OPM.IMPL,x:OPL_EXT.MPUSH},
-	{n:'?X7F',md:OPM.IMPL,x:OPL_EXT.MPOP},
+	{n:'STK',md:OPM.IMPL,x:OPL_EXT.MPUSH},
+	{n:'POP',md:OPM.IMPL,x:OPL_EXT.MPOP},
 	// 0x8H
 	{n:'LDAB',nm:'LD',ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'LDAB',nm:'LD',ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
@@ -3858,8 +3868,8 @@ const oplist:OPLEntry[] = [
 	{n:'LDAB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'LDAB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'LDAB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'?sy86',md:OPM.IMPL},
-	{n:'?X87',md:OPM.IMPL},
+	{n:'DPE',md:OPM.IMPL}, // TODO
+	{n:'!ill87',md:OPM.IMPL},
 	{n:'LAAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.AL},
 	{n:'LABB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.AL},
 	{n:'LAXB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.AL},
@@ -3875,8 +3885,8 @@ const oplist:OPLEntry[] = [
 	{n:'LDA',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
 	{n:'LDA',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
 	{n:'LDA',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'?sy96',md:OPM.IMPL},
-	{n:'?s9-97',md:OPM.IMPL},
+	{n:'SOP',md:OPM.IMPL},
+	{n:'!ill97',md:OPM.IMPL},
 	{n:'LAA',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.A},
 	{n:'LAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.A},
 	{n:'LAX',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.A},
@@ -3892,8 +3902,8 @@ const oplist:OPLEntry[] = [
 	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.AL},
 	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.AL},
 	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.AL},
-	{n:'?XA6',md:OPM.IMPL},
-	{n:'?XA7',md:OPM.IMPL},
+	{n:'SEP',md:OPM.IMPL}, // TODO
+	{n:'!illA7',md:OPM.IMPL}, // TODO
 	{n:'SAAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.A},
 	{n:'SABB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.B},
 	{n:'SAXB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.X},
@@ -3909,8 +3919,8 @@ const oplist:OPLEntry[] = [
 	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.A},
 	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.A},
 	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.A},
-	{n:'?syB6',md:OPM.IMPL},
-	{n:'?s9-B7',md:OPM.IMPL},
+	{n:'ECK',md:OPM.IMPL}, // TODO
+	{n:'!illB7',md:OPM.IMPL}, // TODO
 	{n:'SAA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.A},
 	{n:'SAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'SAX',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.X},
@@ -3926,8 +3936,8 @@ const oplist:OPLEntry[] = [
 	{n:'LDBB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
 	{n:'LDBB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
 	{n:'LDBB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'?syC6',md:OPM.IMPL},
-	{n:'?s9-C7',md:OPM.IMPL},
+	{n:'DCK',md:OPM.IMPL},
+	{n:'!illC7',md:OPM.IMPL},
 	{n:'LBAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.BL},
 	{n:'LBBB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.BL},
 	{n:'LBXB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.BL},
@@ -3943,8 +3953,8 @@ const oplist:OPLEntry[] = [
 	{n:'LDB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
 	{n:'LDB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
 	{n:'LDB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'?XD6',md:OPM.IMPL},
-	{n:'?syD7',md:OPM.IMPL},
+	{n:'STR',md:OPM.IMPL}, // TODO
+	{n:'SAR',md:OPM.IMPL}, // TODO
 	{n:'LBA',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'LBB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.B},
 	{n:'LBX',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.B},
@@ -3960,8 +3970,8 @@ const oplist:OPLEntry[] = [
 	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.BL},
 	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.BL},
 	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.BL},
-	{n:'?syE6',md:OPM.IMPL},
-	{n:'?s9-E7',md:OPM.IMPL},
+	{n:'LAR',md:OPM.IMPL},
+	{n:'!illE7',md:OPM.IMPL},
 	{n:'SBAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.A},
 	{n:'SBBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.B},
 	{n:'SBXB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.X},
@@ -3977,8 +3987,8 @@ const oplist:OPLEntry[] = [
 	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.B},
 	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.B},
 	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.B},
-	{n:'?syF6',md:OPM.IMPL,l:3}, // TODO
-	{n:'?XF7',md:OPM.IMPL},
+	{n:'LIO/SIO',md:OPM.IMPL,l:3}, // TODO
+	{n:'MVL',md:OPM.IMPL}, // TODO
 	{n:'SBA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.A},
 	{n:'SBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.B},
 	{n:'SBX',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.X},
@@ -4547,29 +4557,49 @@ class CPU6 {
 				}
 			}
 			break;
-		case OPL_EXT.DMA:
+		case OPL_EXT.PAGE: {
+			rvc = dfetch();
+			let mod1 = (rvc >> 2) & 3;
+			let mod2 = rvc & 3;
+			let sel = (rvc >> 4);
+			switch(sel) {
+			case 0: opname = "WPF";
+				break;
+			case 1: opname = "RPF";
+				break;
+			case 2: opname = "WPF1";
+				break;
+			case 3: opname = "RPF1";
+				break;
+			case 4: opname = "WPFH";
+				break;
+			case 5: opname = "RPFH";
+				break;
+			}
+			break; }
+		case OPL_EXT.DMA: {
 			rvc = dfetch();
 			let reg = (rvc >> 4);
 			let sel = (rvc & 15);
 			switch(sel) {
-			case 0: opname = (NAME_CONV == 1) ? opname + 'WR.A' : 'LDDMAA';
+			case 0: opname = (NAME_CONV == 1) ? opname + 'LD.A' : 'LDDMAA';
 				pstr = regname[16 + reg];
 				break;
-			case 1: opname = (NAME_CONV == 1) ? opname +'RD.A' : 'STDMAA';
+			case 1: opname = (NAME_CONV == 1) ? opname +'ST.A' : 'STDMAA';
 				psstr = regname[16 + reg];
 				break;
-			case 2: opname = (NAME_CONV == 1) ? opname +'WR.C' : 'LDDMAC';
+			case 2: opname = (NAME_CONV == 1) ? opname +'LD.C' : 'LDDMAC';
 				pstr = regname[16 + reg];
 				break;
-			case 3: opname = (NAME_CONV == 1) ? opname +'RD.C' : 'STDMAC';
+			case 3: opname = (NAME_CONV == 1) ? opname +'ST.C' : 'STDMAC';
 				psstr = regname[16 + reg];
 				break;
 			case 4:
-				opname = (NAME_CONV == 1) ? opname +'WR.M' : 'SETDMAM';
+				opname = (NAME_CONV == 1) ? opname +'LD.M' : 'SETDMAM';
 				psstr = `#${hexlist(reg,1)}`;
 				break;
 			case 5:
-				opname = (NAME_CONV == 1) ? opname +'WR.M' : 'SETDMAMR';
+				opname = (NAME_CONV == 1) ? opname +'LD.M' : 'SETDMAMR';
 				psstr = regname[16 + reg];
 				break;
 			case 6:
@@ -4579,17 +4609,17 @@ class CPU6 {
 				opname = (NAME_CONV == 1) ? opname +'DIS' : 'DDMA';
 				break;
 			case 8:
-				opname = (NAME_CONV == 1) ? opname +'WR.S' : 'LDISR';
+				opname = (NAME_CONV == 1) ? opname +'LD.S' : 'LDISR';
 				psstr = regname[16 + reg];
 				break;
 			case 9:
-				opname = (NAME_CONV == 1) ? opname +'RD.S' : 'STISR';
+				opname = (NAME_CONV == 1) ? opname +'ST.S' : 'STISR';
 				pstr = regname[16 + reg];
 				break;
 			default:
 				opname += hex(sel, 1);
 			}
-			break;
+			break; }
 		}
 		
 		if (NAME_CONV == 1 && opcs.nm !== undefined) {
@@ -4646,8 +4676,9 @@ const mmio_0 = new MMIOMulti();
 const mmio_1 = new MMIOMulti();
 bpl.configmemory(0x3f000, mmio_0, 256);
 bpl.configmemory(0x3f100, mmio_1, 256);
-mmio_1.adddev(0, 0x10, cx_diag0);
+mmio_1.adddev(0, 0x11, cx_diag0);
 mmio_1.adddev(0x40, 0x10, dsk2_0);
+//mmio_0.adddev(0xe0, 0x10, new MMIOTrace());
 function setupmemory() {
 	for(let q = 0; q < 8; q++) {
 		bpl.configmemory(q * 0x4000, mem[q], 0x4000);
@@ -4705,6 +4736,9 @@ function update_sense() {
 	style_if(btn_ss2,'active',(sense_switch & 2) > 0);
 	style_if(btn_ss3,'active',(sense_switch & 4) > 0);
 	style_if(btn_ss4,'active',(sense_switch & 8) > 0);
+	style_if(btn_ssR,'active',(dswitch & 8) > 0);
+	style_if(btn_ssH,'active',(dswitch & 4) > 0);
+	style_if(btn_ssI,'active',(dswitch & 2) > 0);
 }
 function update_diagsw() {
 	style_if(btn_dt1,'active',(cx_dip & 1) > 0);
@@ -4728,6 +4762,18 @@ btn_ss3.addEventListener('click', function(ev) {
 });
 btn_ss4.addEventListener('click', function(ev) {
 	sense_switch ^= 8;
+	update_sense();
+});
+btn_ssR.addEventListener('click', function(ev) {
+	dswitch ^= 8;
+	update_sense();
+});
+btn_ssH.addEventListener('click', function(ev) {
+	dswitch ^= 4;
+	update_sense();
+});
+btn_ssI.addEventListener('click', function(ev) {
+	dswitch ^= 2;
 	update_sense();
 });
 btn_dt1.addEventListener('click', function(ev) {
