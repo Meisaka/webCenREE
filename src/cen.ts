@@ -81,6 +81,7 @@ const in_softcaps = document.getElementById('softcaps') as HTMLInputElement;
 const in_diagins = document.getElementById('diagins') as HTMLInputElement;
 const in_dbgcmd = document.getElementById('dbgcmd') as HTMLInputElement;
 const btn_cm_import = document.getElementById('cm_imp') as HTMLButtonElement;
+const btn_cm_tocrt = document.getElementById('cm_vki') as HTMLButtonElement;
 const btn_cm_clear = document.getElementById('cm_clear') as HTMLButtonElement;
 const txt_anno = document.getElementById('anno') as HTMLTextAreaElement;
 const cv_diag = document.getElementById('fp_diag') as HTMLCanvasElement;
@@ -184,6 +185,9 @@ cx_term0.strokeStyle = '#6ac';
 cx_term0.font = '12px monospace';
 cx_map.font = '20px monospace';
 
+interface Run {
+	run(increment:number):void;
+}
 let run_ctl = 0;
 let run_rate = 1;
 let run_step:boolean = false;
@@ -195,11 +199,18 @@ let dis_vpc_end = 0x200;
 let run_accu = 0;
 let run_accutime = 0;
 let run_once = false;
+let rate_match_input = false;
+const run_hw:Run[] = [];
 let run_stop:null | (()=>void);
 function do_run_stop():void {
 	if (run_stop) {
 		run_stop();
 		run_stop = null;
+	}
+}
+function run_hw_steps(inc:number) {
+	for(let r of run_hw) {
+		r.run(inc);
 	}
 }
 function run_control(run:boolean):void {
@@ -225,6 +236,7 @@ function run_control(run:boolean):void {
 			if (run_rate >= 10000) {
 				let hsr = (run_rate / 100) | 0;
 				for (let i=0;i<hsr;i++) {
+					run_hw_steps(100);
 					mcsim.hsstep();
 					if (run_ctl == 0) {
 						do_run_stop();
@@ -233,6 +245,7 @@ function run_control(run:boolean):void {
 				}
 			} else {
 				for (let i=0;i<run_rate;i++) {
+					run_hw_steps(1);
 					mcsim.step(i == (run_rate - 1));
 					if (run_ctl == 0) {
 						do_run_stop();
@@ -244,8 +257,12 @@ function run_control(run:boolean):void {
 			run_accutime += runtime;
 			run_accu += run_rate;
 			run_busy = false;
-			mcsim.step(run_ctl == 0);
-			mcsim.showstate(run_ctl == 0);
+			if(run_ctl == 0) {
+				mcsim.step(true);
+				mcsim.showstate(true);
+			} else {
+				mcsim.showstate(false);
+			}
 			if (dis_after) {
 				show_disasm();
 			}
@@ -1042,11 +1059,38 @@ class VTerm {
 		if (this.input_buf.length < 8)
 			this.input_buf.push(c);
 		if (this.mux != null) {
-			this.mux.receive();
+			this.mux.receive_some(this.input_buf);
+		}
+	}
+	text_import(txt:string):void {
+		let last = false;
+		for(let c of txt) {
+			let v = c.codePointAt(0) as number;
+			if(v == 10) {
+				if (last) {
+					this.input_buf.push(10); // backslash + newline (linefeed)
+				} else {
+					this.input_buf.push(13); // typical Centurion newline
+				}
+				last = false;
+			} else if (v == 92) { // backslash
+				last = true;
+			} else {
+				if (last) this.input_buf.push(92);
+				this.input_buf.push(v);
+				last = false;
+			}
+		}
+		if (this.mux != null) {
+			this.mux.receive_some(this.input_buf);
 		}
 	}
 }
 const cx_crt0 = new VTerm(cx_term0);
+function console_text_import(txt:string):void {
+	rate_match_input = true;
+	cx_crt0.text_import(txt);
+}
 const vtctrlkeys:{[id:string]:number} = {
 	Digit2: 0, KeyA: 1, KeyB: 2, KeyC: 3,
 	KeyD: 4, KeyE: 5, KeyF: 6, KeyG: 7,
@@ -3391,22 +3435,40 @@ class MUXPort {
 	write_full = false;
 	read_busy = false;
 	read_full = false;
+	read_buffer = 0;
+	_cts = true;
 	buf_write = 0;
 	card:MMIOMux;
+	input_interval = 0;
 	constructor(card:MMIOMux) {
 		this.card = card;
+	}
+	run(increment:number):void {
+		if(rate_match_input && cx_crt0.input_buf.length > 0) {
+			this.input_interval += increment;
+			if(this.input_interval >= 20000) {
+				this.input_interval = 0;
+				this.receive_some(cx_crt0.input_buf);
+			}
+			if(cx_crt0.input_buf.length == 0) {
+				rate_match_input = false;
+			}
+		}
+	}
+	get cts() { return this._cts; }
+	set cts(value:boolean) {
+		this._cts = value;
+		if(!rate_match_input) this.receive_some(cx_crt0.input_buf);
 	}
 	read_status():number {
 		return (this.write_busy ? 0 : 2) | (this.read_busy ? 1 : 0) | 0x20;
 	}
 	read_data():number {
-		let vcc = cx_crt0.input_buf.shift();
+		let vcc = this.read_buffer;
+		this.read_buffer = 0;
 		this.read_busy = false;
-		if (cx_crt0.input_buf.length != 0) this.receive();
-		if (vcc != undefined) {
-			return vcc;
-		}
-		return 0;
+		if(!rate_match_input) this.receive_some(cx_crt0.input_buf);
+		return vcc;
 	}
 	write_control(value:number):void {
 	}
@@ -3418,22 +3480,153 @@ class MUXPort {
 			cx_crt0.write(this.buf_write & 0x7f);
 		//}, 0);
 	}
-	receive():void {
+	receive_some(buffer:number[]):void {
+		if (!this._cts) return;
+		if (this.read_busy) {
+			//this.card.interrupt_pend = true;
+			//this.card.mux_cause = true;
+			return;
+		}
+		let sv = buffer.shift();
+		if (sv !== undefined) {
+			this.receive(sv);
+		}
+	}
+	receive(data:number):void {
+		this.read_buffer = data;
 		this.read_busy = true;
 		this.card.interrupt_pend = true;
 		this.card.mux_cause = true;
 	}
 }
-class MMIOTrace implements MemAccessR, MemAccessW {
-	readbyte(address: number): number {
-		console.log('IOTrace-R', address);
-		return 0;
-	}
+class MockPrinter implements MemAccessR, MemAccessW {
 	is_io = true;
-	writebyte(address: number, value: number): void {
-		console.log('IOTrace-W', address, value);
-	}
 	is_write = true;
+	readbyte(address: number): number {
+		let value = 0;
+		if(address == 1) {
+			value = 31; // don't know the actual status, but this works :D
+		}
+		return value;
+	}
+	writebyte(address: number, value: number): void {
+		if (address == 0) {
+			if(value > 127) {
+				let v = value & 127;
+				let c;
+				if (v == 12) {
+					c = "\u21ca\n";
+				} else {
+					c = String.fromCodePoint(value & 127);
+				}
+				txt_anno.value += c;
+			}
+		}
+	}
+}
+class TestCMD implements MemAccessR, MemAccessW {
+	is_io = true;
+	is_write = true;
+	data_in = 0;
+	data_out = 0;
+	data_fout = false;
+	data_fin = false;
+	state = 0;
+	address = 0;
+	count = 0;
+	process() {
+		switch(this.state) {
+		case 0:
+			if(this.data_fin) {
+				if(this.data_in == 0x46) {
+					this.state = 0x46;
+				}
+				if(this.data_in == 0x47) {
+					this.state = 0x46;
+				}
+				this.data_fin = false;
+			}
+			break;
+		case 1:
+			if(this.data_fin) {
+				this.data_fin = false;
+			}
+			break;
+		case 0x40:
+			if(this.data_fin) {
+				this.data_fin = false;
+			}
+			break;
+		case 0x46:
+			if(this.data_fin) {
+				this.data_fin = false;
+				this.state = 0x100;
+			}
+			break;
+		case 0x100:
+			if(this.data_fin) {
+				this.data_fin = false;
+				this.state = 0x101;
+			}
+			break;
+		case 0x101:
+			if(this.data_fin) {
+				this.data_fin = false;
+				this.state = 0x102;
+			}
+			break;
+		case 0x102:
+			if(this.data_fin) {
+				this.data_fin = false;
+				this.state = 0;
+				this.data_out = 0;
+				this.data_fout = true;
+			}
+			break;
+		}
+	}
+	readbyte(address: number): number {
+		let value = 0;
+		if (address == 1) {
+			if(this.data_fout) value |= 1;
+			if(this.data_fin) value |= 2;
+			if(this.state > 16) value |= 8;
+			this.process();
+		} else {
+			this.data_fout = false;
+			value = this.data_out;
+			if(this.state == 1) {
+				this.state = 0x40;
+			}
+			//console.log('CMDTrace-R', address, hex(value));
+		}
+		return value;
+	}
+	writebyte(address: number, value: number): void {
+		if(address == 0) {
+			this.data_in = value;
+			this.data_fin = true;
+		} else {
+			console.log('CMDTrace-W', address, hex(value));
+		}
+	}
+}
+class MMIOTrace implements MemAccessR, MemAccessW {
+	v = new Uint8Array(20);
+	is_io = true;
+	is_write = true;
+	readbyte(address: number): number {
+		let value = this.v[address];
+		console.log('IOTrace-R', address, value);
+		return value;
+	}
+	writebyte(address: number, value: number): void {
+		let c = ' ';
+		if(value > 127) {
+			c = String.fromCodePoint(value & 127);
+		}
+		console.log('IOTrace-W', address, value, c);
+	}
 }
 class MMIOMulti implements MemAccessR, MemAccessW {
 	is_io = true;
@@ -3489,6 +3682,9 @@ class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 	interrupt_pend = false;
 	mux_cause = false;
 	tx_int = 0;
+	constructor() {
+		run_hw.push(this.muxports[0]);
+	}
 	readbyte(address:number):number {
 		let v = 0;
 		if (address < 8) {
@@ -3504,7 +3700,7 @@ class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 		} else if (address == 15) {
 			if (this.mux_cause) {
 				this.mux_cause = false;
-				if (cx_crt0.input_buf.length > 0) {
+				if (this.muxports[0].read_busy) {
 					v = 0; // (card_id << 4)
 				} else if (this.tx_int > 0) {
 					v = 0; // (card_id << 4)
@@ -3519,7 +3715,7 @@ class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 				}
 			}
 			//console.log('MUX:R:' + hex(address,1), hex(v));
-		} else {
+		} else if (address < 16) {
 			console.log('MUX:R:' + hex(address,1), hex(v));
 		}
 		return v;
@@ -3539,6 +3735,12 @@ class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 				}
 			}
 		} else if (address == 8) { // CTS control
+			let onoff = value & 1;
+			let port = (value >> 1) & 3;
+			let selmux = this.muxports[port];
+			if (selmux) {
+				selmux.cts = (onoff == 0);
+			}
 		} else if (address == 10) {
 			this.interrupt_level = value & 0xf;
 		} else if (address == 12) {
@@ -3552,7 +3754,7 @@ class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 			this.interrupt_en = true;
 		} else if (address == 15) {
 			this.reset();
-		} else {
+		} else if (address < 16) {
 			console.log('MUX:W:' + hex(address), hex(value));
 		}
 		return;
@@ -4674,11 +4876,19 @@ bpl.configio(1, dsk2_0);
 bpl.configio(0, mmio_mux);
 const mmio_0 = new MMIOMulti();
 const mmio_1 = new MMIOMulti();
+const mmio_8 = new MMIOMulti();
 bpl.configmemory(0x3f000, mmio_0, 256);
 bpl.configmemory(0x3f100, mmio_1, 256);
+bpl.configmemory(0x3f800, mmio_8, 256);
 mmio_1.adddev(0, 0x11, cx_diag0);
 mmio_1.adddev(0x40, 0x10, dsk2_0);
-//mmio_0.adddev(0xe0, 0x10, new MMIOTrace());
+const mmio_t = new MMIOTrace();
+//@ts-ignore
+window.p = mmio_t;
+const test_cmd = new TestCMD();
+mmio_8.adddev(0x08, 2, test_cmd);
+const prt_0 = new MockPrinter();
+mmio_0.adddev(0xe0, 0x10, prt_0);
 function setupmemory() {
 	for(let q = 0; q < 8; q++) {
 		bpl.configmemory(q * 0x4000, mem[q], 0x4000);
@@ -4871,6 +5081,12 @@ btn_cm_import.addEventListener('click', function(ev) {
 	annotation_import(txt_anno.value);
 	show_disasm();
 });
+btn_cm_tocrt.addEventListener('click', function(ev) {
+	console_text_import(txt_anno.value);
+});
+btn_cm_clear.addEventListener('click', function(ev) {
+	txt_anno.value = '';
+});
 if ((document.getElementById('conv_ee') as HTMLInputElement).checked) {
 	NAME_CONV = 0;
 }
@@ -4981,10 +5197,6 @@ document.body.addEventListener('drop', function(ev) {
 	}
 	ev.preventDefault();
 });
-
-if (txt_anno.value.length > 0) {
-	annotation_import(txt_anno.value);
-}
 
 show_disasm();
 
