@@ -10,6 +10,8 @@ const run_rate3 = document.getElementById('b_r3') as HTMLButtonElement;
 const run_rate4 = document.getElementById('b_r4') as HTMLButtonElement;
 const run_rate5 = document.getElementById('b_r5') as HTMLButtonElement;
 const run_rate6 = document.getElementById('b_r6') as HTMLButtonElement;
+const run_rate7 = document.getElementById('b_r7') as HTMLButtonElement;
+const run_rate8 = document.getElementById('b_r8') as HTMLButtonElement;
 const micro_button = document.getElementById('b_micro') as HTMLButtonElement;
 const win_micro = document.getElementById('mclisting') as HTMLDivElement;
 const microstep_button = document.getElementById('b_mstep') as HTMLButtonElement;
@@ -209,8 +211,8 @@ function do_run_stop():void {
 	}
 }
 function run_hw_steps(inc:number) {
-	for(let r of run_hw) {
-		r.run(inc);
+	for(let i = 0; i < run_hw.length; i++) {
+		run_hw[i].run(inc);
 	}
 }
 function run_control(run:boolean):void {
@@ -233,7 +235,7 @@ function run_control(run:boolean):void {
 			run_busy = true;
 			run_follow = (run_rate <= 100);
 			let runtime = Date.now();
-			if (run_rate >= 10000) {
+			if (run_rate > 10000) {
 				let hsr = (run_rate / 100) | 0;
 				for (let i=0;i<hsr;i++) {
 					run_hw_steps(100);
@@ -261,6 +263,7 @@ function run_control(run:boolean):void {
 				mcsim.step(true);
 				mcsim.showstate(true);
 			} else {
+				mcsim.step(false);
 				mcsim.showstate(false);
 			}
 			if (dis_after) {
@@ -538,6 +541,8 @@ AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`),
 };
 const uc = {
+c0:new Uint32Array(2048),
+c1:new Uint32Array(2048),
 e:bload(`wAAADQABDS2TUnAAUJoAACAAGgoQEAEACoAAAAEQAAAAAAAAgAENAAAAcC0AAAAtCQoAABAQAAAA
 AC1QAACdYAAAcBANDQAKCwAAAIAAAQAKGgAQAAAAAIAAAAABAAAAAAAAAYAAcBBQAAAgEgAAAAAA
 ABCAAAAAUAIAAAAAHRBQAAAKDQENLRMAAC0AAABQAQAQABAAIBEQgAAAI4AwIFBwEQAKABoAABoA
@@ -1208,30 +1213,127 @@ function bit(v:number, b:number):number {
 	return (v >> b) & 1;
 }
 
-const ALU_RN = ['0','D','A','B','Q'];
-const ALU_FN = ['+','-','|','&','^'];
-const ALU_S = [[2,4],[2,3],[0,4],[0,3],[0,2],[1,2],[1,4],[1,0]];
+const ALU_FN = ['+','|','&','^'];
 const ALU_F:{on:number,ivr:boolean,ivs:boolean}[] = [
 	{on:0,ivr:false,ivs:false},
-	{on:1,ivr:true,ivs:false},
-	{on:1,ivr:false,ivs:true},
+	{on:0,ivr:true,ivs:false},
+	{on:0,ivr:false,ivs:true},
+	{on:1,ivr:false,ivs:false},
 	{on:2,ivr:false,ivs:false},
+	{on:2,ivr:true,ivs:false},
 	{on:3,ivr:false,ivs:false},
-	{on:3,ivr:true,ivs:false},
-	{on:4,ivr:false,ivs:false},
-	{on:4,ivr:true,ivs:false}
-]
-const ALU_D = [
-	'      Q=  F=',
-	'          F=',
-	'F=A B=  ',
-	'      B=F=',
-	'srbQ  B=F=',
-	'srb   B=F=',
-	'slbQ  B=F=',
-	'slb   B=F='
+	{on:3,ivr:true,ivs:false}
 ];
 
+class ALU8 {
+	in_data:number = 0;
+	reg:number[] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+	regq:number = 0;
+	y:number = 0;
+	out_f:number = 0;
+	carry_in:number = 0;
+	half_carry_out:number = 0;
+	main_carry_out:number = 0;
+	sign:number = 0;
+	over:number = 0;
+	zero:number = 0;
+	ram0:number = 0;
+	ram7:number = 0;
+	q0:number = 0;
+	q7:number = 0;
+	is_shift:boolean = false;
+	is_right:boolean = false;
+
+	// save results to register(s)
+	step(dst:number, sel_b:number) {
+		switch(dst) {
+		case 0: this.regq = this.y; break; // Q=
+		case 1: break; // nop
+		case 2: this.reg[sel_b] = this.y; break; // B=
+		case 3: this.reg[sel_b] = this.y; break; // B=
+		case 4: // B=F>>1 Q>>=1
+			this.reg[sel_b] = (this.y >> 1) | (this.ram7 << 7);
+			this.regq = (this.regq >> 1) | (this.q7 << 7);
+			break;
+		case 5: // B=F>>1
+			this.reg[sel_b] = (this.y >> 1) | (this.ram7 << 7);
+			break;
+		case 6: // B=F<<1 Q<<=1
+			this.reg[sel_b] = ((this.y << 1) | this.ram0) & 255;
+			this.regq = ((this.regq << 1) | this.q0) & 255;
+			break;
+		case 7: // B=F<<1
+			this.reg[sel_b] = ((this.y << 1) | this.ram0) & 255;
+			break;
+		}
+	}
+	// perform logic flow
+	resolve_alu(alsrc:number, alfn:number, aldst:number, sel_a:number, sel_b:number) {
+		const dsti = aldst & 7;
+		const fn = ALU_F[alfn & 7];
+		// TODO fn.iv
+		const vals_1 = this.in_data;
+		const vals_2 = this.reg[sel_a];
+		const vals_3 = this.reg[sel_b];
+		const vals_4 = this.regq;
+		let val_r:number = 0;
+		let val_s:number = 0;
+		switch(alsrc & 7) {
+		case 0: val_r = vals_2; val_s = vals_4; break;
+		case 1: val_r = vals_2; val_s = vals_3; break;
+		case 2: val_r = 0; val_s = vals_4; break;
+		case 3: val_r = 0; val_s = vals_3; break;
+		case 4: val_r = 0; val_s = vals_2; break;
+		case 5: val_r = vals_1; val_s = vals_2; break;
+		case 6: val_r = vals_1; val_s = vals_4; break;
+		case 7: val_r = vals_1; val_s = 0; break;
+		}
+		val_r = (fn.ivr ? ~val_r : val_r) & 255;
+		val_s = (fn.ivs ? ~val_s : val_s) & 255;
+		let out = 0;
+		switch(fn.on) { // [+ & | ⊻]
+		case 0: // subtraction is just addition with inverted inputs
+			out = val_r + val_s + this.carry_in;
+			this.main_carry_out = (out > 255) ? 1 : 0;
+			this.half_carry_out = (((val_r & 15) + (val_s & 15) + this.carry_in) > 15) ? 1 : 0;
+			this.over = this.main_carry_out ^ ((((val_r & 127) + (val_s & 127) + this.carry_in) > 127) ? 1 : 0);
+			break;
+		case 1:
+			out = val_r | val_s;
+			this.half_carry_out = ((((val_r|val_s)&15)==15) ? 0 : 1) | this.carry_in;
+			this.over = this.main_carry_out = (((val_r|val_s)==255) ? 0 : 1) | this.carry_in;
+			break;
+		case 2:
+			out = val_r & val_s;
+			this.half_carry_out = ((((val_r&val_s)&15)!=0) ? 1 : 0) | this.carry_in;
+			this.over = this.main_carry_out = (((val_r&val_s)!=0) ? 1 : 0) | this.carry_in;
+			break;
+		case 3:
+			out = val_r ^ val_s;
+			break;
+		}
+		out &= 255;
+		this.y = out;
+		this.zero = (out == 0) ? 1 : 0;
+		this.sign = (out > 127) ? 1 : 0;
+		if (dsti == 2) {
+			this.out_f = vals_2 & 255; // select A to the bus output
+		} else {
+			this.out_f = out;
+		}
+		this.is_shift = dsti > 3;
+		this.is_right = (dsti & 2) == 0;
+		if(this.is_shift) {
+			if(this.is_right) {
+				this.q0 = this.regq & 1;
+				this.ram0 = out & 1;
+			} else {
+				this.q7 = (this.regq >> 7) & 1;
+				this.ram7 = (out >> 7) & 1;
+			}
+		}
+	}
+}
 class ALU {
 	src:number = 0;
 	aop:number = 0;
@@ -1281,83 +1383,104 @@ class ALU {
 		}
 	}
 	// perform logic flow
-	resolve() {
-		const src = ALU_S[this.src & 7];
+	resolve_alu() {
 		const dsti = this.dst & 7;
 		const fn = ALU_F[this.aop & 7];
 		const ia = this.sel_a&15;
 		const ib = this.sel_b&15;
 		// TODO fn.iv
-		const vals = [0, this.in_data, this.reg[ia], this.reg[ib], this.regq];
-		let val_r = vals[src[0]];
-		let val_s = vals[src[1]];
+		const vals_1 = this.in_data;
+		const vals_2 = this.reg[ia];
+		const vals_3 = this.reg[ib];
+		const vals_4 = this.regq;
+		let val_r:number = 0;
+		let val_s:number = 0;
+		switch(this.src & 7) {
+		case 0: val_r = vals_2; val_s = vals_4; break;
+		case 1: val_r = vals_2; val_s = vals_3; break;
+		case 2: val_r = 0; val_s = vals_4; break;
+		case 3: val_r = 0; val_s = vals_3; break;
+		case 4: val_r = 0; val_s = vals_2; break;
+		case 5: val_r = vals_1; val_s = vals_2; break;
+		case 6: val_r = vals_1; val_s = vals_4; break;
+		case 7: val_r = vals_1; val_s = 0; break;
+		}
 		val_r = (fn.ivr ? ~val_r : val_r) & 15;
 		val_s = (fn.ivs ? ~val_s : val_s) & 15;
 		let out = 0;
-		switch(fn.on) { // [+ - & | ⊻]
-		case 0:
-		case 1:
+		switch(fn.on) { // [+ & | ⊻]
+		case 0: // subtraction is just addition with inverted inputs
 			out = val_r + val_s + this.carry_in;
 			this.carry_out = (out > 15) ? 1 : 0;
 			this.over = this.carry_out ^ ((((val_r & 7) + (val_s & 7) + this.carry_in) > 7) ? 1 : 0);
 			break;
-		case 2:
+		case 1:
 			out = val_r | val_s;
 			this.over = this.carry_out = (((val_r|val_s)==15) ? 0 : 1) | this.carry_in;
 			break;
-		case 3:
+		case 2:
 			out = val_r & val_s;
 			this.over = this.carry_out = (((val_r&val_s)!=0) ? 1 : 0) | this.carry_in;
 			break;
-		case 4:
+		case 3:
 			out = val_r ^ val_s;
 			break;
 		}
-		this.y = out & 15;
-		this.zero = this.y == 0 ? 1 : 0;
-		this.sign = this.y > 7 ? 1 : 0;
+		out &= 15;
+		this.y = out;
+		this.zero = (out == 0) ? 1 : 0;
+		this.sign = (out > 7) ? 1 : 0;
 		if (dsti == 2) {
-			this.out_f = vals[2] & 15; // select A to the bus output
+			this.out_f = vals_2 & 15; // select A to the bus output
 		} else {
-			this.out_f = this.y;
+			this.out_f = out;
 		}
 		this.is_shift = dsti > 3;
 		this.is_right = (dsti & 2) == 0;
 		if(this.is_shift) {
 			if(this.is_right) {
 				this.q0 = this.regq & 1;
-				this.ram0 = this.y & 1;
+				this.ram0 = out & 1;
 			} else {
 				this.q3 = (this.regq >> 3) & 1;
-				this.ram3 = (this.y >> 3) & 1;
+				this.ram3 = (out >> 3) & 1;
 			}
 		}
 	}
 	// debug/trace string
-	funcstr() {
-		const srci = this.src & 7;
-		const fni = this.aop & 7;
-		const dsti = this.dst & 7;
-		const src = ALU_S[srci];
-		const fn = ALU_F[fni];
-		const dst = ALU_D[dsti];
-		const ia = this.sel_a&15;
-		const ib = this.sel_b&15;
-		let r = `SFD:${srci}${fni}${dsti} ${dst}${fn.ivr?'~':' '}${ALU_RN[src[0]]}${ALU_FN[fn.on]}${fn.ivs?'~':' '}${ALU_RN[src[1]]}`;
-		return r.replace(/[ABb]/g,ss=>{if(ss=='b')return'B';return ss=='A'? `[${hex(ia,1)}]`:`[${hex(ib,1)}]`;});
-	}
 	static trace_str(srci:number,fni:number,dsti:number,ia:number,ib:number) {
-		const src = ALU_S[srci];
+		const vals_2 = `[${hex(ia,1)}]`;
+		const vals_3 = `[${hex(ib,1)}]`;
+		let val_r:string;
+		let val_s:string;
+		switch(srci & 7) {
+		default:
+		case 0: val_r = vals_2; val_s = 'Q'; break;
+		case 1: val_r = vals_2; val_s = vals_3; break;
+		case 2: val_r = '0'; val_s = 'Q'; break;
+		case 3: val_r = '0'; val_s = vals_3; break;
+		case 4: val_r = '0'; val_s = vals_2; break;
+		case 5: val_r = 'D'; val_s = vals_2; break;
+		case 6: val_r = 'D'; val_s = 'Q'; break;
+		case 7: val_r = 'D'; val_s = '0'; break;
+		}
+		let dst:string;
+		switch(dsti & 7) {
+		default:
+		case 0: dst = '      Q=  F='; break;
+		case 1: dst = '          F='; break;
+		case 2: dst = `F=${vals_2} ${vals_3}=  `; break;
+		case 3: dst = `      ${vals_3}=F=`; break;
+		case 4: dst = `>>Q >>${vals_3}=F=`; break;
+		case 5: dst = `    >>${vals_3}=F=`; break;
+		case 6: dst = `<<Q <<${vals_3}=F=`; break;
+		case 7: dst = `    <<${vals_3}=F=`; break;
+		}
 		const fn = ALU_F[fni];
-		const dst = ALU_D[dsti];
-		let r = `SFD:${srci}${fni}${dsti} ${dst}${fn.ivr?'~':' '}${ALU_RN[src[0]]}${ALU_FN[fn.on]}${fn.ivs?'~':' '}${ALU_RN[src[1]]}`;
-		return r.replace(/[ABb]/g,ss=>{if(ss=='b')return'B';return ss=='A'? `[${hex(ia,1)}]`:`[${hex(ib,1)}]`;});
+		return `SFD:${srci}${fni}${dsti} ${dst}${fn.ivr?'~':' '}${val_r}${ALU_FN[fn.on]}${fn.ivs?'~':' '}${val_s}`;
 	}
 }
-const FN_E6 = [
-	'','F=>Result','F=>RIdx','F=>Level',
-	'F=>PTA','ASwap','SEQ_RE','CondRegLD'
-];
+
 const FN_SEQ_SN = ['uPC','AHR','STK','DIR'];
 const FN_SEQ_FE = ['POP','---','PSH','---']; // FE:0 | (PUSH:1/POP:0) << 1
 
@@ -1525,15 +1648,14 @@ class Backplane implements MemAccessR, MemAccessW {
 		}
 	}
 	is_interrupt(cpl:number):boolean {
-		for(let i = 0; this.decode_io[i] != null; i++) {
+		for(let i = 0; i < this.decode_io.length; i++) {
 			let dev = this.decode_io[i];
 			if (dev.is_interrupt() && (dev.getlevel() > cpl)) return true;
 		}
 		return false;
 	}
 	ack_interrupt(cpl:number):number {
-		for(let i = 0; this.decode_io[i] != null; i++) {
-			let dev = this.decode_io[i];
+		for(let dev of this.decode_io) {
 			if (dev.is_interrupt() && (dev.getlevel() > cpl)) {
 				dev.acknowledge();
 				return dev.getlevel();
@@ -1591,8 +1713,7 @@ function mcsetup() {
 const s0 = new Sequencer();
 const s1 = new Sequencer();
 const s2 = new Sequencer();
-const alul= new ALU();
-const aluh= new ALU();
+const aluc= new ALU8();
 let mcpc = 0; // not a "true" register, simulates the microcode pipeline registers
 let alu_flag = 0;
 let ccr_f = 0;
@@ -1611,7 +1732,6 @@ let memdata_in = 0;
 let memdata_out = 0;
 let resetting:boolean = true;
 let physaddr = 0;
-let physpre = 0;
 let busctl = 0;
 let sysctl = 0;
 let sys_write_latch = false;
@@ -1684,7 +1804,7 @@ function showstate(in_halt:boolean) {
 	let mstk = '';
 	let msp0 = s0.sp, msp1 = s1.sp, msp2 = s2.sp;
 	let fl = alu_flag;
-	let malu1 = hex((aluh.regq << 4) | alul.regq, 2) +
+	let malu1 = hex(aluc.regq, 2) +
 	` ${hex(fl,2)} ${(fl&0x20)!=0?'L':'-'}${(fl&0x10)!=0?'H':'-'}${(fl&8)!=0?'C':'-'}${(fl&4)!=0?'V':'-'}${(fl&2)!=0?'S':'-'}${(fl&1)!=0?'Z':'-'}`;
 	let malu2 = '';
 	let malu3 = '';
@@ -1695,8 +1815,8 @@ function showstate(in_halt:boolean) {
 		msp2 = (msp2 - 1) & 3;
 	}
 	for(let i=0;i<8;i++) {
-		malu2 += hex((aluh.reg[i] << 4) | alul.reg[i], 2) + ' ';
-		malu3 += hex((aluh.reg[i+8] << 4) | alul.reg[i+8], 2) + ' ';
+		malu2 += hex(aluc.reg[i], 2) + ' ';
+		malu3 += hex(aluc.reg[i+8], 2) + ' ';
 	}
 	
 	for(let rindex = 0;rindex < 256;rindex += 32) {
@@ -1784,10 +1904,10 @@ function showstate(in_halt:boolean) {
 	pta2a = 0;
 	pta3a = 0;
 	
-	const pindex = pta << 5;
+	const ptindex = pta << 5;
 	for (let k = 0; k < 4; k++) {
 		let pgt = '';
-		const psubindex = pindex | (k << 3);
+		const psubindex = ptindex | (k << 3);
 		for (let i = 0; i < 8; i++) {
 			const page = pagetb[psubindex | i];
 			const pf = (page & 128) != 0;
@@ -1802,10 +1922,8 @@ function showstate(in_halt:boolean) {
 	` ${(bc&16)>0?'DA':'--'} ${(bc&32)>0?'PT':'--'} ${(bc&64)>0?'MFE':'---'}${(bc&128)>0?'DMA':'---'}`;
 	mcr_sys.innerText = `${(sc&1)>0?'DM4':'---'} ${(sc&2)>0?'DM3':'---'} ${(sc&4)>0?'TE':'--'} ${(sc&8)>0?'-':'M'}` +
 	` ${(sc&16)>0?'R':'H'} ${(sc&32)>0?'--':'TR'} ${(sc&64)>0?'A':'-'} ${(sc&128)>0?'IA':'--'}`;
-	const mpindex = pindex | ((memaddr >> 11) & 31);
-	const mpage = pagetb[mpindex];
-	const mpaddress = ((mpage & 127) << 11) | (memaddr & 0x7ff);
-	mcr_addr.innerText = hex(workaddr, 4) + ' ' + hex(memaddr, 4) + ' ' + ((mpage & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(physaddr, 5);
+	const mpaddress = ((pgram & 127) << 11) | (memaddr & 0x7ff);
+	mcr_addr.innerText = hex(workaddr, 4) + ' ' + hex(memaddr, 4) + ' ' + ((pgram & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(physaddr, 5);
 	fp_addr.innerText = `${hex(memaddr, 4)} [${bin((memaddr>>12) & 15,4)} ${bin((memaddr>>8) & 15,4)} ${bin((memaddr>>4) & 15,4)} ${bin(memaddr & 15,4)}]`
 }
 
@@ -1873,40 +1991,42 @@ function loadcache() {
 		const v2 = /*E*/uc.m[ro];
 		const v1 = /*F*/uc.j[ro];
 		const v0 = /*H*/uc.e[ro]; // LSB
-
-		const ra = ro * 40;
+		const c0 = (v3 << 24) | (v2 << 16) | (v1 << 8) | v0;
+		const c1 = (v6 << 16) | (v5 << 8) | v4;
+		uc.c0[ro] = c0;
+		uc.c1[ro] = c1;
 
 		const dp_sel = v0 & 15;
 		const x_e6 = (v0 >> 4) & 7;
 		const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
 		const x_h11 = (v1 >> 2) & 7;
 		const x_e7 = (v1 >> 5) & 3;
-		const k9_en = bit(v1,7);
+		const k9_en = (v1>>7)&1;
 		const k9_sel = v2 & 7;
 		const mpconst_m6 = v2 ^ 0xff; // goes through a 74ls240
 		const j12_sel = v2 & 3;
-		const j11_en = bit(v2,2);
+		const j11_en = (v2>>2)&1;
 		const j11_sel = (v2>>3) & 3;
 		const j13_sel = (v2>>4) & 3;
-		const j10_en = bit(v2,5);
-		const j10_sel = ((v2>>6) & 3) | (bit(v3,0) << 2);
+		const j10_en = (v2>>5)&1;
+		const j10_sel = ((v2>>6) & 3) | ((v3&1) << 2);
 		const k13_sel = (v2>>6) & 3;
 		const seq_d0 = v2 & 15;
 		const seq_d1 = v2 >> 4;
 		const seq_d2 = v3 & 7;
 		const seq_fci = (v3 >> 3) & 3; // TODO verify FE/PUP
 		const seq0_si = (v3 >> 5) & 3;
-		const seq12_s0i = bit(v3,7); // TODO verify
-		const seq2_si_k6b = seq12_s0i | (bit(v4,0) << 1); // TODO verify
-		const seq1_si_k6dc = seq12_s0i | (((bit(v6,6) << 1) & (seq2_si_k6b ^ 2)) ^ 2);
-		const seq_branch = bit(v4,1);
-		const rir0 = bit(v6,5);
+		const seq12_s0i = (v3>>7)&1; // TODO verify
+		const seq2_si_k6b = seq12_s0i | ((v4&1) << 1); // TODO verify
+		const seq1_si_k6dc = seq12_s0i | ((((v6>>5)&2) & (seq2_si_k6b ^ 2)) ^ 2);
+		const seq_branch = (v4>>1)&1;
+		const rir0 = (v6>>5)&1;
 		const x_f6h6 = (v6 >> 3) & 3;
-		const x_c14_sel = bit(v6,7)/* !=0 */;
+		const x_c14_sel = (v6>>7)&1/* !=0 */;
 		const aluc_s = (v4>>2) & 7;
 		const aluc_f = (v4>>5) & 7;
 		const aluc_d = v5 & 7;
-		const busctld = bit(v5,3);
+		const busctld = (v5>>3)&1;
 		const busctla = (v5>>4) & 7;
 		const busctlset = busctld << busctla;
 		const busctlmask = (1 << busctla) ^ 255;
@@ -1955,23 +2075,55 @@ function loadcache() {
 }
 loadcache();
 
+let pindex = 0;
+let pgram = 0;
+let pgaddr = 0;
+let is_mmio = 0;
+let is_regmmio = 0;
+let notpgbit = 0;
+let is_mem = 0;
+
+function mempt_set() {
+	pindex = ((memaddr >> 11) & 31) | (pta << 5);
+	pgram = pagetb[pindex];
+	pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
+	is_mmio = ((pgram & 253) == 253) ? 0 : 1;
+	const is_reg = (((pgram & 127) == 0) && ((memaddr & 1792) == 0)) ? 0 : 1;
+	is_regmmio = (is_reg & is_mmio) ^ 1;
+	notpgbit = (pgram >> 7) ^ 1;
+	is_mem = (is_reg & notpgbit) ^ 1;
+	physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+}
+
+const mc_dma_control = {
+	read():number {
+		let v = bpl.readbyte(physaddr & 0x3ffff);
+		const count_up = (busctl & 8)!=0;
+		workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
+		memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
+		mempt_set();
+		return v;
+	},
+	write(value:number) {
+		bpl.writebyte(physaddr & 0x3ffff, value);
+		const count_up = (busctl & 8)!=0;
+		workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
+		memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
+		mempt_set();
+	},
+	end():void {
+		dma_13 = 0;
+		dma_func = null;
+	}
+};
+
 // this function is a variant that favours speed
 function hsstep() {
 	for (let ql = 0; ql < 100; ql++) {
 
 	const mci = mpscache[mcpc];
 
-	const pindex = ((memaddr >> 11) & 31) | (pta << 5);
-	const pgram = pagetb[pindex];
-	const pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
-	const is_mmio = ((pgram & 253) == 253) ? 0 : 1;
-	const is_reg = (((pgram & 127) == 0) && ((memaddr & 1792) == 0)) ? 0 : 1;
-	const is_regmmio = (is_reg & is_mmio) ^ 1;
-	const notpgbit = (pgram >> 7) ^ 1;
-	const is_mem = (is_reg & notpgbit) ^ 1;
-
 	const intena = (busctl & 1) != 0;
-	const intreq = intena && bpl.is_interrupt(level); // inverted on bus
 	const sysint = reqlevel;
 	const dmaint = intena && (level < 2) && (dma_12 != 0);
 	const count_up = (busctl & 8)!=0;
@@ -1981,7 +2133,6 @@ function hsstep() {
 	} else if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
 		run_control(false);
 		dis_after = true;
-		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
 		dis_vpc = physaddr & 0x3ffff;
 		return;
 	}
@@ -2000,7 +2151,7 @@ function hsstep() {
 		case 6: /* TODO B15A */ k9_com = b15a ^ 1; break;
 		case 7: /* TODO F13->H13A any INT */
 			k9_com = dma_13;
-			if (intreq || dmaint) {
+			if (dmaint || (intena && bpl.is_interrupt(level))) {
 				k9_com = 1;
 			}
 			if (rtc && ((sysctl & 0x4) != 0)) {
@@ -2021,7 +2172,6 @@ function hsstep() {
 	const seq_fc = (2|k9_com) & mci.seq_fci;
 
 	let datapath = 0;
-	let sysdata = memdata_in;
 	// Data Path Control
 	switch(mci.dp_sel) {
 	case 0: case 4: // R_SWP ⇒ DP
@@ -2038,7 +2188,7 @@ function hsstep() {
 		// sense_switch inverted on bus
 		datapath = ((ccr_l << 4) | (ccr_f << 5) | (ccr_m << 6) | (ccr_v << 7) | sense_switch) ^ 0xf0 /* sense sw */; break;
 	case 10: // R_SysDLatch ⇒ DP
-		datapath = sysdata; break;
+		datapath = memdata_in; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
 		datapath = (level << 4) | 4 |
 		(resetting ? 2 : 0) | notpgbit |
@@ -2054,45 +2204,33 @@ function hsstep() {
 	// __ncE N/C
 	// __ncF N/C
 	}
-	
-	aluh.in_data = datapath >> 4;
-	alul.in_data = datapath & 15;
-	alul.sel_a = aluh.sel_a = mci.aluc_a;
-	alul.sel_b = aluh.sel_b = mci.aluc_b;
-	alul.src = aluh.src = mci.aluc_s;
-	alul.aop = aluh.aop = mci.aluc_f;
-	alul.dst = aluh.dst = mci.aluc_d;
+
+	aluc.in_data = datapath;
 
 	switch(mci.x_f6h6) {
-	case 0: alul.carry_in = 0; break;
-	case 1: alul.carry_in = 1; break;
-	case 2: alul.carry_in = (alu_flag >> 3) & 1; break;
-	case 3: alul.carry_in = 0; break;
+	case 0: aluc.carry_in = 0; break;
+	case 1: aluc.carry_in = 1; break;
+	case 2: aluc.carry_in = (alu_flag >> 3) & 1; break;
+	case 3: aluc.carry_in = 0; break;
 	}
-	alul.resolve();
-	aluh.carry_in = alul.carry_out;
-	aluh.resolve();
+	aluc.resolve_alu(mci.aluc_s, mci.aluc_f, mci.aluc_d, mci.aluc_a, mci.aluc_b);
 	let h6a = 0, h6b = 0;
 	switch(mci.x_f6h6) {
-	case 0: h6a = aluh.sign; h6b = 0; break;
+	case 0: h6a = aluc.sign; h6b = 0; break;
 	case 1: h6a = h6b = ((alu_flag >> 3) & 1); /* TODO both get flag.C? */ break;
-	case 2: h6a = alul.q0; h6b = aluh.sign; break;
-	case 3: h6a = aluh.carry_out; h6b = 1; break;
+	case 2: h6a = aluc.q0; h6b = aluc.sign; break;
+	case 3: h6a = aluc.main_carry_out; h6b = 1; break;
 	}
-	if (alul.is_right) {
+	if (aluc.is_right) {
 		// >> 3.h.0 >> 3.l.0 >>
-		alul.q3 = aluh.q0;
-		alul.ram3 = aluh.ram0;
-		aluh.q3 = alul.ram0;
-		aluh.ram3 = h6a; // h6.Za
+		aluc.q7 = aluc.ram0;
+		aluc.ram7 = h6a; // h6.Za
 	} else {
 		// << 3.h.0 << 3.l.0 <<
-		aluh.q0 = alul.q3;
-		aluh.ram0 = alul.ram3;
-		alul.q0 = h6b; // h6.Zb
-		alul.ram0 = aluh.q3;
+		aluc.q0 = h6b; // h6.Zb
+		aluc.ram0 = aluc.q7;
 	}
-	let data_f = (aluh.out_f << 4) | alul.out_f;
+	let data_f = aluc.out_f;
 	if (mci.x_h11 == 6) {// Select MAPROM to F
 		data_f = uc.map[datapath];
 	}
@@ -2121,7 +2259,7 @@ function hsstep() {
 			break;
 		case 1: // |4 IF DMA_INT, |8 IF INT_REQ
 			if (!dmaint) seq_or |= 4;
-			if (!intreq) seq_or |= 8;
+			if (!(intena && bpl.is_interrupt(level))) seq_or |= 8;
 			break;
 		case 2: // |4 IF MEM_INT, |8 IF DMA_REQ
 			//seq_or |= 4; // TODO typically low
@@ -2166,6 +2304,7 @@ function hsstep() {
 		break;
 	case 5: // PTR_WR
 		pagetb[pindex] = result;
+		mempt_set();
 		break;
 	case 6: // WADL_WR
 		if (mci.x_e6 == 5) {
@@ -2192,73 +2331,15 @@ function hsstep() {
 		rtc = false;
 	}
 
-	// conditions register
-	if (mci.x_e6 == 7) {
-		let fl_v = 0;
-		let fl_m = 0;
-		switch(mci.j12_sel) {
-		case 0:
-			fl_v = ccr_v;
-			fl_m = ccr_m;
-			break;
-		case 1:
-			fl_v = prevflag & 1;
-			fl_m = (prevflag >> 1) & 1;
-			break;
-		case 2:
-			fl_v = (result >> 7) & 1;
-			fl_m = (result >> 6) & 1;
-			break;
-		case 3:
-			fl_v = (prevflag & (prevflag >> 5)) & 1;
-			fl_m = (prevflag >> 1) & 1;
-			break;
-		}
-		let fl_f = 0;
-		let fl_l = 0;
-		if (mci.j11_en == 0) {
-			switch(mci.j11_sel | (prevflag & 0x4)) {
-			case 0: fl_f = (result >> 5) & 1; break;
-			case 1: fl_f = 1; break;
-			case 2: fl_f = ccr_f; break;
-			case 3: fl_f = 0; break;
-			case 4: fl_f = (result >> 5) & 1; break;
-			case 5: fl_f = 1; break;
-			case 6: fl_f = ccr_f; break;
-			case 7: fl_f = 1; break;
-			}
-		}
-		if (mci.j10_en == 0) {
-			switch(mci.j10_sel) {
-			case 0: fl_l = ccr_l; break;
-			case 1: fl_l = ccr_l ^ 1; break;
-			case 2: fl_l = (prevflag >> 3) & 1; break;
-			case 3: fl_l = 1; break;
-			case 4: fl_l = (result >> 4) & 1; break;
-			case 5: fl_l = aluh.ram3; break;
-			case 6: fl_l = alul.ram0; break;
-			case 7: fl_l = alul.q0; break;
-			}
-		}
-		ccr_l = fl_l;
-		ccr_f = fl_f;
-		ccr_m = fl_m;
-		ccr_v = fl_v;
-	}
-	ccr_la += ccr_l;
-	ccr_fa += ccr_f;
-	ccr_ma += ccr_m;
-	ccr_va += ccr_v;
-
 	rdr = regfile[rindex];
 
 	switch(mci.x_e7) {
 	case 0: break; // nop
 	case 1: break; // TODO: BusReady
 	case 2: // ALUFlag_LD
-		alu_flag = (alul.zero & aluh.zero) |
-		(aluh.sign << 1) | (aluh.over << 2) |
-		(aluh.carry_out << 3) | (alul.carry_out << 4) | ((prevflag & 1) << 5);
+		alu_flag = (aluc.zero) |
+		(aluc.sign << 1) | (aluc.over << 2) |
+		(aluc.main_carry_out << 3) | (aluc.half_carry_out << 4) | ((prevflag & 1) << 5);
 		break;
 	case 3: // DataRD
 		if (sys_write_latch) {
@@ -2285,36 +2366,14 @@ function hsstep() {
 	s2.commit(seq_fc);
 
 	if (((busctl & 20) == 16) && dma_func != null) {
-		dma_func((workaddr == 0xffff), {
-			read():number {
-				physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
-				let v = bpl.readbyte(physaddr & 0x3ffff);
-				workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
-				memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
-				return v;
-			},
-			write(value:number) {
-				physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
-				bpl.writebyte(physaddr & 0x3ffff, value);
-				workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
-				memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
-			},
-			end():void {
-				dma_13 = 0;
-				dma_func = null;
-			}
-		});
+		dma_func((workaddr == 0xffff), mc_dma_control);
 	}
 	switch(mci.x_h11) {
 	case 0: break; // nop
 	case 1: // RD_START /* TODO */
-		physpre = pgram >> 7;
-		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
 		sys_read_in = true;
 		break;
 	case 2: // WT_START /* TODO */
-		physpre = pgram >> 7;
-		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
 		bpl.writebyte(physaddr & 0x3ffff, memdata_out);
 		break;
 	case 3: // WorkAddr_LDH
@@ -2329,6 +2388,7 @@ function hsstep() {
 		break;
 	case 5: // MemAddr_Count
 		memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
+		mempt_set();
 		break;
 	case 6: break; // F=MapROM - handled farther above
 	case 7: // NibSwap
@@ -2341,79 +2401,74 @@ function hsstep() {
 	case 1: result = data_f; break; // F⇒Result
 	case 2: rir = data_f; break; // F⇒RIdx
 	case 3: level = data_f >> 4; break; // F⇒Level
-	case 4: pta = data_f & 7; break; // F⇒PTA
-	case 5: memaddr = prevwork; break; // ASwap
+	case 4: pta = data_f & 7; mempt_set(); break; // F⇒PTA
+	case 5: memaddr = prevwork; mempt_set(); break; // ASwap
 	case 6: // SEQ_RE
 		s0.h = data_f & 15;
 		s1.h = (data_f >> 4) & 15;
 		break;
-	case 7: break; //!E6:O7
+	case 7: // conditions register
+		switch(mci.j12_sel) {
+		case 0: break;
+		case 1:
+			ccr_v = prevflag & 1;
+			ccr_m = (prevflag >> 1) & 1;
+			break;
+		case 2:
+			ccr_v = (result >> 7) & 1;
+			ccr_m = (result >> 6) & 1;
+			break;
+		case 3:
+			ccr_v = (prevflag & (prevflag >> 5)) & 1;
+			ccr_m = (prevflag >> 1) & 1;
+			break;
+		}
+		if (mci.j11_en == 0) {
+			switch(mci.j11_sel | (prevflag & 0x4)) {
+			case 0: ccr_f = (result >> 5) & 1; break;
+			case 1: ccr_f = 1; break;
+			case 2: break;
+			case 3: ccr_f = 0; break;
+			case 4: ccr_f = (result >> 5) & 1; break;
+			case 5: ccr_f = 1; break;
+			case 6: break;
+			case 7: ccr_f = 1; break;
+			}
+		} else {
+			ccr_f = 0;
+		}
+		if (mci.j10_en == 0) {
+			switch(mci.j10_sel) {
+			case 0: break;
+			case 1: ccr_l = ccr_l ^ 1; break;
+			case 2: ccr_l = (prevflag >> 3) & 1; break;
+			case 3: ccr_l = 1; break;
+			case 4: ccr_l = (result >> 4) & 1; break;
+			case 5: ccr_l = aluc.ram7; break;
+			case 6: ccr_l = aluc.ram0; break;
+			case 7: ccr_l = aluc.q0; break;
+			}
+		} else {
+			ccr_l = 0;
+		}
+		break;
 	}
+	ccr_la += ccr_l;
+	ccr_fa += ccr_f;
+	ccr_ma += ccr_m;
+	ccr_va += ccr_v;
 	pta1a += pta & 1;
 	pta2a += (pta >> 1) & 1;
 	pta3a += (pta >> 2) & 1;
 
-	alul.step();
-	aluh.step();
+	aluc.step(mci.aluc_d, mci.aluc_b);
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 	}
 }
 
 function step(debug_output:boolean = false) {
-	const v6 = /*A*/uc.k[mcpc]; // MSB
-	const v5 = /*B*/uc.f[mcpc];
-	const v4 = /*C*/uc.h[mcpc];
-	const v3 = /*D*/uc.l[mcpc];
-	const v2 = /*E*/uc.m[mcpc];
-	const v1 = /*F*/uc.j[mcpc];
-	const v0 = /*H*/uc.e[mcpc]; // LSB
 
-	const dp_sel = v0 & 15;
-	const x_e6 = (v0 >> 4) & 7;
-	const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
-	const x_h11 = (v1 >> 2) & 7;
-	const x_e7 = (v1 >> 5) & 3;
-	const k9_en = bit(v1,7) == 0;
-	const k9_sel = v2 & 7;
-	const mpconst_m6 = v2 ^ 0xff; // goes through a 74ls240
-	const j12_sel = v2 & 3;
-	const j11_en = bit(v2,2);
-	const j11_sel = (v2>>3) & 3;
-	const j13_sel = (v2>>4) & 3;
-	const j10_en = bit(v2,5);
-	const j10_sel = ((v2>>6) & 3) | (bit(v3,0) << 2);
-	const k13_sel = (v2>>6) & 3;
-	const seq_d0 = v2 & 15;
-	const seq_d1 = v2 >> 4;
-	const seq_d2 = v3 & 7;
-	const seqjmp = v2 | (seq_d2<<8); // for debug output
-	const seq_fci = (v3 >> 3) & 3; // TODO verify FE/PUP
-	const seq0_si = (v3 >> 5) & 3;
-	const seq12_s0i = bit(v3,7); // TODO verify
-	const seq2_si_k6b = seq12_s0i | (bit(v4,0) << 1); // TODO verify
-	const seq1_si_k6dc = seq12_s0i | (((bit(v6,6) << 1) & (seq2_si_k6b ^ 2)) ^ 2);
-	const seq_branch = bit(v4,1);
-	const rir0 = bit(v6,5);
-	const x_f6h6 = (v6 >> 3) & 3;
-	const x_c14_sel = bit(v6,7)!=0;
-	const aluc_s = (v4>>2) & 7;
-	const aluc_f = (v4>>5) & 7;
-	const aluc_d = v5 & 7;
-	const busctld = bit(v5,3);
-	const busctla = (v5>>4) & 7;
-	const busctlset = busctld << busctla;
-	const busctlmask = (1 << busctla) ^ 255;
-	const aluc_b = (v5>>3) & 15;
-	const aluc_a = ((v6<<1)|(v5>>7)) & 15;
-
-	const pindex = ((memaddr >> 11) & 31) | (pta << 5);
-	const pgram = pagetb[pindex];
-	const pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
-	const is_mmio = ((pgram & 253) == 253) ? 0 : 1;
-	const is_reg = (((pgram & 127) == 0) && ((memaddr & 1792) == 0)) ? 0 : 1;
-	const is_regmmio = (is_reg & is_mmio) ^ 1;
-	const notpgbit = (pgram >> 7) ^ 1;
-	const is_mem = (is_reg & notpgbit) ^ 1;
+	const mci = mpscache[mcpc];
 
 	const intena = (busctl & 1) != 0;
 	const intreq = intena && bpl.is_interrupt(level); // inverted on bus
@@ -2422,8 +2477,8 @@ function step(debug_output:boolean = false) {
 	const count_up = (busctl & 8)!=0;
 
 	let k9_com = 1;
-	if (k9_en) {
-		switch(k9_sel) {
+	if (mci.k9_en) {
+		switch(mci.k9_sel) {
 		case 0: /* TODO f12b */ k9_com = 1; break;
 		case 1: /* rir.0 nor 4 */
 			k9_com = ((rir | (rir >> 4)) & 1)^1; break;
@@ -2450,15 +2505,14 @@ function step(debug_output:boolean = false) {
 
 	// seqencer control
 	const k9_com3 = k9_com|(k9_com << 1);
-	const seq0_s = (k9_com3 & seq0_si) ^ 3;
-	const seq1_s = (k9_com3 & seq1_si_k6dc) ^ 3;
-	const seq2_s = (k9_com3 & seq2_si_k6b) ^ 3;
-	const seq_fc = (2|k9_com) & seq_fci;
+	const seq0_s = (k9_com3 & mci.seq0_si) ^ 3;
+	const seq1_s = (k9_com3 & mci.seq1_si_k6dc) ^ 3;
+	const seq2_s = (k9_com3 & mci.seq2_si_k6b) ^ 3;
+	const seq_fc = (2|k9_com) & mci.seq_fci;
 
 	let datapath = 0;
-	let sysdata = memdata_in;
 	// Data Path Control
-	switch(dp_sel) {
+	switch(mci.dp_sel) {
 	case 0: case 4: // R_SWP ⇒ DP
 		datapath = swap; break;
 	case 1: case 5: // R_REG(d13) ⇒ DP
@@ -2473,7 +2527,7 @@ function step(debug_output:boolean = false) {
 		// inverted on bus
 		datapath = ((ccr_l << 4) | (ccr_f << 5) | (ccr_m << 6) | (ccr_v << 7) | sense_switch) ^ 0xf0 /* sense sw */; break;
 	case 10: // R_SysDLatch ⇒ DP
-		datapath = sysdata; break;
+		datapath = memdata_in; break;
 	case 11: // R_H14 ⇒ DP // TODO rest of H14? beware invertions
 		datapath = (level << 4) | 4 |
 		(resetting ? 2 : 0) | notpgbit |
@@ -2483,57 +2537,45 @@ function step(debug_output:boolean = false) {
 		datapath = ((sysint & 15) << 4) | dswitch | ((rtc && ((sysctl & 0x4) != 0)) ? 1 : 0);
 		break;
 	case 13: // RCnst MCv2 ⇒ DP
-		datapath = mpconst_m6;
+		datapath = mci.mpconst_m6;
 		break;
 	// __ncE N/C
 	// __ncF N/C
 	}
-	
-	aluh.in_data = datapath >> 4;
-	alul.in_data = datapath & 15;
-	alul.sel_a = aluh.sel_a = aluc_a;
-	alul.sel_b = aluh.sel_b = aluc_b;
-	alul.src = aluh.src = aluc_s;
-	alul.aop = aluh.aop = aluc_f;
-	alul.dst = aluh.dst = aluc_d;
 
-	switch(x_f6h6) {
-	case 0: alul.carry_in = 0; break;
-	case 1: alul.carry_in = 1; break;
-	case 2: alul.carry_in = (alu_flag >> 3) & 1; break;
-	case 3: alul.carry_in = 0; break;
+	aluc.in_data = datapath;
+
+	switch(mci.x_f6h6) {
+	case 0: aluc.carry_in = 0; break;
+	case 1: aluc.carry_in = 1; break;
+	case 2: aluc.carry_in = (alu_flag >> 3) & 1; break;
+	case 3: aluc.carry_in = 0; break;
 	}
-	alul.resolve();
-	aluh.carry_in = alul.carry_out;
-	aluh.resolve();
+	aluc.resolve_alu(mci.aluc_s, mci.aluc_f, mci.aluc_d, mci.aluc_a, mci.aluc_b);
 	let h6a = 0, h6b = 0;
-	switch(x_f6h6) {
-	case 0: h6a = aluh.sign; h6b = 0; break;
+	switch(mci.x_f6h6) {
+	case 0: h6a = aluc.sign; h6b = 0; break;
 	case 1: h6a = h6b = ((alu_flag >> 3) & 1); /* TODO both get flag.C? */ break;
-	case 2: h6a = alul.q0; h6b = aluh.sign; break;
-	case 3: h6a = aluh.carry_out; h6b = 1; break;
+	case 2: h6a = aluc.q0; h6b = aluc.sign; break;
+	case 3: h6a = aluc.main_carry_out; h6b = 1; break;
 	}
-	if (alul.is_right) {
+	if (aluc.is_right) {
 		// >> 3.h.0 >> 3.l.0 >>
-		alul.q3 = aluh.q0;
-		alul.ram3 = aluh.ram0;
-		aluh.q3 = alul.ram0;
-		aluh.ram3 = h6a; // h6.Za
+		aluc.q7 = aluc.ram0;
+		aluc.ram7 = h6a; // h6.Za
 	} else {
 		// << 3.h.0 << 3.l.0 <<
-		aluh.q0 = alul.q3;
-		aluh.ram0 = alul.ram3;
-		alul.q0 = h6b; // h6.Zb
-		alul.ram0 = aluh.q3;
+		aluc.q0 = h6b; // h6.Zb
+		aluc.ram0 = aluc.q7;
 	}
-	let data_f = (aluh.out_f << 4) | alul.out_f;
-	if (x_h11 == 6) {// Select MAPROM to F
+	let data_f = aluc.out_f;
+	if (mci.x_h11 == 6) {// Select MAPROM to F
 		data_f = uc.map[datapath];
 	}
 
 	// uses ALU flags, so must be after comb logic resolve
-	if (seq_branch == 0) {
-		switch(j13_sel) {
+	if (mci.seq_branch == 0) {
+		switch(mci.j13_sel) {
 		case 0: // |1 IF ALUF.S, |2 IF ALUF.Z
 			seq_or |= ((alu_flag & 2)!=0 ?1:0);
 			seq_or |= ((alu_flag & 1)!=0 ?2:0);
@@ -2548,7 +2590,7 @@ function step(debug_output:boolean = false) {
 		case 3: break; // nop
 		}
 
-		switch(k13_sel) { // mind the strange order of OR2/3 (|4 |8)
+		switch(mci.k13_sel) { // mind the strange order of OR2/3 (|4 |8)
 		case 0: // |4 IF INT_EN, |8 IF CCR.Carry (Link)
 			if (intena) seq_or |= 4; // TODO: trace
 			if (ccr_l != 0) seq_or |= 8;
@@ -2566,18 +2608,18 @@ function step(debug_output:boolean = false) {
 	}
 
 	let rindex;
-	if (x_c14_sel) {
+	if (mci.x_c14_sel) {
 		rindex = (rir & 15) | (level << 4);
 	} else {
 		rindex = (rir & 255);
 	}
 	// rindex bit 0, this is technically a NOR
 	// but can be handled as needed because this is the only reference
-	rindex = (rindex | rir0); // I elected to not invert it, since the debug dump would have anyways
+	rindex = (rindex | mci.rir0); // I elected to not invert it, since the debug dump would have anyways
 
-	let c = s0.resolve(true, seq0_s, seq_d0, seq_or, false);
-	c = s1.resolve(c, seq1_s, seq_d1, 0, false);
-	s2.resolve(c, seq2_s, seq_d2, 0, false);
+	let c = s0.resolve(true, seq0_s, mci.seq_d0, seq_or, false);
+	c = s1.resolve(c, seq1_s, mci.seq_d1, 0, false);
+	s2.resolve(c, seq2_s, mci.seq_d2, 0, false);
 
 	////////////////////////////// rising clock edge /////////////////////////////
 
@@ -2585,7 +2627,6 @@ function step(debug_output:boolean = false) {
 	const prevflag = alu_flag;
 
 	if (!debug_output) {
-		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
 		if (mcpc == 0x101) {
 			dis_after = true;
 			dis_vpc = physaddr & 0x3ffff;
@@ -2598,134 +2639,54 @@ function step(debug_output:boolean = false) {
 		}
 	}
 	if (debug_output) {
-		const k9_fn = (!k9_en ? 'nop' : [
-			'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
-			'(1)RIR.~0|4',
-			'(2)RIR.0',
-			'(3)Ad=IO/REG',
-			'(4)Ad=REG/pbit', // need to recheck the logic on this one to give it a better name
-			'(5)DMA_REQ', // DMA port, request start
-			'(6)MemFault', // Memory parity error, must be enabled via BusCtl bit 6
-			'(7)F13 most' // this one needs a better name (checks multiple interrupt lines)
-			][k9_sel]);
-		let d_branch0 = '         ';
-		let d_branch1 = '         ';
-		let d_branch2 = '          ';
-		let d_branch3 = '          ';
-		if (seq_branch == 0) {
-			switch(j13_sel) {
-			case 0:
-				if ((seq_d0 | 1) != seq_d0) d_branch0 = '|1:ALUF.S';
-				if ((seq_d0 | 2) != seq_d0) d_branch1 = '|2:ALUF.Z';
-				break;
-			case 1:
-				if ((seq_d0 | 1) != seq_d0) d_branch0 = '|1:ALUF.H';
-				if ((seq_d0 | 2) != seq_d0) d_branch1 = '|2:ALUF.V';
-				break;
-			case 2:
-				if ((seq_d0 | 1) != seq_d0) d_branch0 = '|1:~pbit ';
-				if ((seq_d0 | 2) != seq_d0) d_branch1 = '|2:~MMIO ';
-				break;
-			case 3: break; // nop
-			}
-			switch(k13_sel) {
-			case 0:
-				if ((seq_d0 | 4) != seq_d0) d_branch2 = '|4:INT_ENA';
-				if ((seq_d0 | 8) != seq_d0) d_branch3 = '|8:CCR.L  ';
-				break;
-			case 1:
-				if ((seq_d0 | 4) != seq_d0) d_branch2 = '|4:DMA_INT';
-				if ((seq_d0 | 8) != seq_d0) d_branch3 = '|8:INT_REQ';
-				break;
-			case 2:
-				if ((seq_d0 | 4) != seq_d0) d_branch2 = '|4:MEM_INT';
-				if ((seq_d0 | 8) != seq_d0) d_branch3 = '|8:DMA_REQ';
-				break;
-			case 3: break; // nop
-			}
-		}
-		const d_f6h6 = ['0   ','1   ','FL.C','0!  '][x_f6h6] +
-		' SIn:' + (alul.is_right ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
-		const lh = alul.funcstr().padEnd(30);
-		const d_ccr = (x_e6 == 7) ? ( // only for CCR load
-			'cV=' + ['.  ','Z  ','R.V','LZ '][j12_sel] +
-			' cM=' + ['.  ','S  ','R.M','S  '][j12_sel] +
-			' cF=' + (j11_en ? '0' : ['Res.5','1','.','0','Res.5','1','.','1'][j11_sel | (prevflag & 0x4)]).padEnd(5) +
-			' cL=' + (j10_en ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][j10_sel]).padEnd(8)
-			) : '                                  ';
-		mcs_op.innerText = `${hex(mcpc,3)}:${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)
-		}: ${FN_SEQ_SN[seq2_s]
-		} ${FN_SEQ_SN[seq1_s]
-		} ${FN_SEQ_SN[seq0_s]
-		} ${FN_SEQ_FE[seq_fc]} K9:${k9_fn.padEnd(14)
-		} [${hex(seqjmp,3)}][${d_branch0}${d_branch1}${d_branch2}${d_branch3}]`;
-		mcs_op_alu.innerText = `${lh} CIn=${d_f6h6} (${hex(data_f,2)}:${hex(aluh.y,1)}${hex(alul.y,1)}) ${d_ccr}`;
-		const d_k11 = [// FN_K11[x_k11]
-		/* 0 */ 'nop',
-		/* 1 */ 'DMAEndReset',
-		/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
-		/* . */ 'P2.3','P2.4','RTC','MapDis',
-		/* . */ 'FP.Run','RTC.R','FP.ABT','INT_ACK'][busctla] + '=' + busctld,
-		/* 3 */ 'BusCtl:' + [
-		/* . */ 'IntEN','AddrToSys','DMACountDIS','AddrU/D',
-		/* . */ 'AddrCtlSel','ParityTest','ParityEN','DMA_EN'][busctla] + '=' + busctld,
-		/* 4 */ x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)',
-		/* 5 */ 'PTR_WR',
-		/* 6 */ 'WA_LD',
-		/* 7 */ 'SysDatOut_WR'][x_k11]
-		const mce7 = ['nop','BusReady','ALUFlag_LD','DataRD'][x_e7];
-		const mch11 = [
-		'nop','RD_START','WT_START','WorkAddr_LDH',
-		'WorkAddr_Count','MemAddr_Count','F=MapROM','NibSwap'][x_h11];
-		const mcd_d45 = [
-		'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
-		'PA','CCR_DSense','SysDatIn','R_H14','R_INTDIP','RCnst','',''][dp_sel];
-		mcs_op_bus.innerText = `D4/5:DP(${hex(datapath)})=${mcd_d45.padEnd(10)
-		} K11:${d_k11.padEnd(18)} E6:${FN_E6[x_e6].padEnd(12)
-		} E7:${mce7.padEnd(11)} H11:${mch11}`;
+		let debug = mc_listing(mcpc, datapath, data_f, aluc.y);
+		mcs_op.innerText = debug.seq;
+		mcs_op_alu.innerText = debug.alu;
+		mcs_op_bus.innerText = debug.bus;
 		return;
 	}
 
-	if(dp_sel == 11) resetting = false;
+	if(mci.dp_sel == 11) resetting = false;
 
-	switch(x_k11) {
+	switch(mci.x_k11) {
 	case 0: break; // nop
 	case 1: break; // L13A_SET
 	case 2: // ?K11_2
-		if ((busctlset == 1) && ((sysctl & 1) == 0)) {
+		if ((mci.busctlset == 1) && ((sysctl & 1) == 0)) {
 			console.log('DMA1:ON');
 		}
-		if ((busctlset == 2) && ((sysctl & 2) == 0)) {
+		if ((mci.busctlset == 2) && ((sysctl & 2) == 0)) {
 			console.log('DMA2:ON');
 		}
-		if ((busctlset == 128) && ((sysctl & 128) == 0)) {
+		if ((mci.busctlset == 128) && ((sysctl & 128) == 0)) {
 			reqlevel = bpl.ack_interrupt(level);
 			//console.log('IACK:', level,'->',reqlevel);
 		}
-		if ((busctlmask == 127) && ((sysctl & 128) == 128)) {
+		if ((mci.busctlmask == 127) && ((sysctl & 128) == 128)) {
 			reqlevel = 0;
 		}
-		sysctl = (sysctl & busctlmask) | busctlset;
+		sysctl = (sysctl & mci.busctlmask) | mci.busctlset;
 		break;
 	case 3: // BusCtl
-		if ((busctlset == 0x20) && ((busctl & 0x20) == 0)) {
+		if ((mci.busctlset == 0x20) && ((busctl & 0x20) == 0)) {
 			//console.log('MEM:TEST');
 			mco.parity = 1;
 		}
-		if ((busctlmask == 0xdf) && ((busctl & 0x20) != 0)) {
+		if ((mci.busctlmask == 0xdf) && ((busctl & 0x20) != 0)) {
 			//console.log('MEM:NOTEST');
 			mco.parity = 0;
 		}
-		busctl = (busctl & busctlmask) | busctlset;
+		busctl = (busctl & mci.busctlmask) | mci.busctlset;
 		break;
 	case 4: // REG_WR
 		regfile[rindex] = result;
 		break;
 	case 5: // PTR_WR
 		pagetb[pindex] = result;
+		mempt_set();
 		break;
 	case 6: // WADL_WR
-		if (x_e6 == 5) {
+		if (mci.x_e6 == 5) {
 			workaddr = (workaddr & 0xff00) | (memaddr & 0xff);
 		} else {
 			workaddr = (workaddr & 0xff00) | result;
@@ -2749,78 +2710,15 @@ function step(debug_output:boolean = false) {
 		rtc = false;
 	}
 
-	// conditions register
-	if (x_e6 == 7) {
-		// alu_flag:
-		//  LHCVSZ
-		//  543210
-		// L<<3 F<<2 M<<1 V<<0
-
-		let fl_v = 0;
-		let fl_m = 0;
-		switch(j12_sel) {
-		case 0:
-			fl_v = ccr_v;
-			fl_m = ccr_m;
-			break;
-		case 1:
-			fl_v = prevflag & 1;
-			fl_m = (prevflag >> 1) & 1;
-			break;
-		case 2:
-			fl_v = (result >> 7) & 1;
-			fl_m = (result >> 6) & 1;
-			break;
-		case 3:
-			fl_v = (prevflag & (prevflag >> 5)) & 1;
-			fl_m = (prevflag >> 1) & 1;
-			break;
-		}
-		let fl_f = 0;
-		let fl_l = 0;
-		if (j11_en == 0) {
-			switch(j11_sel | (prevflag & 0x4)) {
-			case 0: fl_f = (result >> 5) & 1; break;
-			case 1: fl_f = 1; break;
-			case 2: fl_f = ccr_f; break;
-			case 3: fl_f = 0; break;
-			case 4: fl_f = (result >> 5) & 1; break;
-			case 5: fl_f = 1; break;
-			case 6: fl_f = ccr_f; break;
-			case 7: fl_f = 1; break;
-			}
-		}
-		if (j10_en == 0) {
-			switch(j10_sel) {
-			case 0: fl_l = ccr_l; break;
-			case 1: fl_l = ccr_l ^ 1; break;
-			case 2: fl_l = (prevflag >> 3) & 1; break;
-			case 3: fl_l = 1; break;
-			case 4: fl_l = (result >> 4) & 1; break;
-			case 5: fl_l = aluh.ram3; break;
-			case 6: fl_l = alul.ram0; break;
-			case 7: fl_l = alul.q0; break;
-			}
-		}
-		ccr_l = fl_l;
-		ccr_f = fl_f;
-		ccr_m = fl_m;
-		ccr_v = fl_v;
-	}
-	ccr_la += ccr_l;
-	ccr_fa += ccr_f;
-	ccr_ma += ccr_m;
-	ccr_va += ccr_v;
-
 	rdr = regfile[rindex];
 
-	switch(x_e7) {
+	switch(mci.x_e7) {
 	case 0: break; // nop
 	case 1: break; // TODO: BusReady
 	case 2: // ALUFlag_LD
-		alu_flag = (alul.zero & aluh.zero) |
-		(aluh.sign << 1) | (aluh.over << 2) |
-		(aluh.carry_out << 3) | (alul.carry_out << 4) | ((prevflag & 1) << 5);
+		alu_flag = aluc.zero |
+		(aluc.sign << 1) | (aluc.over << 2) |
+		(aluc.main_carry_out << 3) | (aluc.half_carry_out << 4) | ((prevflag & 1) << 5);
 		break;
 	case 3: // DataRD
 		if (sys_write_latch) {
@@ -2845,40 +2743,18 @@ function step(debug_output:boolean = false) {
 	s2.commit(seq_fc);
 
 	if (((busctl & 20) == 16) && dma_func != null) {
-		dma_func((workaddr == 0xffff), {
-			read():number {
-				physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
-				let v = bpl.readbyte(physaddr & 0x3ffff);
-				workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
-				memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
-				return v;
-			},
-			write(value:number) {
-				physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
-				bpl.writebyte(physaddr & 0x3ffff, value);
-				workaddr = (workaddr + (count_up?1:-1)) & 0xffff;
-				memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
-			},
-			end():void {
-				dma_13 = 0;
-				dma_func = null;
-			}
-		});
+		dma_func((workaddr == 0xffff), mc_dma_control);
 	}
-	switch(x_h11) {
+	switch(mci.x_h11) {
 	case 0: break; // nop
 	case 1: // RD_START /* TODO */
-		physpre = pgram >> 7;
-		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
 		sys_read_in = true;
 		break;
 	case 2: // WT_START /* TODO */
-		physpre = pgram >> 7;
-		physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
 		bpl.writebyte(physaddr & 0x3ffff, memdata_out);
 		break;
 	case 3: // WorkAddr_LDH
-		if (x_e6 == 5) {
+		if (mci.x_e6 == 5) {
 			workaddr = (workaddr & 0x00ff) | (memaddr & 0xff00);
 		} else {
 			workaddr = (workaddr & 0x00ff) | (result << 8);
@@ -2889,6 +2765,7 @@ function step(debug_output:boolean = false) {
 		break;
 	case 5: // MemAddr_Count
 		memaddr = (memaddr + (count_up?1:-1)) & 0xffff;
+		mempt_set();
 		break;
 	case 6: break; // F=MapROM - handled farther above
 	case 7: // NibSwap
@@ -2896,25 +2773,77 @@ function step(debug_output:boolean = false) {
 		break;
 	}
 
-	switch(x_e6) {
-	// no case 0
+	switch(mci.x_e6) {
+	case 0: break; // nop case 0
 	case 1: result = data_f; break; // F⇒Result
 	case 2: rir = data_f; break; // F⇒RIdx
 	case 3: level = data_f >> 4; break; // F⇒Level
-	case 4: pta = data_f & 7; break; // F⇒PTA
-	case 5: memaddr = prevwork; break; // ASwap
+	case 4: pta = data_f & 7; mempt_set(); break; // F⇒PTA
+	case 5: memaddr = prevwork; mempt_set(); break; // ASwap
 	case 6: // SEQ_RE
 		s0.h = data_f & 15;
 		s1.h = (data_f >> 4) & 15;
 		break;
-	case 7: break; //!E6:O7
+	case 7: // conditions register
+		// alu_flag:
+		//  LHCVSZ
+		//  543210
+		// L<<3 F<<2 M<<1 V<<0
+		switch(mci.j12_sel) {
+		case 0:
+			break;
+		case 1:
+			ccr_v = prevflag & 1;
+			ccr_m = (prevflag >> 1) & 1;
+			break;
+		case 2:
+			ccr_v = (result >> 7) & 1;
+			ccr_m = (result >> 6) & 1;
+			break;
+		case 3:
+			ccr_v = (prevflag & (prevflag >> 5)) & 1;
+			ccr_m = (prevflag >> 1) & 1;
+			break;
+		}
+		if (mci.j11_en == 0) {
+			switch(mci.j11_sel | (prevflag & 0x4)) {
+			case 0: ccr_f = (result >> 5) & 1; break;
+			case 1: ccr_f = 1; break;
+			case 2: break;
+			case 3: ccr_f = 0; break;
+			case 4: ccr_f = (result >> 5) & 1; break;
+			case 5: ccr_f = 1; break;
+			case 6: break;
+			case 7: ccr_f = 1; break;
+			}
+		} else {
+			ccr_f = 0;
+		}
+		if (mci.j10_en == 0) {
+			switch(mci.j10_sel) {
+			case 0: break;
+			case 1: ccr_l = ccr_l ^ 1; break;
+			case 2: ccr_l = (prevflag >> 3) & 1; break;
+			case 3: ccr_l = 1; break;
+			case 4: ccr_l = (result >> 4) & 1; break;
+			case 5: ccr_l = aluc.ram7; break;
+			case 6: ccr_l = aluc.ram0; break;
+			case 7: ccr_l = aluc.q0; break;
+			}
+		} else {
+			ccr_l = 0;
+		}
+		break;
 	}
+	ccr_la += ccr_l;
+	ccr_fa += ccr_f;
+	ccr_ma += ccr_m;
+	ccr_va += ccr_v;
 	pta1a += pta & 1;
 	pta2a += (pta >> 1) & 1;
 	pta3a += (pta >> 2) & 1;
 
-	alul.step();
-	aluh.step();
+	aluc.step(mci.aluc_d, mci.aluc_b);
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 }
 
@@ -2922,47 +2851,49 @@ return mco;
 }
 const mcsim = mcsetup();
 
-function mc_listing(address:number) {
-	const v6 = /*A*/uc.k[address]; // MSB
-	const v5 = /*B*/uc.f[address];
-	const v4 = /*C*/uc.h[address];
-	const v3 = /*D*/uc.l[address];
-	const v2 = /*E*/uc.m[address];
-	const v1 = /*F*/uc.j[address];
-	const v0 = /*H*/uc.e[address]; // LSB
+const FN_E6 = [
+	'','Result=F','RIdx=F','Level=F',
+	'PTA=F','ASwap','SEQ_RE','CondRegLD'
+];
 
-	const dp_sel = v0 & 15;
-	const x_e6 = (v0 >> 4) & 7;
-	const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
-	const x_h11 = (v1 >> 2) & 7;
-	const x_e7 = (v1 >> 5) & 3;
-	const k9_en = bit(v1,7) == 0;
+function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:number) {
+
+	const c0 = uc.c0[address];
+	const c1 = uc.c1[address];
+
+	const dp_sel = c0 & 15;
+	const x_e6 = (c0>>4) & 7;
+	const x_k11 = (c0>>7) & 7;
+	const x_h11 = (c0>>10) & 7;
+	const x_e7 = (c0>>13) & 3;
+	const k9_en = ((c0>>15)&1) == 0;
+	const v2 = (c0 >> 16) & 255;
 	const k9_sel = v2 & 7;
 	const mpconst_m6 = v2 ^ 0xff; // goes through a 74ls240
 	const j12_sel = v2 & 3;
-	const j11_en = bit(v2,2);
-	const j11_sel = (v2>>3) & 3;
-	const j13_sel = (v2>>4) & 3;
-	const j10_en = bit(v2,5);
-	const j10_sel = ((v2>>6) & 3) | (bit(v3,0) << 2);
-	const k13_sel = (v2>>6) & 3;
-	const seqjmp = (v2 | (v3<<8)) & 0x7ff; // for debug output
-	const seq_fci = (v3 >> 3) & 3; // TODO verify FE/PUP
-	const seq0_si = (v3 >> 5) & 3;
-	const seq12_s0i = bit(v3,7); // TODO verify
-	const seq2_si_k6b = seq12_s0i | (bit(v4,0) << 1); // TODO verify
-	const seq1_si_k6dc = seq12_s0i | (((bit(v6,6) << 1) & (seq2_si_k6b ^ 2)) ^ 2);
-	const seq_branch = bit(v4,1);
-	const rir0 = bit(v6,5);
-	const x_f6h6 = (v6 >> 3) & 3;
-	const x_c14_sel = bit(v6,7)!=0;
-	const aluc_s = (v4>>2) & 7;
-	const aluc_f = (v4>>5) & 7;
-	const aluc_d = v5 & 7;
-	const busctld = bit(v5,3);
-	const busctla = (v5>>4) & 7;
-	const aluc_b = (v5>>3) & 15;
-	const aluc_a = ((v6<<1)|(v5>>7)) & 15;
+	const j11_en = (c0>>18)&1;
+	const j11_sel = (c0>>19) & 3;
+	const j13_sel = (c0>>20) & 3;
+	const j10_en = (c0>>21)&1;
+	const j10_sel = (c0>>22) & 7;
+	const k13_sel = (c0>>22) & 3;
+	const seqjmp = (c0>>16) & 0x7ff; // for debug output
+	const seq_fci = (c0>>27) & 3; // FE/PUP
+	const seq0_si = (c0>>29) & 3;
+	const seq12_s0i = (c0>>31)&1;
+	const seq2_si_k6b = seq12_s0i | ((c1&1) << 1);
+	const seq1_si_k6dc = seq12_s0i | ((((c1>>21)&2) & (seq2_si_k6b ^ 2)) ^ 2);
+	const seq_branch = (c1>>1)&1;
+	const rir0 = (c1>>21)&1;
+	const x_f6h6 = (c1>>19) & 3;
+	const x_c14_sel = ((c1>>23)&1)!=0;
+	const aluc_s = (c1>>2) & 7;
+	const aluc_f = (c1>>5) & 7;
+	const aluc_d = (c1>>8) & 7;
+	const busctld = (c1>>11)&1;
+	const busctla = (c1>>12) & 7;
+	const aluc_b = (c1>>11) & 15;
+	const aluc_a = (c1>>15) & 15;
 
 	const k9_fn = (!k9_en ? 'nop' : [
 		'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
@@ -2972,7 +2903,7 @@ function mc_listing(address:number) {
 		'(4)Ad=REG/pbit', // need to recheck the logic on this one to give it a better name
 		'(5)DMA_REQ', // DMA port, request start
 		'(6)MemFault', // Memory parity error, must be enabled via BusCtl bit 6
-		'(7)F13 most' // this one needs a better name (checks multiple interrupt lines)
+		'(7)IntCheck' // this one needs a better name (checks multiple interrupt lines)
 		][k9_sel]);
 	let d_branch0 = '';
 	let d_branch1 = '';
@@ -3016,7 +2947,7 @@ function mc_listing(address:number) {
 	const seq_fc = seq_fci;
 
 	const d_f6h6 = ['0   ','1   ','FL.C','0!  '][x_f6h6] +
-	' SIn:' + (((aluc_d & 2) == 0) ? ['alu.s','AFL.C','q0','alu.c'][x_f6h6] : ['0','AFL.C','alu.s','1'][x_f6h6]).padEnd(5);
+	' SIn:' + (((aluc_d & 2) == 0) ? ['alu.s','AFL.C','q0   ','alu.c'][x_f6h6] : ['0    ','AFL.C','alu.s','1    '][x_f6h6]);
 	const lh = ALU.trace_str(aluc_s, aluc_f, aluc_d, aluc_a, aluc_b).padEnd(30);
 	const d_ccr = (x_e6 == 7) ? ( // only for CCR load
 		'cV=' + ['.  ','Z  ','R.V','LZ '][j12_sel] +
@@ -3026,7 +2957,7 @@ function mc_listing(address:number) {
 	) : '                                  ';
 
 	const d_k11 = [// FN_K11[x_k11]
-	/* 0 */ 'nop',
+	/* 0 */ '',
 	/* 1 */ 'DMAEndReset',
 	/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
 	/* . */ 'P2.3','P2.4','RTC','MapDis',
@@ -3034,28 +2965,29 @@ function mc_listing(address:number) {
 	/* 3 */ 'BusCtl:' + [
 	/* . */ 'IntEN','AddrToSys','DMACountDIS','AddrU/D',
 	/* . */ 'AddrCtlSel','ParityTest','ParityEN','DMA_EN'][busctla] + '=' + busctld,
-	/* 4 */ x_c14_sel ? 'REG_WR(LV)' : 'REG_WR(RI)',
+	/* 4 */ 'REG_WR(R)',
 	/* 5 */ 'PTR_WR',
 	/* 6 */ 'WA_LD',
-	/* 7 */ 'SysDatOut_WR'][x_k11]
-	const mce7 = ['nop','BusReady','ALUFlag_LD','DataRD'][x_e7];
+	/* 7 */ 'SysDatOut_WR'][x_k11];
+	const mce7 = ['','BusReady','ALUFlag_LD','DataRD'][x_e7];
 	const mch11 = [
-	'nop','RD_START','WT_START','WorkAddr_LDH',
+	'','RD_START','WT_START','WorkAddr_LDH',
 	'WorkAddr_Count','MemAddr_Count','F=MapROM','NibSwap'][x_h11];
 	const mcd_d45 = [
 	'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
 	'PA','CCR_DSense','SysDatIn','R_H14','R_INTDIP',`RCnst(${hex(mpconst_m6)})`,'',''][dp_sel];
 	return {
-		seq: `${hex(v6)}${hex(v5)}${hex(v4)}${hex(v3)}${hex(v2)}${hex(v1)}${hex(v0)
+		seq: `${((datapath != undefined) ? hex(address,3) : '')}`+
+		`:${hex(c1,6)}${hex(c0,8)
 	} ${FN_SEQ_SN[seq2_s]
 	} ${FN_SEQ_SN[seq1_s]
 	} ${FN_SEQ_SN[seq0_s]
 	} ${FN_SEQ_FE[seq_fc]} K9:${k9_fn.padEnd(14)
 	} [${hex(seqjmp,3)}]${d_branch0}${d_branch1}${d_branch2}${d_branch3}`,
-		alu: `${lh} CIn=${d_f6h6} ${d_ccr}`,
-		bus: `D4/5:DP=${mcd_d45.padEnd(10)
-		} K11:${d_k11.padEnd(18)} E6:${FN_E6[x_e6].padEnd(12)
-		} E7:${mce7.padEnd(11)} H11:${mch11}`
+		alu: (alu_y != undefined) ? `${lh} CIn=${d_f6h6} (${hex(data_f as number,2)}:${hex(alu_y,2)}) ${d_ccr}` : `${lh} CIn=${d_f6h6} ${d_ccr}`,
+		bus: 'D4/5:DP' + ((datapath != undefined) ? `(${hex(datapath)})`: '') +
+		`=${mcd_d45.padEnd(10)} R:${x_c14_sel?'Lv':'RI'}${rir0!=0?'|1':'  '} K11:${d_k11.padEnd(18)} H11:${mch11.padEnd(14)} E6:${FN_E6[x_e6].padEnd(12)
+		} E7:${mce7.padEnd(11)}`
 	};
 }
 
@@ -3201,7 +3133,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 	interrupt_en = false;
 	interrupt_pend = false;
 	is_interrupt(): boolean {
-		this.tickbusy();
 		return false;
 	}
 	getlevel():number {
@@ -3224,33 +3155,36 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 		mcsim.dma_int(false);
 	}
 	tickbusy() {
-		if (this.busy_time > 0) {
-			this.busy_time--;
-			if (this.busy_time == 0) {
-				this.busy = false;
-				switch(this.command) {
-				case 0:
-				case 1:
-				case 4:
-					if (this.interrupt_en) mcsim.dma_int(true);
-					break;
-				case 2:
-					this.seeking = false;
-					this.seek_done = true;
-					if (this.interrupt_en) mcsim.dma_int(true);
-					break;
-				case 3:
-					this.seeking = false;
-					this.seek_done = true;
-					if (this.interrupt_en) mcsim.dma_int(true);
-					break;
-				default:
-					if (this.command != -1) {
-						console.log('unknown command');
-					}
+		this.busy_time--;
+		if (this.busy_time == 0) {
+			this.busy = false;
+			switch(this.command) {
+			case 0:
+			case 1:
+			case 4:
+				if (this.interrupt_en) mcsim.dma_int(true);
+				break;
+			case 2:
+				this.seeking = false;
+				this.seek_done = true;
+				if (this.interrupt_en) mcsim.dma_int(true);
+				break;
+			case 3:
+				this.seeking = false;
+				this.seek_done = true;
+				if (this.interrupt_en) mcsim.dma_int(true);
+				break;
+			default:
+				if (this.command != -1) {
+					console.log('unknown command');
 				}
-				this.command = -1;
 			}
+			this.command = -1;
+		}
+	}
+	run(increment:number):void {
+		if (this.busy_time > 0) {
+			this.tickbusy();
 		}
 	}
 	readbyte(address:number):number {
@@ -3277,13 +3211,11 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 			break;
 		case 4: // stat hi / 0 tmo adrerr fmterr | 0 seekerr fault busy
 			if (this.sel_unit == 1 || this.sel_unit == 0) {
-				this.tickbusy();
 				v = ((this.busy || this.seeking) ? 1 : 0);
 			}
 			break;
 		case 5: // stat lo / wtpr wten oncyl ready | seekcom3..0
 			if (this.sel_unit == 1 || this.sel_unit == 0) {
-				this.tickbusy();
 				v = ((dskui[this.sel_unit].wp.checked !== false) ? 0x80 : 0) /* wp */ |
 				((this.wpmask & (1 << this.sel_unit)) ? 0x40 : 0) |
 				(this.seeking ? 0 : 0x20) /* oncyl */ |
@@ -3293,7 +3225,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 			break;
 		case 8: // busy?
 			if (this.sel_unit == 1 || this.sel_unit == 0) {
-				this.tickbusy();
 				v = ((this.busy || this.seeking) ? 1 : 0);
 			}
 			break;
@@ -3428,7 +3359,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 		return;
 	}
 }
-const dsk2_0 = new DSK2();
 
 class MUXPort {
 	write_busy = false;
@@ -3636,15 +3566,18 @@ class MMIOMulti implements MemAccessR, MemAccessW {
 		this.devices.push({address:subaddr, end:subaddr+size, dev});
 	}
 	readbyte(address: number):number {
-		for (const devlist of this.devices) {
+		for (let i = 0;;i++) {
+			const devlist = this.devices[i];
+			if (devlist == null) return 0;
 			if ((address >= devlist.address) && (address < devlist.end)) {
 				return devlist.dev.readbyte(address - devlist.address);
 			}
 		}
-		return 0;
 	}
 	writebyte(address: number, value: number):void {
-		for (const devlist of this.devices) {
+		for (let i = 0;;i++) {
+			const devlist = this.devices[i];
+			if (devlist == null) return;
 			if ((address >= devlist.address) && (address < devlist.end)) {
 				devlist.dev.writebyte(address - devlist.address, value);
 				return;
@@ -3654,8 +3587,7 @@ class MMIOMulti implements MemAccessR, MemAccessW {
 }
 class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 	is_interrupt():boolean {
-		if (!this.interrupt_en) return false;
-		return this.interrupt_pend;
+		return this.interrupt_en && this.interrupt_pend;
 	}
 	getlevel():number {
 		return this.interrupt_level;
@@ -4872,8 +4804,10 @@ bpl.configmemory(0x3fc00, new ROM512({
 }), 512);
 bpl.configmemory(0x3f200, mmio_mux, 256);
 cx_crt0.mux = mmio_mux.muxports[0];
-bpl.configio(1, dsk2_0);
+const dsk2_0 = new DSK2();
+run_hw.push(dsk2_0);
 bpl.configio(0, mmio_mux);
+bpl.configio(1, dsk2_0);
 const mmio_0 = new MMIOMulti();
 const mmio_1 = new MMIOMulti();
 const mmio_8 = new MMIOMulti();
@@ -5041,6 +4975,8 @@ function update_runrate(new_rate:number) {
 	style_if(run_rate4,'active',run_rate == 1000);
 	style_if(run_rate5,'active',run_rate == 10000);
 	style_if(run_rate6,'active',run_rate == 50000);
+	style_if(run_rate7,'active',run_rate == 100000);
+	style_if(run_rate8,'active',run_rate == 150000);
 }
 update_runrate(run_rate);
 run_rate1.addEventListener('click', function(ev) { update_runrate(1); });
@@ -5050,6 +4986,8 @@ run_rate4.addEventListener('click', function(ev) { update_runrate(1000); });
 run_rate5.addEventListener('click', function(ev) { update_runrate(10000); });
 // can't handle this speed ;)
 run_rate6.addEventListener('click', function(ev) { update_runrate(50000); });
+run_rate7.addEventListener('click', function(ev) { update_runrate(100000); });
+run_rate8.addEventListener('click', function(ev) { update_runrate(150000); });
 step_button.addEventListener('click', function(ev) {
 	run_once = true;
 	run_step = true;
@@ -5140,6 +5078,8 @@ document.body.addEventListener('dragover', function(ev) {
 		return;
 	}
 	if(dt && dt.items.length > 0 && dt.items[0].kind == 'file') {
+		dt.dropEffect = 'copy';
+	} else if (dt && dt.types.length > 0) {
 		dt.dropEffect = 'copy';
 	} else {
 		dt.dropEffect = 'none';
