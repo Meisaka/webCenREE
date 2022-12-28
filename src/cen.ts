@@ -13,6 +13,7 @@ const run_rate6 = document.getElementById('b_r6') as HTMLButtonElement;
 const run_rate7 = document.getElementById('b_r7') as HTMLButtonElement;
 const run_rate8 = document.getElementById('b_r8') as HTMLButtonElement;
 const micro_button = document.getElementById('b_micro') as HTMLButtonElement;
+const local_button = document.getElementById('b_local') as HTMLButtonElement;
 const win_micro = document.getElementById('mclisting') as HTMLDivElement;
 const microstep_button = document.getElementById('b_mstep') as HTMLButtonElement;
 const btn_ss1 = document.getElementById('ss1') as HTMLButtonElement;
@@ -203,6 +204,8 @@ let run_accutime = 0;
 let run_once = false;
 let rate_match_input = false;
 const run_hw:Run[] = [];
+const run_hshw:Run[] = [];
+let hs_wait = 0;
 let run_stop:null | (()=>void);
 function do_run_stop():void {
 	if (run_stop) {
@@ -213,6 +216,11 @@ function do_run_stop():void {
 function run_hw_steps(inc:number) {
 	for(let i = 0; i < run_hw.length; i++) {
 		run_hw[i].run(inc);
+	}
+}
+function run_hshw_steps() {
+	for(let i = 0; i < run_hshw.length; i++) {
+		run_hshw[i].run(5);
 	}
 }
 function run_control(run:boolean):void {
@@ -239,7 +247,10 @@ function run_control(run:boolean):void {
 				let hsr = (run_rate / 100) | 0;
 				for (let i=0;i<hsr;i++) {
 					run_hw_steps(100);
-					mcsim.hsstep();
+					for (let ql = 0; ql < 20; ql++) {
+						mcsim.hsstep(); mcsim.hsstep(); mcsim.hsstep();
+						mcsim.hsstep(); mcsim.hsstep();
+					}
 					if (run_ctl == 0) {
 						do_run_stop();
 						break;
@@ -841,7 +852,11 @@ const vt_font_data = new ImageData(128, 128);
 	}
 })();
 const vt_font_bmp:ImageBitmap = await createImageBitmap(vt_font_data);
-class VTerm {
+interface CharDevice {
+	write(c:number):void;
+	check_read():void;
+}
+class VTerm implements CharDevice {
 	buffer = new Uint8Array(80*24);
 	blink = false;
 	cursor_x = 0;
@@ -857,6 +872,16 @@ class VTerm {
 	vbel_id = 0;
 	constructor(c:CanvasRenderingContext2D) {
 		this.ctx = c;
+	}
+	input_interval = 0;
+	run(increment:number):void {
+		if(rate_match_input && this.input_buf.length > 0) {
+			this.input_interval += increment;
+			if(this.input_interval >= 20000) {
+				this.input_interval = 0;
+				this.check_read();
+			}
+		}
 	}
 	render_char(vcc:number, vcx:number, vcy:number):void {
 		const vtfx = (vcc & 15) * 8;
@@ -913,7 +938,7 @@ class VTerm {
 			this.advance_line();
 		}
 	}
-	write(c:number) {
+	write(c:number):void {
 		const vcx = this.cursor_x * vt_width;
 		const vcy = this.cursor_y * vt_height;
 		const vca = this.cursor_y * VTerm.columns + this.cursor_x;
@@ -940,6 +965,7 @@ class VTerm {
 			this.esc_mode = 0;
 			switch(c) {
 			case 5: // transmit status message
+				console.log('vtt: unhandled status');
 				break;
 			case 48: // set vis attr
 				// maybe TODO?
@@ -957,33 +983,42 @@ class VTerm {
 				// 74       constant reverse
 				// 6c       print-only
 				// 7c       print-only reverse
+				console.log('vtt: unhandled attr');
 				break;
 			case 49: // begin line drawing
+				console.log('vtt: unhandled line drawing');
 				break;
 			case 50: // end line drawing
 				break;
 			case 51: // begin transparent mode
 			case 52: // end transparent mode
+				console.log('vtt: unhandled transparent');
 				break;
 			case 71: // erase unprotected + home cursor
 			case 75: // erase unprotected from cursor to next field (or EOL if null form)
 			case 79: // cursor to previous unprotected field
 			case 82: // enter forms mode
+				console.log('vtt: unhandled Forms');
 				break;
 			case 88: // print variable/print-only data to aux port
 				break;
 			case 89: // set cursor addr
 				this.esc_mode = 2;
 				break;
+			case 90: this.esc_mode = -1; break; // show next control code
 			case 107: // erase unprotected from cursor to end of screen
 			case 115: // reset
+				console.log('vtt: unhandled ECE/RST');
 				break;
 			case 120: // print all data to aux port
 				break;
+			default: break;
 			}
 			return;
 		}
-		if (c < 32) {
+		if (this.esc_mode < 0) {
+			this.esc_mode = 0;
+		} else if (c < 32) {
 			switch(c) {
 			case 0: // NUL
 				break;
@@ -1016,6 +1051,7 @@ class VTerm {
 				break;
 			case 11: // VT
 				// TODO next char & 0x1f is row address
+				console.log('vtt: unhandled VT');
 				break;
 			case 12: {// FF (clear)
 				this.cursor_x = 0;
@@ -1034,8 +1070,11 @@ class VTerm {
 				// TODO
 				// next char & 0x7f is converted to col address
 				// ((c >> 4) * 10) + (c & 0xf)
+				console.log('vtt: unhandled DLE');
 				break;
 			case 18: // DC4 (aux port on)
+				console.log('vtt: unhandled DC4 ON');
+				break;
 			case 20: // DC4 (aux port off)
 				break;
 			case 26: // SUB
@@ -1047,9 +1086,6 @@ class VTerm {
 			case 27: // ESC
 				this.esc_mode = 1;
 				return;
-			default:
-				this.buffer[vca] = c;
-				this.advance_cursor();
 			}
 			this.ctx.clearRect(vcx, vcy, vt_width, vt_height);
 			this.render_char(this.buffer[vca], vcx, vcy);
@@ -1060,12 +1096,21 @@ class VTerm {
 		this.render_char(c, vcx, vcy);
 		this.advance_cursor();
 	}
+	check_read() {
+		if (this.mux == null) return;
+		if (this.mux.can_receive()) {
+			if (this.input_buf.length > 0) {
+				let sv = this.input_buf.shift() as number;
+				this.mux.receive(sv);
+			} else {
+				rate_match_input = false;
+			}
+		}
+	}
 	receive(c:number) {
 		if (this.input_buf.length < 8)
 			this.input_buf.push(c);
-		if (this.mux != null) {
-			this.mux.receive_some(this.input_buf);
-		}
+		this.check_read();
 	}
 	text_import(txt:string):void {
 		let last = false;
@@ -1086,12 +1131,11 @@ class VTerm {
 				last = false;
 			}
 		}
-		if (this.mux != null) {
-			this.mux.receive_some(this.input_buf);
-		}
+		this.check_read();
 	}
 }
 const cx_crt0 = new VTerm(cx_term0);
+run_hw.push(cx_crt0);
 function console_text_import(txt:string):void {
 	rate_match_input = true;
 	cx_crt0.text_import(txt);
@@ -1132,46 +1176,30 @@ cv_term0.addEventListener('keypress', function(ev) {
 });
 cv_term0.addEventListener('keydown', function(ev) {
 	//console.log(ev.key.toUpperCase().charCodeAt(0));
+	const crt = cx_crt0;
 	if (ev.ctrlKey || vcontrol) {
 		let vcc = vtctrlkeys[ev.code];
 		if (vcc !== undefined) {
-			cx_crt0.receive(vcc);
+			crt.receive(vcc);
 		}
 		vcontrol = false;
 		btn_vctrl.classList.remove('active');
 	} else if (ev.key.length == 1) {
 		if (in_softcaps.checked) {
-			cx_crt0.receive(ev.key.toUpperCase().charCodeAt(0));
+			crt.receive(ev.key.toUpperCase().charCodeAt(0));
 		} else {
-			cx_crt0.receive(ev.key.charCodeAt(0));
+			crt.receive(ev.key.charCodeAt(0));
 		}
 	} else switch(ev.key) {
-	case 'Backspace':
-		cx_crt0.receive(8);
-		break;
-	case 'Tab':
-		cx_crt0.receive(9);
-		break;
-	case 'Enter':
-		cx_crt0.receive(13);
-		break;
-	case 'Escape':
-		cx_crt0.receive(27);
-		break;
-	case 'ArrowUp':
-		cx_crt0.receive(26);
-		break;
-	case 'ArrowDown':
-		cx_crt0.receive(10);
-		break;
-	case 'ArrowLeft':
-		cx_crt0.receive(21);
-		break;
-	case 'ArrowRight':
-		cx_crt0.receive(6);
-		break;
-	case 'Home':
-		cx_crt0.receive(1);
+	case 'Backspace': crt.receive(8); break;
+	case 'Tab': crt.receive(9); break;
+	case 'Enter': crt.receive(13); break;
+	case 'Escape': crt.receive(27); break;
+	case 'ArrowUp': crt.receive(26); break;
+	case 'ArrowDown': crt.receive(10); break;
+	case 'ArrowLeft': crt.receive(21); break;
+	case 'ArrowRight': crt.receive(6); break;
+	case 'Home': crt.receive(1); break;
 	}
 	ev.preventDefault();
 });
@@ -1934,13 +1962,15 @@ function showstate(in_halt:boolean) {
 //     40 23 FFF8 fc 800D fast
 // 3ed 40 23 7E11E1E00D orig
 //     40 1b 7E11E1E00D fast
-uc.f[0x3ec] = 0x23;
-uc.m[0x3ec] = 0x01;
-uc.f[0x3ed] = 0x1b;
+// uc.f[0x3ec] = 0x23;
+// uc.m[0x3ec] = 0x01;
+// uc.f[0x3ed] = 0x1b;
 
-function dma_request(stepfn:DMAFunc) {
+function dma_request(stepfn:DMAFunc):boolean {
+	if (dma_func != null) return false;
 	dma_func = stepfn;
 	dma_13 = 1;
+	return true;
 }
 
 const mpscache:{
@@ -2119,7 +2149,6 @@ const mc_dma_control = {
 
 // this function is a variant that favours speed
 function hsstep() {
-	for (let ql = 0; ql < 100; ql++) {
 
 	const mci = mpscache[mcpc];
 
@@ -2321,7 +2350,7 @@ function hsstep() {
 
 	// timer
 	cycles++;
-	if (cycles >= 8333) {
+	if (cycles >= 83333) {
 		cycles = 0;
 		if ((sysctl & 0x20) != 0) {
 			rtc = true;
@@ -2463,6 +2492,10 @@ function hsstep() {
 
 	aluc.step(mci.aluc_d, mci.aluc_b);
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
+
+	if(hs_wait++ >= 5) {
+		hs_wait = 0;
+		run_hshw_steps();
 	}
 }
 
@@ -2700,7 +2733,7 @@ function step(debug_output:boolean = false) {
 
 	// timer
 	cycles++;
-	if (cycles >= 8333) {
+	if (cycles >= 83333) {
 		cycles = 0;
 		if ((sysctl & 0x20) != 0) {
 			rtc = true;
@@ -2845,6 +2878,11 @@ function step(debug_output:boolean = false) {
 
 	aluc.step(mci.aluc_d, mci.aluc_b);
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
+
+	if(hs_wait++ >= 5) {
+		hs_wait = 0;
+		run_hshw_steps();
+	}
 }
 
 return mco;
@@ -3360,75 +3398,6 @@ class DSK2 implements MemAccessR, MemAccessW, IOAccess {
 	}
 }
 
-class MUXPort {
-	write_busy = false;
-	write_full = false;
-	read_busy = false;
-	read_full = false;
-	read_buffer = 0;
-	_cts = true;
-	buf_write = 0;
-	card:MMIOMux;
-	input_interval = 0;
-	constructor(card:MMIOMux) {
-		this.card = card;
-	}
-	run(increment:number):void {
-		if(rate_match_input && cx_crt0.input_buf.length > 0) {
-			this.input_interval += increment;
-			if(this.input_interval >= 20000) {
-				this.input_interval = 0;
-				this.receive_some(cx_crt0.input_buf);
-			}
-			if(cx_crt0.input_buf.length == 0) {
-				rate_match_input = false;
-			}
-		}
-	}
-	get cts() { return this._cts; }
-	set cts(value:boolean) {
-		this._cts = value;
-		if(!rate_match_input) this.receive_some(cx_crt0.input_buf);
-	}
-	read_status():number {
-		return (this.write_busy ? 0 : 2) | (this.read_busy ? 1 : 0) | 0x20;
-	}
-	read_data():number {
-		let vcc = this.read_buffer;
-		this.read_buffer = 0;
-		this.read_busy = false;
-		if(!rate_match_input) this.receive_some(cx_crt0.input_buf);
-		return vcc;
-	}
-	write_control(value:number):void {
-	}
-	write_data(value:number):void {
-		this.write_busy = true;
-		this.buf_write = value;
-		//setTimeout(()=>{
-			this.write_busy = false;
-			cx_crt0.write(this.buf_write & 0x7f);
-		//}, 0);
-	}
-	receive_some(buffer:number[]):void {
-		if (!this._cts) return;
-		if (this.read_busy) {
-			//this.card.interrupt_pend = true;
-			//this.card.mux_cause = true;
-			return;
-		}
-		let sv = buffer.shift();
-		if (sv !== undefined) {
-			this.receive(sv);
-		}
-	}
-	receive(data:number):void {
-		this.read_buffer = data;
-		this.read_busy = true;
-		this.card.interrupt_pend = true;
-		this.card.mux_cause = true;
-	}
-}
 class MockPrinter implements MemAccessR, MemAccessW {
 	is_io = true;
 	is_write = true;
@@ -3454,7 +3423,33 @@ class MockPrinter implements MemAccessR, MemAccessW {
 		}
 	}
 }
-class TestCMD implements MemAccessR, MemAccessW {
+const enum CMDERR {
+	COMMAND_STRING_OVERFLOW = 0x11,
+	INVALID_COMMAND = 0x12,
+	COMMAND_SEQ_ERROR = 0x13,
+	COMMAND_STRING_OVERRUN = 0x14,
+	UNIT_SELECT_ERROR_1 = 0x16,
+	KEY_LENGTH_ERROR = 0x22,
+	DMA_LAG = 0x23,
+	WRITE_FAULT = 0x24,
+	BUFFER_ADDRESS_ERROR = 0x26,
+	DATA_LENGTH_ERROR = 0x29,
+	CYLINDER_ADDRESS_ERROR = 0x2a,
+	SEEK_ERROR = 0x2b,
+	HEAD_ADDRESS_ERROR = 0x2c,
+	ADDRESS_CHECKWORD_ERROR = 0x2d,
+	DATA_MARK_ERROR = 0x2f,
+	UNIT_SELECT_ERROR_3 = 0x30,
+	TIMEOUT_ERROR = 0x31,
+	DATA_CRC_ERROR = 0x33,
+	VERIFY_ERROR = 0x34,
+	TRACK_END_WHILE_WRITING = 35,
+	DRIVE_NOT_READY = 0x41,
+	DISK_WRITE_PROTECTED = 0x42,
+	LOAD_COMMAND_STRING_ERROR = 0x43,
+	EXEC_COMMAND_STRING_ERROR = 0x45,
+}
+class TestCMD implements MemAccessR, MemAccessW, Run {
 	is_io = true;
 	is_write = true;
 	data_in = 0;
@@ -3463,56 +3458,139 @@ class TestCMD implements MemAccessR, MemAccessW {
 	data_fin = false;
 	state = 0;
 	address = 0;
-	count = 0;
-	process() {
-		switch(this.state) {
-		case 0:
-			if(this.data_fin) {
-				if(this.data_in == 0x46) {
-					this.state = 0x46;
+	dma_len = 0;
+	busy = false;
+	cardram = new Uint8Array(0x1000);
+	read_request:((v:number)=>void) | null = null;
+	cancel_request:(()=>void) | null = null;
+	delay_request:(()=>void) | null = null;
+	delay_count = 0;
+	run(increment: number): void {
+		if(this.delay_count < 200) {
+			this.delay_count += increment;
+		} else {
+			this.delay_count = 0;
+			if (this.delay_request != null) {
+				this.delay_request();
+			}
+		}
+		this.process();
+	}
+	async request8():Promise<number> {
+		let v = await new Promise<number>((resolve, reject)=>{
+			this.cancel_request = reject;
+			this.read_request = resolve;
+		});
+		console.log('CMD-RQ:', hex(v));
+		this.cancel_request = null;
+		return v;
+	}
+	async request16():Promise<number> {
+		return ((await this.request8()) << 8) | (await this.request8());
+	}
+	// not to be confused with delay_request, this function just waits
+	async request_delay():Promise<void> {
+		return new Promise<void>((resolve)=>{
+			this.delay_request = ()=>{
+				this.delay_request = null;
+				resolve();
+			};
+		});
+	}
+	async dma_in():Promise<void> {
+		return new Promise((resolve, reject)=>{
+			this.cancel_request = reject;
+			if(!mcsim.dma_request((atend, ctrl)=>{
+				if(atend || this.dma_len <= 0) {
+					ctrl.end();
+					this.cancel_request = null;
+					resolve();
+					return;
 				}
-				if(this.data_in == 0x47) {
-					this.state = 0x46;
-				}
-				this.data_fin = false;
-			}
-			break;
-		case 1:
-			if(this.data_fin) {
-				this.data_fin = false;
-			}
-			break;
-		case 0x40:
-			if(this.data_fin) {
-				this.data_fin = false;
-			}
-			break;
-		case 0x46:
-			if(this.data_fin) {
-				this.data_fin = false;
-				this.state = 0x100;
-			}
-			break;
-		case 0x100:
-			if(this.data_fin) {
-				this.data_fin = false;
-				this.state = 0x101;
-			}
-			break;
-		case 0x101:
-			if(this.data_fin) {
-				this.data_fin = false;
-				this.state = 0x102;
-			}
-			break;
-		case 0x102:
-			if(this.data_fin) {
-				this.data_fin = false;
-				this.state = 0;
-				this.data_out = 0;
+				this.cardram[this.address & 0xfff] = ctrl.read();
+				this.address = (this.address + 1) & 0xfff;
+				this.dma_len--;
+			})) {
+				this.cancel_request = null;
+				this.data_out = CMDERR.DMA_LAG;
 				this.data_fout = true;
+				reject();
 			}
-			break;
+		});
+	}
+	async dma_out():Promise<void> {
+		return new Promise((resolve, reject)=>{
+			this.cancel_request = reject;
+			if(!mcsim.dma_request((atend, ctrl)=>{
+				if(atend || this.dma_len <= 0) {
+					ctrl.end();
+					this.cancel_request = null;
+					resolve();
+					return;
+				}
+				ctrl.write(this.cardram[this.address & 0xfff]);
+				this.address = (this.address + 1) & 0xfff;
+				this.dma_len--;
+			})) {
+				this.cancel_request = null;
+				this.data_out = CMDERR.DMA_LAG;
+				this.data_fout = true;
+				reject();
+			}
+		});
+	}
+	async io_command(index:number):Promise<number> {
+		console.log('CMD-C', hex(index));
+		switch(index) {
+		case 0: // CMD reset?
+			console.log('CMD-RST');
+			await this.request_delay();
+			console.log('CMD-RSTOK');
+			return 0;
+		case 0x43: // DMA to cmdbuf
+			this.address = 0x11; // TODO: same as FFC?
+			this.dma_len = 178;
+			await this.dma_in();
+			return 0;
+		case 0x46: // CPU to card
+			this.address = await this.request16();
+			this.dma_len = await this.request16();
+			if (this.address > 0xfff) return CMDERR.BUFFER_ADDRESS_ERROR;
+			if (this.dma_len > 0xfff) return CMDERR.DATA_LENGTH_ERROR;
+			await this.dma_in();
+			return 0;
+		case 0x47: // card to CPU
+			this.address = await this.request16();
+			this.dma_len = await this.request16();
+			if (this.address > 0xfff) return CMDERR.BUFFER_ADDRESS_ERROR;
+			if (this.dma_len > 0xfff) return CMDERR.DATA_LENGTH_ERROR;
+			await this.dma_out();
+			return 0;
+		}
+		return CMDERR.INVALID_COMMAND;
+	}
+	process() {
+		if(this.data_fin) {
+			const fin = this.data_in;
+			this.data_fin = false;
+			if (this.read_request != null) {
+				let req = this.read_request;
+				this.read_request = null;
+				req.call(this, fin);
+			} else if (!this.busy) {
+				this.busy = true;
+				this.io_command(fin).then((res)=>{
+					this.data_out = res;
+					this.data_fout = true;
+				}).catch(()=>{
+					console.log('CMD: io-cancel');
+				}).finally(()=>{
+					console.log('CMD-done');
+					this.busy = false;
+				});
+			} else {
+				this.data_fin = true;
+			}
 		}
 	}
 	readbyte(address: number): number {
@@ -3520,24 +3598,25 @@ class TestCMD implements MemAccessR, MemAccessW {
 		if (address == 1) {
 			if(this.data_fout) value |= 1;
 			if(this.data_fin) value |= 2;
-			if(this.state > 16) value |= 8;
-			this.process();
+			if(this.busy) {
+				console.log('CMD-rdbusy');
+				value |= 8;
+			}
 		} else {
 			this.data_fout = false;
 			value = this.data_out;
-			if(this.state == 1) {
-				this.state = 0x40;
-			}
-			//console.log('CMDTrace-R', address, hex(value));
 		}
 		return value;
 	}
 	writebyte(address: number, value: number): void {
 		if(address == 0) {
 			this.data_in = value;
+			console.log('CMD:W:', hex(value), this.data_fin, this.read_request != null);
 			this.data_fin = true;
-		} else {
-			console.log('CMDTrace-W', address, hex(value));
+			this.process();
+		} else if (this.cancel_request != null) {
+			this.cancel_request();
+			this.cancel_request = null;
 		}
 	}
 }
@@ -3585,6 +3664,52 @@ class MMIOMulti implements MemAccessR, MemAccessW {
 		}
 	}
 }
+class MUXPort {
+	write_busy = false;
+	write_full = false;
+	read_busy = false;
+	read_full = false;
+	read_buffer = 0;
+	_cts = true;
+	buf_write = 0;
+	card:MMIOMux;
+	line:CharDevice | null = null;
+	constructor(card:MMIOMux) {
+		this.card = card;
+	}
+	get cts() { return this._cts; }
+	set cts(value:boolean) {
+		this._cts = value;
+		if(!rate_match_input && this.line != null) this.line.check_read();
+	}
+	read_status():number {
+		return (this.write_busy ? 0 : 2) | (this.read_busy ? 1 : 0) | 0x20;
+	}
+	read_data():number {
+		let vcc = this.read_buffer;
+		this.read_buffer = 0;
+		this.read_busy = false;
+		if(!rate_match_input && this.line != null) this.line.check_read();
+		return vcc;
+	}
+	write_control(value:number):void {
+	}
+	write_data(value:number):void {
+		this.write_busy = true;
+		this.buf_write = value;
+		this.write_busy = false;
+		this.line?.write(this.buf_write & 0x7f);
+	}
+	can_receive():boolean {
+		return this._cts && !this.read_busy;
+	}
+	receive(data:number):void {
+		this.read_buffer = data;
+		this.read_busy = true;
+		this.card.interrupt_pend = true;
+		this.card.mux_cause = true;
+	}
+}
 class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 	is_interrupt():boolean {
 		return this.interrupt_en && this.interrupt_pend;
@@ -3605,8 +3730,15 @@ class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 		this.interrupt_level = 0;
 		this.interrupt_pend = false;
 		this.mux_cause = false;
+		this.muxports[0].cts = true;
+		this.muxports[1].cts = true;
+		this.muxports[2].cts = true;
+		this.muxports[3].cts = true;
 	}
-	muxports:MUXPort[] = [new MUXPort(this)];
+	muxports:MUXPort[] = [
+		new MUXPort(this), new MUXPort(this),
+		new MUXPort(this), new MUXPort(this)
+	];
 	is_io = true;
 	is_write:true = true;
 	interrupt_level = 0;
@@ -3614,9 +3746,6 @@ class MMIOMux implements MemAccessR, MemAccessW, IOAccess {
 	interrupt_pend = false;
 	mux_cause = false;
 	tx_int = 0;
-	constructor() {
-		run_hw.push(this.muxports[0]);
-	}
 	readbyte(address:number):number {
 		let v = 0;
 		if (address < 8) {
@@ -4793,6 +4922,8 @@ diag2.loadbin(diag.f2);
 diag3.loadbin(diag.f3);
 diag4.loadbin(diag.f4);
 const mmio_mux = new MMIOMux();
+// @ts-ignore
+window.mmio_mux = mmio_mux;
 const mem = [
 	new SysMem(), new SysMem(),
 	new SysMem(), new SysMem(),
@@ -4804,6 +4935,7 @@ bpl.configmemory(0x3fc00, new ROM512({
 }), 512);
 bpl.configmemory(0x3f200, mmio_mux, 256);
 cx_crt0.mux = mmio_mux.muxports[0];
+mmio_mux.muxports[0].line = cx_crt0;
 const dsk2_0 = new DSK2();
 run_hw.push(dsk2_0);
 bpl.configio(0, mmio_mux);
@@ -4820,6 +4952,7 @@ const mmio_t = new MMIOTrace();
 //@ts-ignore
 window.p = mmio_t;
 const test_cmd = new TestCMD();
+run_hshw.push(test_cmd);
 mmio_8.adddev(0x08, 2, test_cmd);
 const prt_0 = new MockPrinter();
 mmio_0.adddev(0xe0, 0x10, prt_0);
@@ -4892,60 +5025,21 @@ function update_diagsw() {
 }
 update_sense();
 update_diagsw();
-btn_ss1.addEventListener('click', function(ev) {
-	sense_switch ^= 1;
-	update_sense();
-});
-btn_ss2.addEventListener('click', function(ev) {
-	sense_switch ^= 2;
-	update_sense();
-});
-btn_ss3.addEventListener('click', function(ev) {
-	sense_switch ^= 4;
-	update_sense();
-});
-btn_ss4.addEventListener('click', function(ev) {
-	sense_switch ^= 8;
-	update_sense();
-});
-btn_ssR.addEventListener('click', function(ev) {
-	dswitch ^= 8;
-	update_sense();
-});
-btn_ssH.addEventListener('click', function(ev) {
-	dswitch ^= 4;
-	update_sense();
-});
-btn_ssI.addEventListener('click', function(ev) {
-	dswitch ^= 2;
-	update_sense();
-});
-btn_dt1.addEventListener('click', function(ev) {
-	cx_dip ^= 1;
-	update_diagsw();
-});
-btn_dt2.addEventListener('click', function(ev) {
-	cx_dip ^= 2;
-	update_diagsw();
-});
-btn_dt4.addEventListener('click', function(ev) {
-	cx_dip ^= 4;
-	update_diagsw();
-});
-btn_dt8.addEventListener('click', function(ev) {
-	cx_dip ^= 8;
-	update_diagsw();
-});
-btn_dtrun.addEventListener('click', function(ev) {
-	cx_diag0.dip = cx_dip;
-});
-reset_button.addEventListener('click', function(ev) {
-	mcsim.reset();
-});
-fp_rf.addEventListener('click', function(ev) {
-	sense_switch ^= 8;
-	update_sense();
-});
+btn_ss1.addEventListener('click', function(ev) { sense_switch ^= 1; update_sense(); });
+btn_ss2.addEventListener('click', function(ev) { sense_switch ^= 2; update_sense(); });
+btn_ss3.addEventListener('click', function(ev) { sense_switch ^= 4; update_sense(); });
+btn_ss4.addEventListener('click', function(ev) { sense_switch ^= 8; update_sense(); });
+btn_ssR.addEventListener('click', function(ev) { dswitch ^= 8; update_sense(); });
+btn_ssH.addEventListener('click', function(ev) { dswitch ^= 4; update_sense(); });
+btn_ssI.addEventListener('click', function(ev) { dswitch ^= 2; update_sense(); });
+btn_dt1.addEventListener('click', function(ev) { cx_dip ^= 1; update_diagsw(); });
+btn_dt2.addEventListener('click', function(ev) { cx_dip ^= 2; update_diagsw(); });
+btn_dt4.addEventListener('click', function(ev) { cx_dip ^= 4; update_diagsw(); });
+btn_dt8.addEventListener('click', function(ev) { cx_dip ^= 8; update_diagsw(); });
+btn_dtrun.addEventListener('click', function(ev) { cx_diag0.dip = cx_dip; });
+local_button.addEventListener('click', function() {});
+reset_button.addEventListener('click', function(ev) { mcsim.reset(); });
+fp_rf.addEventListener('click', function(ev) { sense_switch ^= 8; update_sense(); });
 fp_load.addEventListener('click', function(ev) {
 	sense_switch |= 2;
 	update_sense();
