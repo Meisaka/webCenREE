@@ -19,6 +19,9 @@
 	text-align: right;
 	padding: 2px 4px 2px 4px;
 }
+.vwop {
+	border: solid 1px #000;
+}
 .fpl {
 	display: flex;
 }
@@ -61,6 +64,10 @@
 	flex-wrap: wrap;
 	margin-right: 10px;
 }
+.pcol {
+	display: flex;
+	flex-direction: column;
+}
 .frontpanel {
 	display: flex;
 	border: solid 2px #666666;
@@ -71,6 +78,10 @@
 button.small {
 	font-size: 16px;
 	padding: 2px 14px 2px 14px;
+}
+button.warn {
+	background: #d4552e;
+	border-color: #ff8059;
 }
 .termcon {
 	margin-top: 10px;
@@ -97,11 +108,12 @@ button.small {
 .term {
 	border: 2px solid #77e;
 	background: #01050c;
-	height: 240px;
+	height: 250px;
 	width: 640px;
+	image-rendering: crisp-edges;
 }
 .term.tall {
-	height: 480px;
+	height: 500px;
 }
 .term.wide {
 	width: 1280px;
@@ -115,6 +127,15 @@ button.small {
 <body>
 	<div class="popwin" id="wset" style="display:none;top:40px;right:3%;float:right;">
 		<div style="display:flex; flex-direction: column;">
+			<div>Show/Hide CPU6:</div>
+			<span class="conv-sel"><label><input type="checkbox" id="view_reg" checked>Registers</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="view_page" checked>Page Map</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="view_int" checked>Internal</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="view_uop" checked>&#x03bc;Instruction</label></span>
+			<div>Show/Hide Other:</div>
+			<span class="conv-sel"><label><input type="checkbox" id="view_dis" checked>Disassembly</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="view_ffc">FFC</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="view_crt0" checked>CRT0</label></span>
 			<div>Disassembly</div>
 			<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
 			<span class="conv-sel"><input type="radio" name="conv" id="conv_mei" value="mei" checked/><label for="conv_mei">Modern Parametric</label></span>
@@ -167,8 +188,9 @@ button.small {
 		<button id="b_local">Local</button>
 		<button id="b_settings">Settings</button>
 	</div>
-	<div class="prow">
-		<div class="frontpanel">
+	<div class="prow" id="cd_r1">
+		<div class="pcol" id="cd_r1c1">
+		<div class="frontpanel" id="dcfpd">
 			<div>
 				<div>Front Panel Display:</div>
 				<div style="display:flex; align-items:flex-end;">
@@ -198,16 +220,28 @@ button.small {
 				<div class="fpl"><div>[View]</div><input id="dbgcmd"/></div>
 			</div>
 			<div class="regs">
-				<div class="fpl"><div>Address:</div><span id="fp_addr">0000 [0000 0000 0000 0000]</span></div>
-				<div class="fpl"><div>Level:</div><span id="fp_level">0 [0000]</span></div>
-				<div class="fpl"><div>Map:</div><Canvas id="fp_flagsc" class="ils dark" height="30" width="250"></Canvas></div>
+				<div class="fpl"><div>Address:</div><span id="fp_addr" style="width: 2.5em">0000</span><canvas id="fp_addrc" class="ils dark" height="30" width="200"></canvas></div>
+				<div class="fpl"><div>Level:</div><span id="fp_level" style="width: 1em">0</span><canvas id="fp_levelc" class="ils dark" height="30" width="108"></canvas></div>
+				<div class="fpl"><div>Map:</div><canvas id="fp_flagsc" class="ils dark" height="30" width="250"></canvas></div>
 				<div class="fpl"><div>Status:</div><span id="fp_runstate"><i>RUN</i><i class="a">HALT</i><i>STEP</i></span></div>
 				<div class="fpl"><div>Extended:</div><span id="fp_extstate"><i>SIM</i><i>MF</i></span></div>
 				<div class="fpl"><div>Diag:</div><canvas id="fp_diag" class="ils" width="40" height="30"></canvas></div>
 				<div class="fpl"><div>Perf:</div><span id="fp_perf"></span></div>
 			</div>
 		</div>
-		<div class="frontpanel">
+		</div>
+		<div class="pcol" id="cd_r1c2"></div>
+		<div class="termcon" id="dccrt0">
+			<div>
+				<button id="vctrl">CTRL</button><span id="vbel">BEL</span><label><input type="checkbox" id="softcaps" checked/>Caps Lock</label>
+				<button id="vcf1">F1</button><button id="vcf2">F2</button><button id="vcf3">F3</button><button id="vcf4">F4</button>
+				<button id="vcf5">F5</button><button id="vcf6">F6</button><button id="vcf7">F7</button><button id="vcf8">F8</button>
+			</div>
+			<canvas id="term0" class="term" width="640" height="250" tabindex="0"></canvas>
+		</div>
+	</div>
+	<div class="prow" id="cd_r2">
+		<div class="frontpanel" id="dcregs">
 			<div class="regs">
 				<div class="fpl fixed"><div>Reg0/1</div><span id="mcr_file0">----</span></div>
 				<div class="fpl fixed"><div>Reg2/3</div><span id="mcr_file2">----</span></div>
@@ -219,9 +253,10 @@ button.small {
 				<div class="fpl fixed"><div>RegE/F</div><span id="mcr_fileE">----</span></div>
 			</div>
 		</div>
+		<div class="pcol" id="ccr2"></div>
 	</div>
-	<div class="prow">
-		<div class="frontpanel">
+	<div class="prow" id="cd_r3">
+		<div class="frontpanel" id="dcint">
 			<div class="regs">
 				<div class="fpl"><div>Level</div><span id="mcr_level">--</span></div>
 				<div class="fpl"><div>Result</div><span id="mcr_res">--</span></div>
@@ -245,7 +280,7 @@ button.small {
 				<div class="fpl"><div>WA/MA/PA</div><span id="mcr_addr">---- ---- -----</span></div>
 			</div>
 		</div>
-		<div class="frontpanel">
+		<div class="frontpanel" id="dcpages">
 			<div class="regs">
 				<div class="fpl"><div>Page 00-3F</div><span id="mcp_0">--</span></div>
 				<div class="fpl"><div>40-7F</div><span id="mcp_1">--</span></div>
@@ -254,42 +289,68 @@ button.small {
 			</div>
 		</div>
 	</div>
-	<div class="prow">
-		<div class="frontpanel">
+	<div class="prow" id="cd_r4">
+		<div class="frontpanel" id="dcuop">
 			<div class="regs">
 				<div class="fpl fixed"><div>&#x03bc;Op:SEQ</div><span id="mcs_op"></span></div>
 				<div class="fpl fixed"><div>&#x03bc;Op:ALU</div><span id="mcs_op_alu"></span></div>
 				<div class="fpl fixed"><div>&#x03bc;Op:Bus</div><span id="mcs_op_bus"></span></div>
 			</div>
 		</div>
-		<div class="frontpanel">
+		<div class="frontpanel" id="dchawk">
 			<div class="regs">
-				<div>DSK II / Hawk Emu (Drag Drop to Load)</div>
-				<div class="fpl fixed"><div>Fixed</div><span id="dsk1_sta">-</span><input type="checkbox" name="dsk1wp" id="dsk1wp"/><label for="dsk1wp">WP</label></div>
-				<div class="fpl fixed"><div>Removable</div><span id="dsk0_sta">-</span><input type="checkbox" name="dsk0wp" id="dsk0wp"/><label for="dsk0wp">WP</label></div>
+				<div>DSK II / Hawk Emu (Drag Drop to Load: F, R...)</div>
+				<div class="fpl fixed"><div>Fixed</div><span id="dsk1_sta">-</span><label><input type="checkbox" id="dsk1wp"/>WP</label><button class="small" id="dsk1sel">Sel</button><button class="small" id="dsk1new">New</button></div>
+				<div class="fpl fixed"><div>Removable</div><span id="dsk0_sta">-</span><label><input type="checkbox" id="dsk0wp"/>WP</label><button class="small" id="dsk0sel">Sel</button><button class="small" id="dsk0new">New</button></div>
 			</div>
 		</div>
 	</div>
-	<div style="display: flex;">
-		<div style="overflow-y: scroll;height: 700px;margin: 10px;border: 2px solid;width: 75%;">
+	<div class="prow">
+		<div class="frontpanel" id="dcffc">
+			<div class="regs">
+				<div class="fpl fixed"><div>FFC SEQ</div><span id="ffc_op"></span></div>
+				<div class="fpl fixed"><div>FFC ALU</div><span id="ffc_op_alu"></span></div>
+				<div class="fpl fixed"><div>FFC I/O</div><span id="ffc_op_bus"></span></div>
+				<div class="fpl fixed"><div>FFC Diag</div>
+					<span id="ffc1_sta"></span>
+					<input type="checkbox" id="ffc1wp" style="display:none;"/>
+					<button class="small" id="ffc1sel">Sel</button>
+					<button class="small" id="ffc1new">New</button>
+					<!--this button is evil--><button class="small" id="ffc_log" style="display:none;">Log</button>
+				</div>
+			</div>
+			<div class="regs">
+				<div class="fpl fixed"><div>ALU Q/Flag</div><span id="ffc_alu">--</span></div>
+				<div class="fpl fixed"><div>ALU Reg0-7</div><span id="ffc_alu2">--</span></div>
+				<div class="fpl fixed"><div>ALU Reg8-F</div><span id="ffc_alu3">--</span></div>
+				<div class="fpl fixed"><div>Disk</div><span id="ffc_disk">--</span></div>
+			</div>
+			<div class="regs">
+				<div class="fpl fixed"><div>Addr</div><span id="ffc_addr">--</span></div>
+				<div class="fpl fixed"><div>SysData</div><span id="ffc_sys">--</span></div>
+				<div class="fpl fixed"><div>IPL</div><span id="ffc_ipl">-</span></div>
+				<div class="fpl fixed"><div>Track</div><span id="ffc_track">---</span></div>
+			</div>
+			<div class="regs">
+				<div class="fpl fixed"><div>Ctrl</div><span id="ffc_ctrl">--</span></div>
+				<div class="fpl fixed"><div>Status</div><span id="ffc_status">--</span></div>
+			</div>
+			
+		</div>
+	</div>
+	<div class="prow">
+		<div id="dclisting" style="overflow-y: scroll;height: 700px;margin: 10px;border: 2px solid;width: 25%;">
 			<div class="regs fixed" id="listing"></div>
 		</div>
-		<div class="termcon">
-			<div>
-				<button id="vctrl">CTRL</button><span id="vbel">BEL</span><label><input type="checkbox" id="softcaps" checked/>Caps Lock</label>
-				<button id="vcf1">F1</button><button id="vcf2">F2</button><button id="vcf3">F3</button><button id="vcf4">F4</button>
-				<button id="vcf5">F5</button><button id="vcf6">F6</button><button id="vcf7">F7</button><button id="vcf8">F8</button>
-			</div>
-			<canvas id="term0" class="term" width="640" height="240" tabindex="0"></canvas>
+		<div>
 			<div>
 				<button id="cm_imp">Annotate</button>
 				<button id="cm_vki">To Console</button>
 				<button id="cm_clear">Clear</button>
 			</div>
-			<textarea name="anno" id="anno" cols="85" rows="30"></textarea>
+			<textarea name="anno" id="anno" cols="85" rows="30" spellcheck="false"></textarea>
 		</div>
 	</div>
-	
-	
+	<div id="dld" style="display: none;"></div>
 </body>
 </html>
