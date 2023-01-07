@@ -93,7 +93,7 @@ button.active {
 	border-color: #f4c455;
 }
 .popwin {
-	position: absolute;
+	position: fixed;
 	display: flex;
 	border: solid 2px #666666;
 	background: #404146;

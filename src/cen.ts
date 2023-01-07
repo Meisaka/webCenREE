@@ -1,4 +1,6 @@
 "use strict";
+//@ts-ignore
+window.cen_ts_version = 11;
 window.addEventListener('load', async function(){
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
@@ -8,6 +10,15 @@ const view_uop = document.getElementById('view_uop') as HTMLInputElement;
 const view_dis = document.getElementById('view_dis') as HTMLInputElement;
 const view_ffc = document.getElementById('view_ffc') as HTMLInputElement;
 const view_crt0 = document.getElementById('view_crt0') as HTMLInputElement;
+const inp_crtsize = document.getElementById('crtsize') as HTMLInputElement;
+const inp_crtwide = document.getElementById('crtwide') as HTMLInputElement;
+const loc_crt0 = [
+	document.getElementById('crt0loc_t') as HTMLInputElement,
+	document.getElementById('crt0loc_b') as HTMLInputElement];
+const conv_hex = document.getElementById('conv_hex') as HTMLInputElement;
+const conv_ee = document.getElementById('conv_ee') as HTMLInputElement;
+const conv_mei = document.getElementById('conv_mei') as HTMLInputElement;
+const conv_uew = document.getElementById('conv_uew') as HTMLInputElement;
 const dc_fpd = document.getElementById('dcfpd') as HTMLDivElement;
 const dc_crt0 = document.getElementById('dccrt0') as HTMLDivElement;
 const dc_int = document.getElementById('dcint') as HTMLDivElement;
@@ -17,15 +28,19 @@ const dc_hawk = document.getElementById('dchawk') as HTMLDivElement;
 const dc_ffc = document.getElementById('dcffc') as HTMLDivElement;
 const dc_regs = document.getElementById('dcregs') as HTMLDivElement;
 const dc_listing = document.getElementById('dclisting') as HTMLDivElement;
+const dc_textio = document.getElementById('dc_textio') as HTMLDivElement;
 const con_rows = [
 	document.getElementById('cd_r1') as HTMLDivElement,
 	document.getElementById('cd_r2') as HTMLDivElement,
 	document.getElementById('cd_r3') as HTMLDivElement,
 	document.getElementById('cd_r4') as HTMLDivElement,
+	document.getElementById('cd_r5') as HTMLDivElement,
+	document.getElementById('cd_r6') as HTMLDivElement,
 ];
 const con_row1col1 = document.getElementById('cd_r1c1') as HTMLDivElement;
 const con_row1col2 = document.getElementById('cd_r1c2') as HTMLDivElement;
 const con_row2col2 = document.getElementById('ccr2') as HTMLDivElement;
+const con_row6col2 = document.getElementById('cd_r6c2') as HTMLDivElement;
 const down_div = document.getElementById('dld') as HTMLDivElement;
 const reset_button = document.getElementById('b_reset') as HTMLButtonElement;
 const step_button = document.getElementById('b_step') as HTMLButtonElement;
@@ -53,6 +68,10 @@ const btn_dt1 = document.getElementById('diag1') as HTMLButtonElement;
 const btn_dt2 = document.getElementById('diag2') as HTMLButtonElement;
 const btn_dt4 = document.getElementById('diag4') as HTMLButtonElement;
 const btn_dt8 = document.getElementById('diag8') as HTMLButtonElement;
+const sts_dt1 = document.getElementById('diag1s') as HTMLSpanElement;
+const sts_dt2 = document.getElementById('diag2s') as HTMLSpanElement;
+const sts_dt4 = document.getElementById('diag4s') as HTMLSpanElement;
+const sts_dt8 = document.getElementById('diag8s') as HTMLSpanElement;
 const btn_settings = document.getElementById('b_settings') as HTMLButtonElement;
 const win_settings = document.getElementById('wset') as HTMLDivElement;
 const btn_dtrun = document.getElementById('diagrun') as HTMLButtonElement;
@@ -1541,7 +1560,9 @@ setInterval(function(){ cx_crt0.update_blink(); }, 125);
 const init_program = '79 86 23 C8 E5 EC EC EF F2 EC E4 A1 8D 8A 00 71 80 01';
 const program_rotl = '60 AA AA 60 AA AA 55 40 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 71 01 03';
 const program_rotr = '60 AA AA 60 AA AA 55 40 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 71 01 03';
-let HEX_CONV = false;
+let HEX_CONV = conv_hex.checked;
+let NAME_CONV = 1;
+const NB = String.fromCodePoint(0xa0);
 
 function hexlist(v:number, l:number = 2) {
 	const pre = HEX_CONV ? '0x' : '';
@@ -1551,6 +1572,20 @@ function hexlist(v:number, l:number = 2) {
 function hex(v:number, l:number = 2) {
 	if(v < 0) return '-'+ ((-v).toString(16).toUpperCase().padStart(l,'0'));
 	return v.toString(16).toUpperCase().padStart(l,'0');
+}
+function hexstr(buf:Uint8Array, offset:number=0, length?:number):string {
+	let hs = '';
+	const limit = buf.byteLength;
+	if(length === undefined) {
+		length = limit;
+	}
+	if(limit == 0) return hs;
+	hs = buf[offset].toString(16).padStart(2,'0');
+	if(limit == 1) return hs;
+	for(let i = 1; i < length && i+offset < limit; i++) {
+		hs += ' '+buf[i+offset].toString(16).padStart(2,'0')
+	}
+	return hs;
 }
 function bin(v:number, l:number) {
 	return v.toString(2).padStart(l,'0');
@@ -5355,9 +5390,6 @@ if(true) {
 	}
 }
 
-let NAME_CONV = 1;
-const NB = String.fromCodePoint(0xa0);
-
 const oplist:OPLEntry[] = [
 	// 0x0H
 	{n:'HALT',md:OPM.IMPL},{n:'NOP',md:OPM.IMPL},
@@ -6309,11 +6341,588 @@ function setupmemory() {
 		bpl.configmemory(0xb800, new RAM2k(), 2048);
 	}
 }
+type BRObject = {[index:string|number]:BRValue};
+type BRValue = undefined|null|boolean|number|string|BRObject|BRValue[];
+function brload(buffer:ArrayBuffer, into?:BRValue):BRValue {
+	let offset = 0;
+	const dv = new DataView(buffer);
+	const limit = buffer.byteLength;
+	function brload_rec(depth:number, into?:BRValue):BRValue {
+		let b = dv.getUint8(offset++);
+		const m = b >> 5;
+		const v = b & 31;
+		let n = false;
+		function read_enc():number {
+			if(v < 24) return v;
+			if(v == 24) {
+				if(offset+1 > limit) throw new Error();
+				let q = dv.getUint8(offset++);
+				if(q < 24) throw new Error();
+				return q;
+			}
+			if(v == 25) {
+				if(offset+2 > limit) throw new Error();
+				let q = dv.getUint16(offset, false);
+				offset += 2;
+				if(q < 256) throw new Error();
+				return q;
+			}
+			if(v == 26) {
+				if(offset+4 > limit) throw new Error();
+				let q = dv.getUint32(offset, false);
+				offset += 4;
+				if(q < 65536) throw new Error();
+				return q;
+			}
+			if(v == 27) throw new Error();
+			throw new Error();
+		}
+		switch(m) {
+		case 0: return read_enc();
+		case 1: return -(read_enc()+1);
+		case 2: throw new Error();
+		case 3: {
+			const len = read_enc();
+			let s = '';
+			for(let i = 0; i < len; i++) {
+				if(offset+1 > limit) throw new Error();
+				const c = dv.getUint8(offset++);
+				if(c < 128) s += String.fromCharCode(c);
+				else if((c & 248)==240) { // 3
+					if(offset+3 > limit) throw new Error();
+					const c2 = dv.getUint8(offset++); if((c2 & 192)!=128) throw new Error();
+					const c1 = dv.getUint8(offset++); if((c1 & 192)!=128) throw new Error();
+					const c0 = dv.getUint8(offset++); if((c0 & 192)!=128) throw new Error();
+					s += String.fromCharCode(((c&31)<<18) | ((c2&63)<<12) | ((c1&63)<<6) | (c0&63));
+				}
+				else if((c & 240)==224) { // 2
+					if(offset+2 > limit) throw new Error();
+					const c1 = dv.getUint8(offset++); if((c1 & 192)!=128) throw new Error();
+					const c0 = dv.getUint8(offset++); if((c0 & 192)!=128) throw new Error();
+					s += String.fromCharCode(((c&31)<<12) | ((c1&63)<<6) | (c0&63));
+				}
+				else if((c & 224)==192) { // 1
+					if(offset+1 > limit) throw new Error();
+					const c0 = dv.getUint8(offset++); if((c0 & 192)!=128) throw new Error();
+					s += String.fromCharCode(((c&31)<<6) | (c0&63));
+				}
+				else throw new Error();
+			}
+			return s;
+		}
+		case 4: {
+			const len = read_enc();
+			if(into !== undefined) {
+				if(typeof into != 'object' || !Array.isArray(into)) {
+					throw new Error();
+				}
+			}
+			const a:BRValue[] = (into !== undefined) ? into:[];
+			for(let i = 0; i < len; i++) {
+				a[i] = brload_rec(depth+1, a[i]);
+			}
+			return a;
+		}
+		case 5: {
+			const len = read_enc();
+			if(into !== undefined) {
+				if(into == null
+					|| typeof into != 'object'
+					|| Array.isArray(into)) throw new Error();
+			}
+			const o:{[index:string|number]:BRValue} =
+				(into !== undefined) ? into : {};
+			for(let i = 0; i < len; i++) {
+				const k = brload_rec(depth+1);
+				if(typeof k == 'number' || typeof k == 'string') {
+					const v = brload_rec(depth+1, o[k]);
+					o[k] = v;
+				} else throw new Error();
+			}
+			return o;
+		}
+		case 6:{
+			const tv = read_enc();
+			const item = brload_rec(depth+1);
+			if(typeof item == 'number') {
+				if(tv == 6) {
+					if(into !== undefined) {
+						if(typeof into == 'object' && Array.isArray(into)) {
+							for(let i = 0; i < 8 && i < into.length; i++) {
+								if(into[i] === false || into[i] === true) {
+									into[i] = (item & (1<<i)) != 0;
+								} else throw new Error();
+							}
+							return into;
+						}
+						throw new Error();
+					}
+					return [
+						(item&1)!=0,(item&2)!=0,(item&4)!=0,(item&8)!=0,
+						(item&16)!=0,(item&32)!=0,(item&64)!=0,(item&128)!=0,
+					];
+				}
+			}
+			return item;
+			}
+		case 7: {
+			if(v == 20) return false;
+			if(v == 21) return true;
+			if(v == 22) return null;
+			if(v == 23) return undefined;
+			throw new Error();
+			}
+		}
+		throw new Error();
+	}
+	return brload_rec(0, into);
+}
+const brscratch = new Uint8Array(16);
+const brscratchv = new DataView(brscratch.buffer);
+function brenc_int(value:number):number {
+	if(value < 24) {
+		brscratch[0] |= value;
+		return 1;
+	} else if(value < 256) {
+		brscratch[0] |= 24;
+		brscratchv.setUint8(1, value);
+		return 2;
+	} else if(value < 65536) {
+		brscratch[0] |= 25;
+		brscratchv.setUint16(1, value, false);
+		return 3;
+	} else if(value < 4294967296) {
+		brscratch[0] |= 27;
+		brscratchv.setUint32(1, value, false);
+		return 5;
+	}
+	throw new Error();
+}
+function brsave(value:BRValue) {
+	let ds = '';
+	function brsave_rec(value:BRValue) {
+		if(value === false) {
+			ds += String.fromCharCode(244);
+			return;
+		} else if(value === true) {
+			ds += String.fromCharCode(245);
+			return;
+		} else if(value === null) {
+			ds += String.fromCharCode(246);
+			return;
+		} else if(value === undefined) {
+			ds += String.fromCharCode(247);
+			return;
+		} else if(typeof value == 'number') {
+			if(Math.floor(value) != value) throw new Error();
+			brscratch[0] = 0;
+			if(value < 0) {
+				brscratch[0] = 32;
+				value = -(value+1);
+			}
+			let dlen = brenc_int(value);
+			for(let i = 0; i < dlen; i++) {
+				ds += String.fromCharCode(brscratch[i]);
+			}
+			return;
+		} else if(typeof value == 'string') {
+			brscratch[0] = 96;
+			let eslen = 0;
+			for(let c of value) {
+				if(c.codePointAt(0) as number > 127) throw new Error();
+				eslen++;
+			}
+			const dlen = brenc_int(eslen);
+			for(let i = 0; i < dlen; i++) {
+				ds += String.fromCharCode(brscratch[i]);
+			}
+			for(let c of value) {
+				ds += c;
+			}
+			return;
+		} else if(typeof value == 'object') {
+			if(Array.isArray(value)) {
+				let is_b = value.length > 1;
+				let b_val = 0;
+				for(let i = 0; is_b && i < value.length; i++) {
+					if(value[i] === true) {
+						b_val |= 1<<i;
+					} else if(value[i] !== false) {
+						is_b = false;
+						break;
+					}
+				}
+				if(is_b && value.length < 8) {
+					ds += String.fromCharCode(198);
+					brsave_rec(b_val);
+					return;
+				}
+				brscratch[0] = 128;
+				const dlen = brenc_int(value.length);
+				for(let i = 0; i < dlen; i++) {
+					ds += String.fromCharCode(brscratch[i]);
+				}
+				for(let i = 0; i < value.length; i++) {
+					brsave_rec(value[i]);
+				}
+			} else {
+				brscratch[0] = 160;
+				const kv = Object.entries(value);
+				const dlen = brenc_int(kv.length);
+				for(let i = 0; i < dlen; i++) {
+					ds += String.fromCharCode(brscratch[i]);
+				}
+				for(let i = 0; i < kv.length; i++) {
+					if(/^0|(?:[1-9][0-9]*)$/.test(kv[i][0])) {
+						const kn = parseInt(kv[i][0]);
+						brsave_rec(kn);
+					} else {
+						brsave_rec(kv[i][0]);
+					}
+					brsave_rec(kv[i][1]);
+				}
+			}
+			return;
+		}
+		throw new Error();
+	}
+	brsave_rec(value);
+	const bv = new Uint8Array(ds.length);
+	for(let i = 0; i<ds.length; i++) {
+		bv[i] = ds.charCodeAt(i);
+	}
+	return bv;
+}
+function to_csr(buffer:ArrayBuffer):string {
+	const dv = new DataView(buffer);
+	let s = '';
+	let i = 0;
+	const limit = buffer.byteLength;
+	while(i < limit) {
+		let v:number;
+		if(i+3 < limit) {
+			v = dv.getUint32(i, true);
+		} else if(i+2 < limit) {
+			v = dv.getUint8(i) | (dv.getUint8(i+1)<<8) | (dv.getUint8(i+2)<<16);
+			v += 4328521728;
+		} else if(i+1 < limit) {
+			v = dv.getUint8(i) | (dv.getUint8(i+1)<<8);
+			v += 4311744512;
+		} else {
+			v = dv.getUint8(i);
+			v += 4294967296;
+		}
+		const v0 = v % 95; v = (v / 95) | 0;
+		const v1 = v % 95; v = (v / 95) | 0;
+		const v2 = v % 95; v = (v / 95) | 0;
+		const v3 = v % 95; v = (v / 95) | 0;
+		s += String.fromCharCode(32 + v) +
+		String.fromCharCode(32 + v0) +
+		String.fromCharCode(32 + v1) +
+		String.fromCharCode(32 + v2) +
+		String.fromCharCode(32 + v3);
+		i+=4;
+	}
+	return s;
+}
+function from_csr(s:string):ArrayBuffer {
+	const blocks = (s.length / 5) | 0;
+	const buffer = new ArrayBuffer(blocks * 4);
+	const dv = new DataView(buffer);
+	const limit = blocks * 5;
+	let i = 0;
+	let o = 0;
+	while(i+4 < limit) {
+		const sv = s.charCodeAt(i) - 32;
+		const sv0 = s.charCodeAt(i+1) - 32;
+		const sv1 = s.charCodeAt(i+2) - 32;
+		const sv2 = s.charCodeAt(i+3) - 32;
+		const sv3 = s.charCodeAt(i+4) - 32;
+		let v = sv * 95 + sv3;
+		v = v * 95 + sv2;
+		v = v * 95 + sv1;
+		v = v * 95 + sv0;
+		if(v > 4294967295) v -= 4294967296;
+		dv.setUint32(o, v, true);
+		o+=4;
+		i+=5;
+	}
+	return buffer;
+}
+
+const RUNRATES = [1,10,100,1000,10000,50000,100000,150000];
+interface ConfigSchema {
+	0:[],
+	1:[boolean[],number],
+	2:[number],
+	3:[boolean],
+	4:[boolean,boolean,number],
+	5:[boolean,number],
+	16: [boolean[]][],
+	17?: [][],
+	18?: [][],
+	19?: [][],
+	20?: [boolean,boolean][],
+}
+const CONFIG_LL:BRObject & ConfigSchema = {
+	0: [],
+	1: [[false,false,false,false],0],
+	2: [0],
+	3: [false],
+	4: [false,false,1],
+	5: [false,13],
+	16: [ // CRT[]
+		[[true,false,false,false]]
+	],
+	//17: [ // MUX[]
+	//[]
+	//],
+	//18: [ // DSK[]
+	//],
+	19: [ // Hawk[]
+	],
+	20: [ // FFC[]
+		[true, false]
+	]
+};
+const CONFIG = {
+	uicore: CONFIG_LL[0], // uicore
+	cpu: CONFIG_LL[1], // cpu
+	emu: CONFIG_LL[2],
+	net: CONFIG_LL[3], // TODO
+	disassm: CONFIG_LL[4],
+	diag: CONFIG_LL[5],// diag
+	crt: CONFIG_LL[16],// crt[]
+	ffc: CONFIG_LL[20],// ffc[]
+};
+
+function config_load() {
+	// config_load must be called before:
+	// update_layout()
+	// setupmemory()
+	// update_runrate()
+	// update_sense()
+	// update_diagsw()
+	// TODO uicore
+	// 0: string -- UI font -- N/A could be a thing though
+	{ // cpu
+		// 0: Array<boolean>
+		//  > view_int.checked = show_int = val[0];
+		//  > view_uop.checked = show_uop = val[1];
+		//  > view_reg.checked = show_reg = val[2];
+		//  > view_page.checked = show_page = val[3];
+		// 1:
+		//  load val
+		//    sense_switch = val & 15;
+		//    dswitch = (val >> 4) & 14;
+		//  save val = sense_switch | (dswitch << 4);
+		const show = CONFIG.cpu[0];
+		view_int.checked = show_int = show[0];
+		view_uop.checked = show_uop = show[1];
+		view_reg.checked = show_reg = show[2];
+		view_page.checked = show_page = show[3];
+		const sense = CONFIG.cpu[1];
+		sense_switch = sense & 15;
+		dswitch = (sense >> 4) & 14;
+	}
+	{
+		// 0: number run_rate = RUNRATES[val];
+		const rsel = CONFIG.emu[0];
+		run_rate = RUNRATES[rsel];
+	}
+	// TODO net
+	// 0: bool local_button -> remote_check -- successfully connected?
+	{
+		// 0: bool show_dis = view_dis.checked;
+		// 1: bool HEX_CONV = false -- (impl)
+		// 2: number NAME_CONV 0|1|2; -- (impl)
+		show_dis = CONFIG.disassm[0];
+		view_dis.checked = show_dis;
+		HEX_CONV = CONFIG.disassm[1];
+		NAME_CONV = CONFIG.disassm[2];
+	}
+	{
+		// 0: bool in_diagins.checked // diag roms
+		// 1: number cx_diag0.dip = cx_dip = value
+		in_diagins.checked = CONFIG.diag[0];
+		cx_dip = CONFIG.diag[1] & 15;
+		cx_diag0.dip = cx_dip;
+	}
+	{
+		const crts = CONFIG.crt;
+		// [n][0] 0: bool view_crt0 // show
+		// [n][0] 1: bool inp_crtsize // tall
+		// [n][0] 2: bool inp_crtwide // wide
+		// [n][0] 3: bool loc_crt0 // f=top/t=bottom
+		for(let i = 0; i < crts.length; i++) {
+			const crt = crts[i];
+			const viewopts = crt[0];
+			if(i == 0) {
+				view_crt0.checked = viewopts[0];
+				inp_crtsize.checked = viewopts[1];
+				inp_crtwide.checked = viewopts[2];
+				if(viewopts[3]) { // f=top/t=bottom
+					loc_crt0[0].checked = false; //top
+					loc_crt0[1].checked = true; //bottom
+				} else {
+					loc_crt0[1].checked = false; //bottom
+					loc_crt0[0].checked = true; //top
+				}
+			}
+		}
+	}
+	do {
+		const ffcs = CONFIG.ffc;
+		if(ffcs == undefined) break;
+		// [n][0] bool installed -- N/A
+		// [n][1] bool show_ffc = view_ffc.checked;
+		for(let i = 0; i < ffcs.length; i++) {
+			const ffc = ffcs[i];
+			show_ffc = ffc[1];
+			view_ffc.checked = show_ffc;
+		}
+	} while(false);
+}
+
+function config_save() {
+	// TODO uicore
+	// 0: string -- UI font -- N/A could be a thing though
+	{ // cpu
+		// 0: Array<boolean>
+		//  > view_int.checked = show_int = val[0];
+		//  > view_uop.checked = show_uop = val[1];
+		//  > view_reg.checked = show_reg = val[2];
+		//  > view_page.checked = show_page = val[3];
+		// 1:
+		//  u8 bits: dswitch[3..1] | 0 | sense_switch[3..0]
+		//  save val = sense_switch | (dswitch << 4);
+		const show = CONFIG.cpu[0];
+		show[0] = show_int;
+		show[1] = show_uop;
+		show[2] = show_reg;
+		show[3] = show_page;
+		CONFIG.cpu[1] = sense_switch | (dswitch << 4);
+	}
+	{
+		// 0: number run_rate = RUNRATES[val];
+		for(let i = 0; i < RUNRATES.length; i++) {
+			if(RUNRATES[i] == run_rate) {
+				CONFIG.emu[0] = i;
+				break;
+			}
+		}
+	}
+	// TODO net
+	// 0: bool local_button -> remote_check -- successfully connected?
+	{
+		// 0: bool show_dis = view_dis.checked;
+		// 1: bool HEX_CONV = false -- (impl)
+		// 2: number NAME_CONV 1|2|3; -- (impl)
+		CONFIG.disassm[0] = show_dis;
+		CONFIG.disassm[1] = HEX_CONV;
+		CONFIG.disassm[2] = NAME_CONV;
+	}
+	{
+		// 0: bool in_diagins.checked // diag roms
+		// 1: number cx_diag0.dip = cx_dip = value
+		CONFIG.diag[0] = in_diagins.checked;
+		CONFIG.diag[1] = cx_diag0.dip & 15;
+	}
+	{
+		const crts = CONFIG.crt;
+		// [n][0] 0: bool view_crt0 // show
+		// [n][0] 1: bool inp_crtsize // tall
+		// [n][0] 2: bool inp_crtwide // wide
+		// [n][0] 3: bool loc_crt0 // f=top/t=bottom
+		for(let i = 0; i < crts.length; i++) {
+			const crt = crts[i];
+			const viewopts = crt[0];
+			if(i == 0) {
+				viewopts[0] = view_crt0.checked;
+				viewopts[1] = inp_crtsize.checked;
+				viewopts[2] = inp_crtwide.checked;
+				viewopts[3] = loc_crt0[1].checked;
+			}
+		}
+	}
+	do {
+		const ffcs = CONFIG.ffc;
+		if(ffcs == undefined) break;
+		// [n][0] bool installed -- N/A
+		// [n][1] bool show_ffc = view_ffc.checked;
+		for(let i = 0; i < ffcs.length; i++) {
+			const ffc = ffcs[i];
+			if(i==0) {
+				ffc[1] = show_ffc;
+			}
+		}
+	} while(false);
+}
+
+//@ts-ignore
+this.window.rtd = rtd;
+//@ts-ignore
+window.brsave = brsave;
+//@ts-ignore
+window.brload = brload;
+//@ts-ignore
+window.to_csr = to_csr;
+//@ts-ignore
+window.from_csr = from_csr;
+function rtd() {
+	config_save();
+	let d:Uint8Array = brsave(CONFIG_LL);
+	let csr = to_csr(d.buffer);
+	try {
+		localStorage.setItem('cencfg', csr);
+	} catch(ex) {
+		console.warn('unable to save config string:',[csr]);
+	}
+	//let hso = hexstr(d);
+	//const bv = new Uint8Array(from_csr(csr));
+	//let hsi = hexstr(bv);
+	//console.log(hso);
+	//console.log(hsi);
+	//console.log(csr);
+	//console.log(brload(bv.buffer, CONFIG_LL));
+}
+
+function config_initialize() {
+	let lsv = localStorage.getItem('cencfg');
+	if(lsv == null) return;
+	try {
+		const bv = new Uint8Array(from_csr(lsv));
+		console.log(brload(bv.buffer, CONFIG_LL));
+		config_load();
+	} catch(ex) {
+		console.warn('unable to load config:',[lsv],ex);
+	}
+}
+config_initialize();
+
+if (NAME_CONV == 0) conv_ee.checked = true;
+if (NAME_CONV == 1) conv_mei.checked = true;
+if (NAME_CONV == 2) conv_uew.checked = true;
+cx_crt0.show_ui = view_crt0.checked;
+
+let config_timeout = 0;
+function config_handle() {
+	config_timeout = 0;
+	rtd();
+}
+function config_updated() {
+	if(config_timeout != 0) {
+		clearTimeout(config_timeout);
+	}
+	config_timeout = setTimeout(config_handle, 10000);
+}
+
 setupmemory();
 
 update_microlist();
 mcsim.step(true);
 mcsim.showstate(true);
+main_ffc.step(true);
 
 //@ts-ignore
 window.io_ffc = main_ffc;
@@ -6362,7 +6971,7 @@ in_dbgcmd.addEventListener('keypress', function(ev) {
 	}
 });
 in_diagins.addEventListener('change', function(ev) {
-	setupmemory();
+	setupmemory(); config_updated();
 });
 // sense_switch
 function update_sense() {
@@ -6376,10 +6985,14 @@ function update_sense() {
 	style_if(btn_ssI,'active',(dswitch & 2) > 0);
 }
 function update_diagsw() {
-	style_if(btn_dt1,'active',(cx_dip & 1) > 0);
-	style_if(btn_dt2,'active',(cx_dip & 2) > 0);
-	style_if(btn_dt4,'active',(cx_dip & 4) > 0);
-	style_if(btn_dt8,'active',(cx_dip & 8) > 0);
+	style_if(btn_dt1,'active',(cx_dip & 1) != 0);
+	style_if(btn_dt2,'active',(cx_dip & 2) != 0);
+	style_if(btn_dt4,'active',(cx_dip & 4) != 0);
+	style_if(btn_dt8,'active',(cx_dip & 8) != 0);
+	style_if(sts_dt1,'active',(cx_diag0.dip & 1) != 0);
+	style_if(sts_dt2,'active',(cx_diag0.dip & 2) != 0);
+	style_if(sts_dt4,'active',(cx_diag0.dip & 4) != 0);
+	style_if(sts_dt8,'active',(cx_diag0.dip & 8) != 0);
 }
 update_sense();
 update_diagsw();
@@ -6425,29 +7038,33 @@ function remote_check() {
 	}
 	new WSConnection();
 }
-btn_ss1.addEventListener('click', function(ev) { sense_switch ^= 1; update_sense(); });
-btn_ss2.addEventListener('click', function(ev) { sense_switch ^= 2; update_sense(); });
-btn_ss3.addEventListener('click', function(ev) { sense_switch ^= 4; update_sense(); });
-btn_ss4.addEventListener('click', function(ev) { sense_switch ^= 8; update_sense(); });
-btn_ssR.addEventListener('click', function(ev) { dswitch ^= 8; update_sense(); });
-btn_ssH.addEventListener('click', function(ev) { dswitch ^= 4; update_sense(); });
-btn_ssI.addEventListener('click', function(ev) { dswitch ^= 2; update_sense(); });
+btn_ss1.addEventListener('click', function(ev) { sense_switch ^= 1; update_sense(); config_updated(); });
+btn_ss2.addEventListener('click', function(ev) { sense_switch ^= 2; update_sense(); config_updated(); });
+btn_ss3.addEventListener('click', function(ev) { sense_switch ^= 4; update_sense(); config_updated(); });
+btn_ss4.addEventListener('click', function(ev) { sense_switch ^= 8; update_sense(); config_updated(); });
+btn_ssR.addEventListener('click', function(ev) { dswitch ^= 8; update_sense(); config_updated(); });
+btn_ssH.addEventListener('click', function(ev) { dswitch ^= 4; update_sense(); config_updated(); });
+btn_ssI.addEventListener('click', function(ev) { dswitch ^= 2; update_sense(); config_updated(); });
 btn_dt1.addEventListener('click', function(ev) { cx_dip ^= 1; update_diagsw(); });
 btn_dt2.addEventListener('click', function(ev) { cx_dip ^= 2; update_diagsw(); });
 btn_dt4.addEventListener('click', function(ev) { cx_dip ^= 4; update_diagsw(); });
 btn_dt8.addEventListener('click', function(ev) { cx_dip ^= 8; update_diagsw(); });
-btn_dtrun.addEventListener('click', function(ev) { cx_diag0.dip = cx_dip; });
+btn_dtrun.addEventListener('click', function(ev) { cx_diag0.dip = cx_dip; update_diagsw(); config_updated(); });
 local_button.addEventListener('click', remote_check);
 reset_button.addEventListener('click', function(ev) { mcsim.reset(); });
-fp_rf.addEventListener('click', function(ev) { sense_switch ^= 8; update_sense(); });
+fp_rf.addEventListener('click', function(ev) { sense_switch ^= 8; update_sense(); config_updated(); });
 fp_load.addEventListener('click', function(ev) {
-	sense_switch |= 2;
-	update_sense();
+	if((sense_switch|2)!=sense_switch) {
+		sense_switch |= 2; config_updated();
+		update_sense();
+	}
 	mcsim.reset();
 });
 fp_select.addEventListener('click', function(ev) {
-	sense_switch &= ~2;
-	update_sense();
+	if((sense_switch & 253)!=sense_switch) {
+		sense_switch &= 253; config_updated();
+		update_sense();
+	}
 	mcsim.reset();
 });
 micro_button.addEventListener('click', function(ev) {
@@ -6462,7 +7079,7 @@ run_button.addEventListener('click', function(ev) {
 	run_control(run_ctl == 0);
 });
 function update_runrate(new_rate:number) {
-	run_rate = new_rate;
+	run_rate = new_rate; config_updated();
 	style_if(run_rate1,'active',run_rate == 1);
 	style_if(run_rate2,'active',run_rate == 10);
 	style_if(run_rate3,'active',run_rate == 100);
@@ -6520,34 +7137,23 @@ btn_cm_tocrt.addEventListener('click', function(ev) {
 btn_cm_clear.addEventListener('click', function(ev) {
 	txt_anno.value = '';
 });
-if ((document.getElementById('conv_ee') as HTMLInputElement).checked) {
-	NAME_CONV = 0;
-}
-if ((document.getElementById('conv_mei') as HTMLInputElement).checked) {
-	NAME_CONV = 1;
-}
-if ((document.getElementById('conv_uew') as HTMLInputElement).checked) {
-	NAME_CONV = 2;
-}
-HEX_CONV = (document.getElementById('conv_hex') as HTMLInputElement).checked;
-(document.getElementById('conv_ee') as HTMLInputElement).addEventListener('change', function(ev) {
-	NAME_CONV = 0;
+
+conv_ee.addEventListener('change', function(ev) {
+	NAME_CONV = 0; config_updated();
 	show_disasm();
 });
-(document.getElementById('conv_mei') as HTMLInputElement).addEventListener('change', function(ev) {
-	NAME_CONV = 1;
+conv_mei.addEventListener('change', function(ev) {
+	NAME_CONV = 1; config_updated();
 	show_disasm();
 });
-(document.getElementById('conv_uew') as HTMLInputElement).addEventListener('change', function(ev) {
-	NAME_CONV = 2;
+conv_uew.addEventListener('change', function(ev) {
+	NAME_CONV = 2; config_updated();
 	show_disasm();
 });
-(document.getElementById('conv_hex') as HTMLInputElement).addEventListener('change', function(ev) {
-	HEX_CONV = this.checked;
+conv_hex.addEventListener('change', function(ev) {
+	HEX_CONV = this.checked; config_updated();
 	show_disasm();
 });
-const inp_crtsize = document.getElementById('crtsize') as HTMLInputElement;
-const inp_crtwide = document.getElementById('crtwide') as HTMLInputElement;
 
 document.body.addEventListener('dragstart', function(ev) {
 	const dt = ev.dataTransfer;
@@ -6584,61 +7190,92 @@ function update_layout() {
 	dc_regs.parentElement?.removeChild(dc_regs);
 	dc_crt0.parentElement?.removeChild(dc_crt0);
 	con_rows[1].removeChild(con_row2col2);
-	if(inp_crtwide.checked) {
-		con_rows[0].appendChild(dc_regs);
-		con_rows[1].appendChild(dc_crt0);
-	} else {
-		con_rows[0].appendChild(dc_crt0);
-		con_rows[1].appendChild(dc_regs);
+	let crt_wide_layout = inp_crtwide.checked && !loc_crt0[1].checked;
+	let crt_tall_layout = inp_crtsize.checked;
+	const reg_fits_on_first_row = show_reg && window.innerWidth >= 1688;
+	const crt_fits_on_first_row = !inp_crtwide.checked && !loc_crt0[1].checked && cx_crt0.show_ui && window.innerWidth >= 1410;
+	let show_reg_layout = show_reg;
+	let first_row_hp = !show_int || !show_uop || !reg_fits_on_first_row;
+	if(!crt_wide_layout && reg_fits_on_first_row) {
+		first_row_hp = false;
+	}
+	if(window.innerWidth < 1392) {
+		crt_wide_layout = true;
+		show_reg_layout = false;
+	}
+	if(loc_crt0[1].checked) { // crt bottom
+		if(first_row_hp || !reg_fits_on_first_row) {
+			con_rows[1].appendChild(dc_regs);
+			crt_wide_layout = true;
+			crt_tall_layout = false;
+			show_reg_layout = false;
+		} else {
+			con_rows[0].appendChild(dc_regs);
+			crt_wide_layout = true;
+		}
+	} else { // crt top
+		if(!crt_fits_on_first_row && reg_fits_on_first_row) {
+			con_rows[0].appendChild(dc_regs);
+			con_rows[1].appendChild(dc_crt0);
+		} else {
+			con_rows[0].appendChild(dc_crt0);
+			con_rows[1].appendChild(dc_regs);
+		}
 	}
 	con_rows[1].appendChild(con_row2col2);
 	dc_pages.parentElement?.removeChild(dc_pages);
 	dc_hawk.parentElement?.removeChild(dc_hawk);
-	if(!show_reg && inp_crtwide.checked) {
+	if(first_row_hp && !crt_fits_on_first_row) {
 		con_row1col2.appendChild(dc_hawk);
 		con_row1col2.appendChild(dc_pages);
-	} else if(inp_crtsize.checked && !inp_crtwide.checked) {
+	} else if(crt_tall_layout && crt_fits_on_first_row) {
 		con_row1col1.appendChild(dc_hawk);
 		con_row1col1.appendChild(dc_pages);
-	} else if(show_reg && !inp_crtwide.checked) {
+	} else if(show_reg_layout && crt_fits_on_first_row) {
 		con_row2col2.appendChild(dc_hawk);
 		con_row2col2.appendChild(dc_pages);
 	} else {
 		con_rows[2].appendChild(dc_pages);
 		con_rows[3].appendChild(dc_hawk);
 	}
+	if(loc_crt0[1].checked) {
+		con_row6col2.appendChild(dc_crt0);
+		con_row6col2.appendChild(dc_textio);
+	}
 }
-inp_crtsize.addEventListener('change', update_layout);
-inp_crtwide.addEventListener('change', update_layout);
+window.addEventListener('resize', update_layout);
+loc_crt0[0].addEventListener('change', function() { update_layout(); config_updated(); });
+loc_crt0[1].addEventListener('change', function() { update_layout(); config_updated(); });
+inp_crtsize.addEventListener('change', function() { update_layout(); config_updated(); });
+inp_crtwide.addEventListener('change', function() { update_layout(); config_updated(); });
 view_reg.addEventListener('click', function() {
-	show_reg = this.checked;
+	show_reg = this.checked; config_updated();
 	update_layout();
 });
 view_page.addEventListener('click', function() {
-	show_page = this.checked;
+	show_page = this.checked; config_updated();
 	update_layout();
 });
 view_int.addEventListener('click', function() {
-	show_int = this.checked;
+	show_int = this.checked; config_updated();
 	update_layout();
 });
 view_uop.addEventListener('click', function() {
-	show_uop = this.checked;
+	show_uop = this.checked; config_updated();
 	update_layout();
 });
 view_dis.addEventListener('click', function() {
-	show_dis = this.checked;
+	show_dis = this.checked; config_updated();
 	update_layout();
 });
 view_ffc.addEventListener('click', function() {
-	show_ffc = this.checked;
+	show_ffc = this.checked; config_updated();
 	update_layout();
 });
 view_crt0.addEventListener('click', function() {
-	cx_crt0.show_ui = this.checked;
+	cx_crt0.show_ui = this.checked; config_updated();
 	update_layout();
 });
-cx_crt0.show_ui = view_crt0.checked;
 update_layout();
 
 class DiskImageUI {

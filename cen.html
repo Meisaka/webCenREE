@@ -4,6 +4,9 @@
 <meta charset="utf-8"/>
 <title>Centurion</title>
 <link rel="stylesheet" href="main.css">
+<script>
+window.cen_version = 11;
+</script>
 <script src="js/cen.js"></script>
 <style>
 .mcl > div {
@@ -59,6 +62,36 @@
 .ils.dark {
 	background: #070000;
 }
+@keyframes alert {
+	from {
+		border-color: #cf2400;
+	}
+	to {
+		border-color: #ff8410;
+	}
+}
+.sysalert {
+	border: 2px solid #cf4400;
+	animation: alert 0.5s alternate 0s infinite both;
+}
+.sysmenu {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+}
+.sysmenu > div {
+	margin: 8px;
+	display: flex;
+}
+#dclisting {
+	overflow-y: scroll;
+	height: 700px;
+	margin: 10px;
+	border: 2px solid;
+	min-width: 350px;
+	flex-grow: 1;
+}
 .prow {
 	display: flex;
 	flex-wrap: wrap;
@@ -82,6 +115,17 @@ button.small {
 button.warn {
 	background: #d4552e;
 	border-color: #ff8059;
+}
+.diagc {
+	display: flex;
+	flex-direction: column;
+}
+.diagc > span {
+	height: 4px;
+	background-color: #290707;
+}
+.diagc > span.active {
+	background-color: #f4c455;
 }
 .termcon {
 	margin-top: 10px;
@@ -135,13 +179,15 @@ button.warn {
 			<div>Show/Hide Other:</div>
 			<span class="conv-sel"><label><input type="checkbox" id="view_dis" checked>Disassembly</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="view_ffc">FFC</label></span>
-			<span class="conv-sel"><label><input type="checkbox" id="view_crt0" checked>CRT0</label></span>
 			<div>Disassembly</div>
 			<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
 			<span class="conv-sel"><input type="radio" name="conv" id="conv_mei" value="mei" checked/><label for="conv_mei">Modern Parametric</label></span>
 			<span class="conv-sel" style="display: none"><input type="radio" name="conv" id="conv_uew" value="uew"/><label for="conv_uew">Centurion RE Wiki</label></span>
 			<span class="conv-sel"><input type="checkbox" name="conv_hex" id="conv_hex"/><label for="conv_hex">Hex Prefix in Listing</label></span>
-			<div>Terminal</div>
+			<div>CRT0 Terminal:</div>
+			<span class="conv-sel"><label><input type="checkbox" id="view_crt0" checked>Show</label></span>
+			<span class="conv-sel"><label><input type="radio" name="crt0l" id="crt0loc_t" value="top" checked>Top</label></span>
+			<span class="conv-sel"><label><input type="radio" name="crt0l" id="crt0loc_b" value="bot">Bottom</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="crtsize"/>Tall CRT</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="crtwide"/>Wide CRT</label></span>
 		</div>
@@ -170,7 +216,13 @@ button.warn {
 			<div class="regs fixed mcl" id="micro"></div>
 		</div>
 	</div>
-	<div style="display:flex">
+	<div class="popwin" id="vercheck" style="display:none;top:100px;left:30%;padding:4px;position:fixed">
+		<div class="sysalert" style="width:400px;padding:20px;font-size:18px">
+			<div>Version Check Failure</div>
+			<div>Full Reload Required (Shift-F5)</div>
+		</div>
+	</div>
+	<div class="sysmenu" id="button_row"><div>
 		<button id="b_reset">Reset</button>
 		<button id="b_step">Step</button>
 		<button id="b_run">Run/Stop</button>
@@ -187,7 +239,8 @@ button.warn {
 		<button id="b_micro">&#x03bc;Code</button>
 		<button id="b_local">Local</button>
 		<button id="b_settings">Settings</button>
-	</div>
+	</div></div>
+	<div style="height:36px"></div>
 	<div class="prow" id="cd_r1">
 		<div class="pcol" id="cd_r1c1">
 		<div class="frontpanel" id="dcfpd">
@@ -209,11 +262,11 @@ button.warn {
 				</div>
 				<div>Diag Select</div>
 				<div style="display:flex; align-items:flex-end;">
-					<button id="diag8">D8</button>
-					<button id="diag4">D4</button>
-					<button id="diag2">D2</button>
-					<button id="diag1">D1</button>
-					<button id="diagrun">&nbsp;</button>
+					<span class="diagc"><button id="diag8">D8</button><span id="diag8s"></span></span>
+					<span class="diagc"><button id="diag4">D4</button><span id="diag4s"></span></span>
+					<span class="diagc"><button id="diag2">D2</button><span id="diag2s"></span></span>
+					<span class="diagc"><button id="diag1">D1</button><span id="diag1s"></span></span>
+					<button id="diagrun">&DownArrowBar;</button>
 				</div>
 				<div><input type="checkbox" name="diagins" id="diagins"/><label for="diagins">Diag ROMs Installed</label></div>
 				<div>Debug Commands / DisAsm Address:</div>
@@ -243,14 +296,14 @@ button.warn {
 	<div class="prow" id="cd_r2">
 		<div class="frontpanel" id="dcregs">
 			<div class="regs">
-				<div class="fpl fixed"><div>Reg0/1</div><span id="mcr_file0">----</span></div>
-				<div class="fpl fixed"><div>Reg2/3</div><span id="mcr_file2">----</span></div>
-				<div class="fpl fixed"><div>Reg4/5</div><span id="mcr_file4">----</span></div>
-				<div class="fpl fixed"><div>Reg6/7</div><span id="mcr_file6">----</span></div>
-				<div class="fpl fixed"><div>Reg8/9</div><span id="mcr_file8">----</span></div>
-				<div class="fpl fixed"><div>RegA/B</div><span id="mcr_fileA">----</span></div>
-				<div class="fpl fixed"><div>RegC/D</div><span id="mcr_fileC">----</span></div>
-				<div class="fpl fixed"><div>RegE/F</div><span id="mcr_fileE">----</span></div>
+				<div class="fpl fixed"><div>Level 0/1</div><span id="mcr_file0">----</span></div>
+				<div class="fpl fixed"><div>Level 2/3</div><span id="mcr_file2">----</span></div>
+				<div class="fpl fixed"><div>Level 4/5</div><span id="mcr_file4">----</span></div>
+				<div class="fpl fixed"><div>Level 6/7</div><span id="mcr_file6">----</span></div>
+				<div class="fpl fixed"><div>Level 8/9</div><span id="mcr_file8">----</span></div>
+				<div class="fpl fixed"><div>Level A/B</div><span id="mcr_fileA">----</span></div>
+				<div class="fpl fixed"><div>Level C/D</div><span id="mcr_fileC">----</span></div>
+				<div class="fpl fixed"><div>Level E/F</div><span id="mcr_fileE">----</span></div>
 			</div>
 		</div>
 		<div class="pcol" id="ccr2"></div>
@@ -305,7 +358,7 @@ button.warn {
 			</div>
 		</div>
 	</div>
-	<div class="prow">
+	<div class="prow" id="cd_r5">
 		<div class="frontpanel" id="dcffc">
 			<div class="regs">
 				<div class="fpl fixed"><div>FFC SEQ</div><span id="ffc_op"></span></div>
@@ -338,11 +391,12 @@ button.warn {
 			
 		</div>
 	</div>
-	<div class="prow">
-		<div id="dclisting" style="overflow-y: scroll;height: 700px;margin: 10px;border: 2px solid;width: 25%;">
+	<div class="prow" id="cd_r6">
+		<div id="dclisting">
 			<div class="regs fixed" id="listing"></div>
 		</div>
-		<div>
+		<div class="pcol" id="cd_r6c2">
+		<div id="dc_textio">
 			<div>
 				<button id="cm_imp">Annotate</button>
 				<button id="cm_vki">To Console</button>
@@ -350,7 +404,17 @@ button.warn {
 			</div>
 			<textarea name="anno" id="anno" cols="85" rows="30" spellcheck="false"></textarea>
 		</div>
+		</div>
 	</div>
 	<div id="dld" style="display: none;"></div>
+<script>
+window.addEventListener('load', function() {
+	setTimeout(function() {
+		if(window.cen_ts_version !== window.cen_version) {
+			document.getElementById('vercheck').style.display = 'block';
+		}
+	}, 500);
+});
+</script>
 </body>
 </html>
