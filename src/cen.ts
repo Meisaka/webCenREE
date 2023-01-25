@@ -1,6 +1,6 @@
 "use strict";
 //@ts-ignore
-window.cen_ts_version = 11;
+window.cen_ts_version = 12;
 window.addEventListener('load', async function(){
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
@@ -53,6 +53,9 @@ const run_rate5 = document.getElementById('b_r5') as HTMLButtonElement;
 const run_rate6 = document.getElementById('b_r6') as HTMLButtonElement;
 const run_rate7 = document.getElementById('b_r7') as HTMLButtonElement;
 const run_rate8 = document.getElementById('b_r8') as HTMLButtonElement;
+const memory_view = document.getElementById('memview') as HTMLDivElement;
+const memory_button = document.getElementById('b_memory') as HTMLButtonElement;
+const memory_elem:{a:HTMLDivElement, d:HTMLDivElement, t:HTMLDivElement}[] = [];
 const micro_button = document.getElementById('b_micro') as HTMLButtonElement;
 const local_button = document.getElementById('b_local') as HTMLButtonElement;
 const win_micro = document.getElementById('mclisting') as HTMLDivElement;
@@ -138,6 +141,7 @@ const ffc_alu2 = document.getElementById('ffc_alu2') as HTMLSpanElement;
 const ffc_alu3 = document.getElementById('ffc_alu3') as HTMLSpanElement;
 const ffc_log = document.getElementById('ffc_log') as HTMLButtonElement;
 const d_listing = document.getElementById('listing') as HTMLDivElement;
+const d_listingc = document.getElementById('listingc') as HTMLDivElement;
 const d_micro = document.getElementById('micro') as HTMLDivElement;
 const in_softcaps = document.getElementById('softcaps') as HTMLInputElement;
 const in_diagins = document.getElementById('diagins') as HTMLInputElement;
@@ -250,10 +254,10 @@ const cv_level = document.getElementById('fp_levelc') as HTMLCanvasElement;
 const cx_level = cv_level.getContext('2d') as CanvasRenderingContext2D;
 
 cx_diag.fillStyle = '#ff3232';
-cx_diag.font = '16px monospace';
-cx_map.font = '20px monospace';
-cx_addr.font = '10px monospace';
-cx_level.font = '20px monospace';
+cx_diag.font = '16px Consolas, "Envy Code R", monospace';
+cx_map.font = '20px Consolas, "Envy Code R", monospace';
+cx_addr.font = '10px Consolas, "Envy Code R", monospace';
+cx_level.font = '20px Consolas, "Envy Code R", monospace';
 
 interface Run {
 	run(increment:number):void;
@@ -264,14 +268,19 @@ let show_int = view_int.checked;
 let show_uop = view_uop.checked;
 let show_dis = view_dis.checked;
 let show_ffc = view_ffc.checked;
+let show_mem = false;
 let run_ctl = 0;
 let run_rate = 10000;
 let run_step:boolean = false;
 let run_busy = false;
 let dis_after = false;
+let memv_after = false;
 let run_follow = false;
+let last_pc = 0;
 let dis_vpc = 0x100;
 let dis_vpc_end = 0x200;
+let memv_begin = 0;
+let memv_end = 0;
 let run_accu = 0;
 let run_accutime = 0;
 let run_once = false;
@@ -315,7 +324,6 @@ function run_control(run:boolean):void {
 		fp_ext[1].classList.add('a');
 		run_ctl = setInterval(function(){
 			run_busy = true;
-			run_follow = (run_rate <= 100);
 			let runtime = Date.now();
 			if (run_rate > 10000) {
 				let hsr = (run_rate / 100) | 0;
@@ -335,31 +343,34 @@ function run_control(run:boolean):void {
 			} else {
 				for (let i=0;i<run_rate;i++) {
 					run_hw_steps(1);
-					mcsim.step(i == (run_rate - 1));
+					mcsim.step(false);
 					if (run_ctl == 0) {
 						do_run_stop();
 						break;
 					}
 				}
+				mcsim.step(true);
 			}
 			runtime = Date.now() - runtime;
 			run_accutime += runtime;
 			run_accu += run_rate;
 			run_busy = false;
 			if(run_ctl == 0) {
-				mcsim.step(true);
 				mcsim.showstate(true);
-				main_ffc.step(true);
 			} else {
-				mcsim.step(false);
 				mcsim.showstate(false);
-				main_ffc.step(true);
 			}
-			if (dis_after) {
-				show_disasm();
-			}
+			main_ffc.step(true);
+			if (dis_after) show_disasm();
+			if (memv_after) update_memview();
 		}, 20);
 	}
+}
+function handle_break():boolean {
+	if(run_once) return false;
+	run_control(false);
+	dis_after = show_dis;
+	return true;
 }
 this.setInterval(function() {
 	let runtime = run_accutime;
@@ -1122,6 +1133,7 @@ const vt_font_bmp:ImageBitmap = await createImageBitmap(vt_font_data);
 interface CharDevice {
 	write(c:number):void;
 	check_read():void;
+	clear_buffer():void;
 }
 const vtctrlkeys:{[id:string]:number} = {
 	Digit2: 0, KeyA: 1, KeyB: 2, KeyC: 3,
@@ -1171,26 +1183,29 @@ class VTerm implements CharDevice {
 		this.ctx = ctx;
 		ctx.fillStyle = '#6ac';
 		ctx.strokeStyle = '#6ac';
-		ctx.font = '12px monospace';
 		let i = 20;
 		let k = 80 * 2;
 		this.buffer[k+i] = 128;
 		this.buffer[k+80+i] = 164;
-		this.buffer[k+160+i] = 136; i++;
-		for(let c of ' Centurion VI Simulator 2023   ') {
+		this.buffer[k+160+i] = 164;
+		this.buffer[k+240+i] = 136; i++;
+		const s1 = '   Centurion VI Simulator   ';
+		//@ts-ignore
+		const s2 = `   2023 v0.${window.cen_ts_version}  by Meisaka   `;
+		const len = s1.length;
+		for(let c = 0; c < len; c++) {
 			this.buffer[k+i] = 160;
-			this.buffer[k+160+i] = 160;
-			this.buffer[k+80+i] = c.charCodeAt(0); i++;
+			this.buffer[k+80+i] = s1.charCodeAt(c);
+			this.buffer[k+160+i] = s2.charCodeAt(c);
+			this.buffer[k+240+i] = 160;
+			i++;
 		}
 		this.buffer[k+i] = 132;
 		this.buffer[k+80+i] = 164;
-		this.buffer[k+160+i] = 140;
-		this.cursor_y = 3;
-		this.cursor_x = i - 2;
-		//for(i = 0; i < 128; i++) {
-		//	this.buffer[80 + i] = i;
-		//	this.buffer[240 + i] = i+128;
-		//}
+		this.buffer[k+160+i] = 164;
+		this.buffer[k+240+i] = 140;
+		this.cursor_y = 7;
+		this.cursor_x = 0;
 		c.addEventListener('keypress', function(ev) {
 			ev.preventDefault();
 		});
@@ -1511,6 +1526,9 @@ class VTerm implements CharDevice {
 		this.render_cell(lastcurx, lastcury);
 		this.advance_cursor();
 	}
+	clear_buffer() {
+		this.input_buf.length = 0;
+	}
 	check_read() {
 		if (this.mux == null) return;
 		if (this.mux.can_receive()) {
@@ -1561,7 +1579,11 @@ const init_program = '79 86 23 C8 E5 EC EC EF F2 EC E4 A1 8D 8A 00 71 80 01';
 const program_rotl = '60 AA AA 60 AA AA 55 40 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 71 01 03';
 const program_rotr = '60 AA AA 60 AA AA 55 40 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 71 01 03';
 let HEX_CONV = conv_hex.checked;
-let NAME_CONV = 1;
+const enum NAMECON {
+	CENT,
+	MEI, WIKI,
+}
+let name_conv = NAMECON.MEI;
 const NB = String.fromCodePoint(0xa0);
 
 function hexlist(v:number, l:number = 2) {
@@ -1569,9 +1591,19 @@ function hexlist(v:number, l:number = 2) {
 	if(v < 0) return '-'+ pre + ((-v).toString(16).toUpperCase().padStart(l,'0'));
 	return pre + v.toString(16).toUpperCase().padStart(l,'0');
 }
+function hexlistp(v:number, l:number = 2) {
+	if(v == 0) return '';
+	const pre = HEX_CONV ? '0x' : '';
+	if(v < 0) return ' - '+ pre + ((-v).toString(16).toUpperCase().padStart(l,'0'));
+	return ' + '+pre + v.toString(16).toUpperCase().padStart(l,'0');
+}
 function hex(v:number, l:number = 2) {
 	if(v < 0) return '-'+ ((-v).toString(16).toUpperCase().padStart(l,'0'));
 	return v.toString(16).toUpperCase().padStart(l,'0');
+}
+function dec(v:number, l:number = 2) {
+	if(v<0) '-'+(-v).toString(10).padStart(l,'0');
+	return v.toString(10).padStart(l,'0');
 }
 function hexstr(buf:Uint8Array, offset:number=0, length?:number):string {
 	let hs = '';
@@ -1595,6 +1627,11 @@ function sbyte(v:number):number {
 	if (v > 127) v -= 256;
 	return v;
 }
+function sword(v:number):number {
+	v = v & 0xffff;
+	if (v > 32768) v -= 65536;
+	return v;
+}
 function nyb(c:number):string {
 	return (c >> 4).toString(2).padStart(4,'0') + ' ' + (c&15).toString(2).padStart(4,'0');
 }
@@ -1602,16 +1639,15 @@ function bit(v:number, b:number):number {
 	return (v >> b) & 1;
 }
 
-const ALU_FN = ['+','|','&','^'];
-const ALU_F:{on:number,ivr:boolean,ivs:boolean}[] = [
-	{on:0,ivr:false,ivs:false},
-	{on:0,ivr:true,ivs:false},
-	{on:0,ivr:false,ivs:true},
-	{on:1,ivr:false,ivs:false},
-	{on:2,ivr:false,ivs:false},
-	{on:2,ivr:true,ivs:false},
-	{on:3,ivr:false,ivs:false},
-	{on:3,ivr:true,ivs:false}
+const ALU_F:{on:number,sym:string,ivr:boolean,ivs:boolean}[] = [
+	{on:0,sym:'+',ivr:false,ivs:false},
+	{on:0,sym:'+',ivr:true,ivs:false},
+	{on:0,sym:'+',ivr:false,ivs:true},
+	{on:1,sym:'|',ivr:false,ivs:false},
+	{on:2,sym:'&',ivr:false,ivs:false},
+	{on:2,sym:'&',ivr:true,ivs:false},
+	{on:3,sym:'^',ivr:false,ivs:false},
+	{on:3,sym:'^',ivr:true,ivs:false}
 ];
 
 class ALU8 {
@@ -1837,40 +1873,106 @@ class ALU {
 		}
 	}
 	// debug/trace string
-	static trace_str(srci:number,fni:number,dsti:number,ia:number,ib:number) {
-		const vals_2 = `[${hex(ia,1)}]`;
-		const vals_3 = `[${hex(ib,1)}]`;
+	static trace_str(srci:number,fni:number,dsti:number,ia:number,ib:number,sq_str:string,sr_str:string,f_str:string,d_str:string,carry:string) {
+		const vals_2 = `r${dec(ia,2)}`;
+		const vals_3 = `r${dec(ib,2)}`;
 		let val_r:string;
 		let val_s:string;
+		let val_rn:number;
+		let val_sn:number;
+		const show_f = f_str.length > 0;
+		if(show_f) {
+			f_str += '= ';
+		}
 		switch(srci & 7) {
 		default:
-		case 0: val_r = vals_2; val_s = 'Q'; break;
-		case 1: val_r = vals_2; val_s = vals_3; break;
-		case 2: val_r = '0'; val_s = 'Q'; break;
-		case 3: val_r = '0'; val_s = vals_3; break;
-		case 4: val_r = '0'; val_s = vals_2; break;
-		case 5: val_r = 'D'; val_s = vals_2; break;
-		case 6: val_r = 'D'; val_s = 'Q'; break;
-		case 7: val_r = 'D'; val_s = '0'; break;
+		case 0: val_rn = 3+ia; val_r = vals_2; val_sn = 2; val_s = 'Q'; break;
+		case 1: val_rn = 3+ia; val_r = vals_2; val_sn = 3+ib; val_s = vals_3; break;
+		case 2: val_rn = 0; val_r = '0'; val_sn = 2; val_s = 'Q'; break;
+		case 3: val_rn = 0; val_r = '0'; val_sn = 3+ib; val_s = vals_3; break;
+		case 4: val_rn = 0; val_r = '0'; val_sn = 3+ia; val_s = vals_2; break;
+		case 5: val_rn = 1; val_r = d_str; val_sn = 3+ia; val_s = vals_2; break;
+		case 6: val_rn = 1; val_r = d_str; val_sn = 2; val_s = 'Q'; break;
+		case 7: val_rn = 1; val_r = d_str; val_sn = 0; val_s = '0'; break;
 		}
 		let dst:string;
 		switch(dsti & 7) {
 		default:
-		case 0: dst = '      Q=  F='; break;
-		case 1: dst = '          F='; break;
-		case 2: dst = `F=${vals_2} ${vals_3}=  `; break;
-		case 3: dst = `      ${vals_3}=F=`; break;
-		case 4: dst = `>>Q >>${vals_3}=F=`; break;
-		case 5: dst = `    >>${vals_3}=F=`; break;
-		case 6: dst = `<<Q <<${vals_3}=F=`; break;
-		case 7: dst = `    <<${vals_3}=F=`; break;
+		case 0: dst = `${f_str}Q= `; break;
+		case 1: dst = f_str; break;
+		case 2: dst = `${f_str}${show_f?vals_2:''}, ${vals_3}=  `; break;
+		case 3: dst = `${f_str}${vals_3}= `; break;
+		case 4: dst = `${sq_str}>>Q, ${sr_str}>>${vals_3}= ${f_str}`; break;
+		case 5: dst = `${sr_str}>>${vals_3}= ${f_str}`; break;
+		case 6: dst = `Q<<${sq_str}, ${vals_3}<<${sr_str}= ${f_str}`; break;
+		case 7: dst = `${vals_3}<<${sr_str}= ${f_str}`; break;
 		}
 		const fn = ALU_F[fni];
-		return `SFD:${srci}${fni}${dsti} ${dst}${fn.ivr?'~':' '}${val_r}${ALU_FN[fn.on]}${fn.ivs?'~':' '}${val_s}`;
+		let fdesc:string;
+		if(!show_f && dsti == 1) {
+			fdesc = '';
+		} else switch(fn.on) {
+		case 0:
+			if(carry == '0') {
+				if(fn.ivr) {
+					if(val_rn == 0) val_r = '1';
+					fdesc = `${val_s} - ${val_r}`;
+				} else if(fn.ivs) {
+					if(val_sn == 0) val_s = '1';
+					fdesc = `${val_r} - ${val_s}`;
+				} else {
+					if(val_rn == 0) fdesc = val_s;
+					else if(val_sn == 0) fdesc = val_r;
+					else fdesc = `${val_r} + ${val_s}`;
+				}
+			} else if(carry == '1') {
+				if(fn.ivr) {
+					if(val_rn == 0) fdesc = val_s;
+					else fdesc = `${val_s} - ${val_r}`;
+				} else if(fn.ivs) {
+					if(val_sn == 0) fdesc = val_r;
+					else fdesc = `${val_r} - ${val_s}`;
+				} else {
+					if(val_rn == 0) fdesc = `${val_s} +1`;
+					else if(val_sn == 0) fdesc = `${val_r} +1`;
+					else fdesc = `${val_r} + ${val_s} +1`;
+				}
+			} else {
+				if(fn.ivr) {
+					if(val_rn == 0) val_r = '1';
+					fdesc = `${val_s} - ${val_r} + ${carry}`;
+				} else if(fn.ivs) {
+					if(val_sn == 0) val_s = '1';
+					fdesc = `${val_r} - ${val_s} + ${carry}`;
+				} else {
+					fdesc = `${val_r} + ${val_s} + ${carry}`;
+				}
+			}
+			break;
+		default:
+		case 1: // or
+			if(val_rn == 0 && !fn.ivr) fdesc = `${fn.ivs?'~':''}${val_s}`;
+			else if(val_sn == 0 && !fn.ivs) fdesc = `${fn.ivr?'~':''}${val_r}`;
+			else fdesc = `${fn.ivr?'~':''}${val_r} ${fn.sym} ${fn.ivs?'~':''}${val_s}`;
+			break;
+		case 2: // and
+			if((val_rn == 0 && !fn.ivr) || (val_sn == 0 && !fn.ivs)) fdesc = '0';
+			else if(val_rn == 0 && fn.ivr) fdesc = `${fn.ivs?'~':''}${val_s}`;
+			else if(val_sn == 0 && fn.ivs) fdesc = `${fn.ivr?'~':''}${val_r}`;
+			else fdesc = `${fn.ivr?'~':''}${val_r} ${fn.sym} ${fn.ivs?'~':''}${val_s}`;
+			break;
+		case 3: // xor
+			if(val_sn == val_rn && !fn.ivr) fdesc = '0';
+			else if(val_sn == 0) fdesc = `${fn.ivr?'~':''}${val_r}`;
+			else if(val_rn == 0 && fn.ivr) fdesc = `~${val_s}`;
+			else fdesc = `${fn.ivr?'~':''}${val_r} ${fn.sym} ${val_s}`;
+			break;
+		}
+		return `o${srci}${fni}${dsti} ${dst}${fdesc}`;
 	}
 }
 
-const FN_SEQ_SN = ['uPC','AHR','STK','DIR'];
+const FN_SEQ_SN = ['P','R','S','D']; // 'uPC','AHR','STK','DIR'
 const FN_SEQ_FE = ['POP','---','PSH','---']; // FE:0 | (PUSH:1/POP:0) << 1
 
 class Sequencer {
@@ -2060,15 +2162,35 @@ interface BPLDev {
 class Backplane implements MemAccess {
 	decode_hi:BPLDev[] = [];
 	decode_io:IOAccess[] = [];
-	is_write = true;
-	is_io = false;
 	constructor() {
+	}
+	readmeta(address: number): number {
+		let aindex = address >> 8;
+		let dev = this.decode_hi[aindex];
+		if(dev) {
+			let v = dev.dev.readmeta(address - dev.base);
+			return v;
+		}
+		return MEMSTAT.OPEN;
+	}
+	writemeta(address: number, value: number): void {
+		let aindex = address >> 8;
+		let dev = this.decode_hi[aindex];
+		if(dev) {
+			dev.dev.writemeta(address - dev.base, value);
+			if ((address >= dis_vpc) && (address < dis_vpc_end)) {
+				dis_after = show_dis;
+			}
+			if ((address >= memv_begin) && (address < memv_end)) {
+				memv_after = show_mem;
+			}
+		}
 	}
 	configio(id:number, m:IOAccess) {
 		this.decode_io[id] = m;
 	}
 	clearmemory(base:number, sz:number = 256) {
-		let aval = base & -256;
+		let aval = base & 0x3ff00;
 		let atarget = aval + sz;
 		while (aval < atarget) {
 			let aindex = aval >> 8;
@@ -2077,7 +2199,7 @@ class Backplane implements MemAccess {
 		}
 	}
 	configmemory(base:number, m:MemAccess, sz:number = 256) {
-		let aval = base & -256;
+		let aval = base & 0x3ff00;
 		let atarget = aval + sz; // TODO
 		let dev:BPLDev = {
 			dev: m,
@@ -2113,15 +2235,6 @@ class Backplane implements MemAccess {
 			dev.reset();
 		}
 	}
-	is_mmio(address:number):boolean {
-		let aindex = address >> 8;
-		let dev = this.decode_hi[aindex];
-		if(dev) {
-			return dev.dev.is_io == true;
-		} else {
-			return true;
-		}
-	}
 	readbyte(address:number):number {
 		let aindex = address >> 8;
 		let dev = this.decode_hi[aindex];
@@ -2134,10 +2247,13 @@ class Backplane implements MemAccess {
 	writebyte(address:number, value:number):void {
 		let aindex = address >> 8;
 		let dev = this.decode_hi[aindex];
-		if(dev && dev.dev.is_write) {
+		if(dev) {
 			dev.dev.writebyte(address - dev.base, value);
 			if ((address >= dis_vpc) && (address < dis_vpc_end)) {
 				dis_after = show_dis;
+			}
+			if ((address >= memv_begin) && (address < memv_end)) {
+				memv_after = show_mem;
 			}
 		}
 	}
@@ -2200,6 +2316,7 @@ let resetting:boolean = true;
 let physaddr = 0;
 let busctl = 0;
 let sysctl = 0;
+let abtac = 0;
 let sys_write_latch = false;
 let sys_read_in = false;
 let cycles = 0;
@@ -2311,7 +2428,7 @@ function showstate(in_halt:boolean) {
 		mcr_sys.innerText = `${(sc&1)>0?'DM4':'---'} ${(sc&2)>0?'DM3':'---'} ${(sc&4)>0?'TE':'--'} ${(sc&8)>0?'-':'M'}` +
 		` ${(sc&16)>0?'R':'H'} ${(sc&32)>0?'--':'TR'} ${(sc&64)>0?'A':'-'} ${(sc&128)>0?'IA':'--'}`;
 		const mpaddress = ((pgram & 127) << 11) | (memaddr & 0x7ff);
-		mcr_addr.innerText = hex(workaddr, 4) + ' ' + hex(memaddr, 4) + ' ' + ((pgram & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(physaddr, 5);	
+		mcr_addr.innerText = hex(workaddr, 4) + ' ' + hex(memaddr, 4) + ' ' + ((pgram & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(physaddr, 5);
 	}
 	
 	if(show_reg) {
@@ -2340,16 +2457,11 @@ function showstate(in_halt:boolean) {
 	cx_addr.clearRect(0, 0, cv_addr.width, cv_addr.height);
 	cx_level.clearRect(0, 0, cv_level.width, cv_level.height);
 	const baseline = 22;
-	cx_map.fillStyle = '#ff3232';
-	if ((sysctl & 64) != 0) {
-		cx_map.fillRect(0, 0, 48, 30);
-	}
-	cx_map.fillStyle = '#aeaeae';
-	cx_map.fillText('ABT', 8, baseline);
 
 	let hrr2 = run_rate >> 1;
 	if (in_halt) {
 		hrr2 = 0;
+		abtac = (sysctl & 64) != 0 ? 1 : 0;
 		ccr_fa = ccr_f;
 		ccr_la = ccr_l;
 		ccr_ma = ccr_m;
@@ -2379,18 +2491,31 @@ function showstate(in_halt:boolean) {
 		level3a = (level>>3) & 1;
 	}
 	let hrr1 = hrr2 >> 1;
+	let hrr05 = hrr1 >> 1;
 	let hrr3 = hrr2 + hrr1;
+	function ledcolor(v:number):string {
+		if (v > hrr2) {
+			if (v > hrr3) {
+				return '#ff3232';
+			} else if(v > hrr2 + hrr05) {
+				return '#c01c1c';
+			} else return '#a81c1c';
+		} else if (v > hrr1) {
+			if(v > hrr1 + hrr05) return '#901c1c';
+			else return '#701c1c';
+		} else if(v > hrr05) {
+			return '#400c0c';
+		} else return '#200c0c';
+	}
+	if (abtac > 0) {
+		cx_map.fillStyle = ledcolor(abtac);
+		cx_map.fillRect(0, 0, 48, 30);
+	}
+	cx_map.fillStyle = '#aeaeae';
+	cx_map.fillText('ABT', 8, baseline);
 	function drawaddr(v:number, x:number, t:string) {
 		if (v > 0) {
-			if (v > hrr3) {
-				cx_addr.fillStyle = '#ff3232';
-			} else if (v > hrr2) {
-				cx_addr.fillStyle = '#c01c1c';
-			} else if (v > hrr1) {
-				cx_addr.fillStyle = '#901c1c';
-			} else {
-				cx_addr.fillStyle = '#400c0c';
-			}
+			cx_addr.fillStyle = ledcolor(v);
 			cx_addr.fillRect(x, 0, 12, 30);
 		}
 		cx_addr.fillStyle = '#aeaeae';
@@ -2398,15 +2523,7 @@ function showstate(in_halt:boolean) {
 	}
 	function drawfill(v:number, x:number, t:string) {
 		if (v > 0) {
-			if (v > hrr3) {
-				cx_map.fillStyle = '#ff3232';
-			} else if (v > hrr2) {
-				cx_map.fillStyle = '#c01c1c';
-			} else if (v > hrr1) {
-				cx_map.fillStyle = '#901c1c';
-			} else {
-				cx_map.fillStyle = '#400c0c';
-			}
+			cx_map.fillStyle = ledcolor(v);
 			cx_map.fillRect(x, 0, 27, 30);
 		}
 		cx_map.fillStyle = '#aeaeae';
@@ -2414,15 +2531,7 @@ function showstate(in_halt:boolean) {
 	}
 	function drawlevel(v:number, x:number, t:string) {
 		if (v > 0) {
-			if (v > hrr3) {
-				cx_level.fillStyle = '#ff3232';
-			} else if (v > hrr2) {
-				cx_level.fillStyle = '#c01c1c';
-			} else if (v > hrr1) {
-				cx_level.fillStyle = '#901c1c';
-			} else {
-				cx_level.fillStyle = '#400c0c';
-			}
+			cx_level.fillStyle = ledcolor(v);
 			cx_level.fillRect(x, 0, 27, 30);
 		}
 		cx_level.fillStyle = '#aeaeae';
@@ -2456,6 +2565,7 @@ function showstate(in_halt:boolean) {
 	drawlevel(level1a, 54, '2');
 	drawlevel(level0a, 81, '1');
 
+	abtac = 0;
 	ccr_va = 0;
 	ccr_fa = 0;
 	ccr_la = 0;
@@ -2587,7 +2697,7 @@ function loadcache() {
 		const seq0_si = (v3 >> 5) & 3;
 		const seq12_s0i = (v3>>7)&1; // TODO verify
 		const seq2_si_k6b = seq12_s0i | ((v4&1) << 1); // TODO verify
-		const seq1_si_k6dc = seq12_s0i | ((((v6>>5)&2) & (seq2_si_k6b ^ 2)) ^ 2);
+		const seq1_si_k6dc = seq12_s0i | (2 ^ (2 & (v6>>5) & ((v4<<1) ^ 2)));
 		const seq_branch = (v4>>1)&1;
 		const rir0 = (v6>>5)&1;
 		const x_f6h6 = (v6 >> 3) & 3;
@@ -2622,10 +2732,10 @@ function loadcache() {
 			seq_d1,
 			seq_d2,
 			seq_fci,
-			seq0_si,
+			seq0_si: 3^seq0_si,
 			seq12_s0i,
-			seq2_si_k6b,
-			seq1_si_k6dc,
+			seq2_si_k6b: 3^seq2_si_k6b,
+			seq1_si_k6dc: 3^seq1_si_k6dc,
 			seq_branch,
 			rir0,
 			x_f6h6,
@@ -2655,13 +2765,14 @@ let is_mem = 0;
 function mempt_set() {
 	pindex = ((memaddr >> 11) & 31) | (pta << 5);
 	pgram = pagetb[pindex];
-	pgaddr = (pgram & 127) | (((pgram & 112) == 112) ? 128 : 0);
+	const pgaddr7 = pgram & 127;
+	pgaddr = pgaddr7 | (((pgaddr7 & 112) == 112) ? 128 : 0);
 	is_mmio = ((pgram & 253) == 253) ? 0 : 1;
-	const is_reg = (((pgram & 127) == 0) && ((memaddr & 1792) == 0)) ? 0 : 1;
+	const is_reg = ((pgaddr7 == 0) && ((memaddr & 1792) == 0)) ? 0 : 1;
 	is_regmmio = (is_reg & is_mmio) ^ 1;
 	notpgbit = (pgram >> 7) ^ 1;
 	is_mem = (is_reg & notpgbit) ^ 1;
-	physaddr = (pgaddr << 11) | (memaddr & 0x7ff);
+	physaddr = (pgaddr7 << 11) | (memaddr & 0x7ff);
 }
 
 function dma_register(device:DMADevice):void {
@@ -2732,48 +2843,48 @@ function hsstep() {
 	const dmaint = intena && (level < 2) && (dma_12 != 0);
 	const count_up = (busctl & 8)!=0;
 
-	if (run_once) {
-		run_once = false;
-	} else if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
-		run_control(false);
-		dis_after = show_dis;
-		dis_vpc = physaddr;
-		return;
+	if(mcpc == 0x101) last_pc = physaddr;
+	if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
+		if(handle_break()) return;
 	}
 
-	let k9_com = 1;
+	let is_jsr = 0;
 	if (mci.k9_en) {
 		switch(mci.k9_sel) {
-		case 0: /* TODO f12b */ k9_com = 1; break;
+		case 0: /* TODO f12b */ is_jsr = 1; break;
 		case 1: /* rir.0 nor 4 */
-			k9_com = ((rir | (rir >> 4)) & 1)^1; break;
-		case 2: /* rir.0 */ k9_com = rir & 1; break;
+			is_jsr = ((rir | (rir >> 4)) & 1)^1; break;
+		case 2: /* rir.0 */ is_jsr = rir & 1; break;
 		case 3: /* mmio/reg */
-			k9_com = is_regmmio; break;
-		case 4: /* REG/pbit */ k9_com = is_mem; break;
-		case 5: /* DMA P2.13 */ k9_com = dma_request(); break;
-		case 6: /* TODO B15A */ k9_com = b15a ^ 1; break;
+			is_jsr = is_regmmio; break;
+		case 4: /* REG/pbit */ is_jsr = is_mem; break;
+		case 5: /* DMA P2.13 */ is_jsr = dma_request(); break;
+		case 6: /* TODO B15A */ is_jsr = b15a ^ 1; break;
 		case 7: /* TODO F13->H13A any INT */
-			k9_com = dma_request();
+			is_jsr = dma_request();
 			if (dmaint || (intena && bpl.is_interrupt(level))) {
-				k9_com = 1;
+				is_jsr = 1;
 			}
 			if (rtc && ((sysctl & 0x4) != 0)) {
-				k9_com = 1;
+				is_jsr = 1;
 			}
 			break;
 		}
-		k9_com = k9_com ^ 1;
 	}
 	// branch and condition selectors
 	let seq_or = 0;
 
 	// seqencer control
-	const k9_com3 = k9_com|(k9_com << 1);
-	const seq0_s = (k9_com3 & mci.seq0_si) ^ 3;
-	const seq1_s = (k9_com3 & mci.seq1_si_k6dc) ^ 3;
-	const seq2_s = (k9_com3 & mci.seq2_si_k6b) ^ 3;
-	const seq_fc = (2|k9_com) & mci.seq_fci;
+	let seq0_s = mci.seq0_si;
+	let seq1_s = mci.seq1_si_k6dc;
+	let seq2_s = mci.seq2_si_k6b;
+	let seq_fc = mci.seq_fci;
+	if(is_jsr != 0) {
+		seq0_s = 3;
+		seq1_s = 3;
+		seq2_s = 3;
+		seq_fc &= 2;
+	}
 
 	let datapath = 0;
 	// Data Path Control
@@ -3142,6 +3253,7 @@ function hsstep() {
 		}
 		break;
 	}
+	abtac += (sysctl >> 6) & 1;
 	ccr_la += ccr_l;
 	ccr_fa += ccr_f;
 	ccr_ma += ccr_m;
@@ -3194,10 +3306,8 @@ function hsstep() {
 	}
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 
-	if(hs_wait++ >= 5) {
-		hs_wait = 0;
-		run_hshw_steps();
-	}
+	run_hshw_steps();
+	run_once = false;
 }
 
 function step(debug_output:boolean = false) {
@@ -3210,39 +3320,43 @@ function step(debug_output:boolean = false) {
 	const dmaint = intena && (level < 2) && (dma_12 != 0);
 	const count_up = (busctl & 8)!=0;
 
-	let k9_com = 1;
+	let is_jsr = 0;
 	if (mci.k9_en) {
 		switch(mci.k9_sel) {
-		case 0: /* TODO f12b */ k9_com = 1; break;
+		case 0: /* TODO f12b */ is_jsr = 1; break;
 		case 1: /* rir.0 nor 4 */
-			k9_com = ((rir | (rir >> 4)) & 1)^1; break;
-		case 2: /* rir.0 */ k9_com = rir & 1; break;
+			is_jsr = ((rir | (rir >> 4)) & 1)^1; break;
+		case 2: /* rir.0 */ is_jsr = rir & 1; break;
 		case 3: /* TODO: double check this (mmio/reg addressed) */
-			k9_com = is_regmmio; break;
-		case 4: /* REG/pbit */ k9_com = is_mem; break;
-		case 5: /* DMA P2.13 */ k9_com = dma_request(); break;
-		case 6: /* TODO B15A */ k9_com = b15a ^ 1; break;
+			is_jsr = is_regmmio; break;
+		case 4: /* REG/pbit */ is_jsr = is_mem; break;
+		case 5: /* DMA P2.13 */ is_jsr = dma_request(); break;
+		case 6: /* TODO B15A */ is_jsr = b15a ^ 1; break;
 		case 7: /* TODO F13->H13A any INT */
-			k9_com = dma_request();
+			is_jsr = dma_request();
 			if (intreq || dmaint) {
-				k9_com = 1;
+				is_jsr = 1;
 			}
 			if (rtc && ((sysctl & 0x4) != 0)) {
-				k9_com = 1;
+				is_jsr = 1;
 			}
 			break;
 		}
-		k9_com = k9_com ^ 1;
 	}
 	// branch and condition selectors
 	let seq_or = 0;
 
 	// seqencer control
-	const k9_com3 = k9_com|(k9_com << 1);
-	const seq0_s = (k9_com3 & mci.seq0_si) ^ 3;
-	const seq1_s = (k9_com3 & mci.seq1_si_k6dc) ^ 3;
-	const seq2_s = (k9_com3 & mci.seq2_si_k6b) ^ 3;
-	const seq_fc = (2|k9_com) & mci.seq_fci;
+	let seq0_s = mci.seq0_si;
+	let seq1_s = mci.seq1_si_k6dc;
+	let seq2_s = mci.seq2_si_k6b;
+	let seq_fc = mci.seq_fci;
+	if(is_jsr != 0) {
+		seq0_s = 3;
+		seq1_s = 3;
+		seq2_s = 3;
+		seq_fc &= 2;
+	}
 
 	let datapath = 0;
 	// Data Path Control
@@ -3289,7 +3403,7 @@ function step(debug_output:boolean = false) {
 	let h6a = 0, h6b = 0;
 	switch(mci.x_f6h6) {
 	case 0: h6a = aluc.sign; h6b = 0; break;
-	case 1: h6a = h6b = ((alu_flag >> 3) & 1); /* TODO both get flag.C? */ break;
+	case 1: h6a = h6b = ((alu_flag >> 3) & 1); break;
 	case 2: h6a = aluc.q0; h6b = aluc.sign; break;
 	case 3: h6a = aluc.main_carry_out; h6b = 1; break;
 	}
@@ -3363,13 +3477,10 @@ function step(debug_output:boolean = false) {
 	if (!debug_output) {
 		if (mcpc == 0x101) {
 			dis_after = show_dis;
-			dis_vpc = physaddr;
+			last_pc = physaddr;
 		}
-		if (run_once) {
-			run_once = false
-		} else if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
-			run_control(false);
-			debug_output = true;
+		if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
+			if(handle_break()) debug_output = true;
 		}
 	}
 	if (debug_output) {
@@ -3377,7 +3488,7 @@ function step(debug_output:boolean = false) {
 		let debug = mc_listing(mcpc, datapath, data_f, aluc.y);
 		mcs_op.innerText = debug.seq;
 		mcs_op_alu.innerText = debug.alu;
-		mcs_op_bus.innerText = debug.bus;
+		mcs_op_bus.innerText = debug.rdr +' '+ debug.bus;
 		return;
 	}
 
@@ -3575,6 +3686,7 @@ function step(debug_output:boolean = false) {
 		}
 		break;
 	}
+	abtac += (sysctl >> 6) & 1;
 	ccr_la += ccr_l;
 	ccr_fa += ccr_f;
 	ccr_ma += ccr_m;
@@ -3606,22 +3718,48 @@ function step(debug_output:boolean = false) {
 	aluc.step(mci.aluc_d, mci.aluc_b);
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 
-	//if(hs_wait++ >= 5) {
-		hs_wait = 0;
-		run_hshw_steps();
-	//}
+	hs_wait = 0;
+	run_hshw_steps();
+
+	run_once = false;
 }
 
 return mco;
 }
 const mcsim = mcsetup();
 
-const FN_E6 = [
-	'','Result=F','RIdx=F','Level=F',
-	'PTA=F','ASwap','SEQ_RE','CondRegLD'
+const FN_K9 = [
+	'0BusAct', // if RDIN or WTIN have been asserted by the CPU
+	'1RI.~0|4',
+	'2RI.0',
+	'3A=IOReg',
+	'4A=RegPGR', // need to recheck the logic on this one to give it a better name
+	'5DMA_REQ', // DMA port, request start
+	'6MemFault', // Memory parity error, must be enabled via BusCtl bit 6
+	'7IntCheck' // this one needs a better name (checks multiple interrupt lines)
 ];
+const FN_F6 = ['0','1','FL.C','0'];
+const FN_H6A = ['alu.s','AFL.C','q0','alu.c'];
+const FN_H6B = ['0','AFL.C','alu.s','1'];
+const FN_J12B = ['.','Z','R.V','LZ'];
+const FN_J12A = ['.','S','R.M','S'];
+const FN_J11 = ['R.F','1','.','alu.o','R.F','1','.','alu.o'];
+const FN_J10 = ['.','~','C','0','R.L','alu.7','alu.0/Q7','alu.Q0'];
+const FV_E6 = [
+	'','Result','RI','Level',
+	'PTA','','SeqRH',''
+];
+const FN_H11 = [
+	'','RD_START','WT_START','WorkAddr_H=Result',
+	'WorkAddr_Count','MemAddr_Count','MapROM','NibSwap'];
+const FN_E7 = ['','BusReady','','BusEnd/DataRD'];
+const FN_D45 = [
+	'SwapR','RDR','MemAddr_H','MemAddr_L','SwapR','RDR','MemAddr_H','MemAddr_L',
+	'PA','CCRSense','SysDatIn','LevelH14','IrqLDipT',''/*Const*/,'',''];
+const FN_M13 = ['P2.3','P2.4','RTC','MapDis','FP.Run','RTC.R','FP.ABT','INT_ACK'];
+const FN_F11 = ['IntEN','AddrToSys','DMACountDIS','AddrU/D','AddrCtlSel','ParityTest','ParityEN','DMA_EN'];
 
-function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:number) {
+function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:number, flow?:FlowTrace) {
 
 	const c0 = uc.c0[address];
 	const c1 = uc.c1[address];
@@ -3647,7 +3785,7 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 	const seq0_si = (c0>>29) & 3;
 	const seq12_s0i = (c0>>31)&1;
 	const seq2_si_k6b = seq12_s0i | ((c1&1) << 1);
-	const seq1_si_k6dc = seq12_s0i | ((((c1>>21)&2) & (seq2_si_k6b ^ 2)) ^ 2);
+	const seq1_si_k6dc = seq12_s0i | (2 ^ (2 & (c1>>21) & ((c1<<1) ^ 2)));
 	const seq_branch = (c1>>1)&1;
 	const rir0 = (c1>>21)&1;
 	const x_f6h6 = (c1>>19) & 3;
@@ -3660,117 +3798,277 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 	const aluc_b = (c1>>11) & 15;
 	const aluc_a = (c1>>15) & 15;
 
-	const k9_fn = (!k9_en ? 'nop' : [
-		'(0)BusAct', // if RDIN or WTIN have been asserted by the CPU
-		'(1)RIR.~0|4',
-		'(2)RIR.0',
-		'(3)Ad=IO/REG',
-		'(4)Ad=REG/pbit', // need to recheck the logic on this one to give it a better name
-		'(5)DMA_REQ', // DMA port, request start
-		'(6)MemFault', // Memory parity error, must be enabled via BusCtl bit 6
-		'(7)IntCheck' // this one needs a better name (checks multiple interrupt lines)
-		][k9_sel]);
-	let d_branch0 = '';
-	let d_branch1 = '';
-	let d_branch2 = '';
-	let d_branch3 = '';
+	const k9_fn = (!k9_en ? '' : FN_K9[k9_sel]);
+	if(k9_en && flow) {
+		flow.branches.push({address:seqjmp, is_push:true, source:[k9_fn]});
+	}
+	const seq0_s = 3^seq0_si;
+	const seq1_s = 3^seq1_si_k6dc;
+	const seq2_s = 3^seq2_si_k6b;
+	const seq_fc = seq_fci;
+
+	let pc = (address + 1) & 0x7ff;
+	let next = pc;
+	let d_mask = 0;
+	let r_mask = 0;
+	let s_mask = 0;
+	switch(seq0_s) {
+		case 1: r_mask |= 0xf; break;
+		case 2: s_mask |= 0xf; break;
+		case 3: d_mask |= 0xf; break;
+	}
+	switch(seq1_s) {
+		case 1: r_mask |= 0xf0; break;
+		case 2: s_mask |= 0xf0; break;
+		case 3: d_mask |= 0xf0; break;
+	}
+	switch(seq2_s) {
+		case 2: s_mask |= 0xf00; break;
+		case 3: d_mask |= 0xf00; break;
+	}
+	next = (pc & ((d_mask | r_mask | s_mask) ^ 0xfff)) | (seqjmp & d_mask);
+	if(flow) {
+		flow.next = next;
+		flow.stack_mask = s_mask;
+		flow.reg_mask = r_mask;
+		if(seq_fc == 0) { flow.stack_op = true; flow.stack_push = false; } // POP
+		if(seq_fc == 2) { flow.stack_op = true; flow.stack_push = true; } // PUSH PC
+	}
+	let d_branch = '';
 	if (seq_branch == 0) {
+		let d_branch0 = '';
+		let d_branch1 = '';
+		let d_branch2 = '';
+		let d_branch3 = '';
 		switch(j13_sel) {
 		case 0:
-			if ((seqjmp | 1) != seqjmp) d_branch0 = ' |1:ALUF.S';
-			if ((seqjmp | 2) != seqjmp) d_branch1 = ' |2:ALUF.Z';
+			if ((next | 1) != next) d_branch0 = 'ALUF.S';
+			if ((next | 2) != next) d_branch1 = 'ALUF.Z';
 			break;
 		case 1:
-			if ((seqjmp | 1) != seqjmp) d_branch0 = ' |1:ALUF.H';
-			if ((seqjmp | 2) != seqjmp) d_branch1 = ' |2:ALUF.V';
+			if ((next | 1) != next) d_branch0 = 'ALUF.H';
+			if ((next | 2) != next) d_branch1 = 'ALUF.V';
 			break;
 		case 2:
-			if ((seqjmp | 1) != seqjmp) d_branch0 = ' |1:~pbit ';
-			if ((seqjmp | 2) != seqjmp) d_branch1 = ' |2:~MMIO ';
+			if ((next | 1) != next) d_branch0 = '~pbit ';
+			if ((next | 2) != next) d_branch1 = '~MMIO ';
 			break;
 		case 3: break; // nop
 		}
 		switch(k13_sel) {
 		case 0:
-			if ((seqjmp | 4) != seqjmp) d_branch2 = ' |4:INT_ENA';
-			if ((seqjmp | 8) != seqjmp) d_branch3 = ' |8:CCR.L  ';
+			if ((next | 4) != next) d_branch2 = 'INT_ENA';
+			if ((next | 8) != next) d_branch3 = 'CCR.L  ';
 			break;
 		case 1:
-			if ((seqjmp | 4) != seqjmp) d_branch2 = ' |4:DMA_INT';
-			if ((seqjmp | 8) != seqjmp) d_branch3 = ' |8:INT_REQ';
+			if ((next | 4) != next) d_branch2 = 'DMA_INT';
+			if ((next | 8) != next) d_branch3 = 'INT_REQ';
 			break;
 		case 2:
-			if ((seqjmp | 4) != seqjmp) d_branch2 = ' |4:MEM_INT';
-			if ((seqjmp | 8) != seqjmp) d_branch3 = ' |8:DMA_REQ';
+			if ((next | 4) != next) d_branch2 = 'MEM_INT';
+			if ((next | 8) != next) d_branch3 = 'DMA_REQ';
 			break;
 		case 3: break; // nop
 		}
+		if(flow) {
+			let mask = 0;
+			if(d_branch0.length != 0) mask |= 1;
+			if(d_branch1.length != 0) mask |= 2;
+			if(d_branch2.length != 0) mask |= 4;
+			if(d_branch3.length != 0) mask |= 8;
+			for(let i = 1; i < 16; i++) {
+				if((i & mask) != i) continue;
+				if((next | i) != next) {
+					let br = [];
+					if ((next | (i&1)) != next) br.push(d_branch0);
+					if ((next | (i&2)) != next) br.push(d_branch1);
+					if ((next | (i&4)) != next) br.push(d_branch2);
+					if ((next | (i&8)) != next) br.push(d_branch3);
+					flow.branches.push({ address: next | i, source: br });
+				}
+			}
+		}
+		if(d_branch0.length != 0) d_branch += '|1:' + d_branch0;
+		if(d_branch1.length != 0) d_branch += '|2:' + d_branch1;
+		if(d_branch2.length != 0) d_branch += '|4:' + d_branch2;
+		if(d_branch3.length != 0) d_branch += '|8:' + d_branch3;
 	}
-	const seq0_s = seq0_si ^ 3;
-	const seq1_s = seq1_si_k6dc ^ 3;
-	const seq2_s = seq2_si_k6b ^ 3;
-	const seq_fc = seq_fci;
+	let mcd_d45 = FN_D45[dp_sel];
+	if(dp_sel == 13) {
+		mcd_d45 += `#${hex(mpconst_m6)}`;
+	} else if(datapath != undefined) {
+		mcd_d45 += `(${hex(datapath)})`;
+	}
+	let disp_f = FV_E6[x_e6];
+	let mck11 = '';
+	switch(x_k11) {
+	case 1: mck11 = 'DMAEndReset'; break;
+	case 2: mck11 = `SysCtl.${FN_M13[busctla]}=${busctld}`; break;
+	case 3: mck11 = `BusCtl.${FN_F11[busctla]}=${busctld}`; break;
+	case 4: mck11 = `REG[${x_c14_sel?'Lv':''}RI${rir0!=0?'1':' '}]=Result`; break;
+	case 5: mck11 = 'Page=Result'; break;
+	case 6: mck11 = 'WorkAddr_L=Result'; break;
+	case 7: if(disp_f.length == 0) disp_f = 'SysDatOut'; else disp_f = 'SysDatOut= ' + disp_f;
+		break;
+	}
+	let mch11 = FN_H11[x_h11];
+	if(x_h11 == 6) { // TODO F=MapROM[DP] ignore ALU F
+		mch11 = `${disp_f}=${mch11}[${mcd_d45}]`;
+		disp_f = '';
+	}
+	let mce6 = '';
+	// e6[0] nop, e6[1..4] load from F, e6[6] maybe load from F
+	if(x_e6 == 5) { // MemAddr=WorkAddr, WorkAddr loads use MemAddr instead
+		if(x_h11 == 3 && x_k11 == 6) { // IF Swap Enabled: WorkAddr=MemAddr
+			mce6 = 'MemAddr<=>WorkAddr';
+			mch11 = '';
+			mck11 = '';
+		} else { // an 8 bit only swap!?
+			if(x_k11 == 6) {
+				mce6 = 'MemAddr_H=WorkAddr_H';
+				mck11 = 'WorkAddr_L<=>MemAddr_L';
+			} else if(x_h11 == 3) {
+				mce6 = 'MemAddr_L=WorkAddr_L';
+				mch11 = 'WorkAddr_H<=>MemAddr_H';
+			} else {
+				mce6 = 'MemAddr=WorkAddr';
+			}
+		}
+	}
 
-	const d_f6h6 = ['0   ','1   ','FL.C','0!  '][x_f6h6] +
-	' SIn:' + (((aluc_d & 2) == 0) ? ['alu.s','AFL.C','q0   ','alu.c'][x_f6h6] : ['0    ','AFL.C','alu.s','1    '][x_f6h6]);
-	const lh = ALU.trace_str(aluc_s, aluc_f, aluc_d, aluc_a, aluc_b).padEnd(30);
-	const d_ccr = (x_e6 == 7) ? ( // only for CCR load
-		'cV=' + ['.  ','Z  ','R.V','LZ '][j12_sel] +
-		' cM=' + ['.  ','S  ','R.M','S  '][j12_sel] +
-		' cF=' + (j11_en ? '0' : ['Res.5','1','.','alu.o','Res.5','1','.','alu.o'][j11_sel]).padEnd(5) +
-		' cL=' + (j10_en ? '0' : ['.','~','C','(3)0','R.L','ALU.7','ALU.0/Q7','ALU.Q0'][j10_sel]).padEnd(8)
-	) : '                                  ';
+	// if right shift (aluc_d & 2) == 0: FN_H6A[x_f6h6] >> RAM7, RAM0>>Q7
+	// if left shift: (aluc_d & 2) != 0: FN_H6B[x_f6h6] >> Q0, Q7>>RAM0
+	let mcsh_r;
+	let mcsh_q;
+	if((aluc_d & 2) == 0) {
+		mcsh_r = FN_H6A[x_f6h6];
+		mcsh_q = 'R.0';
+	} else {
+		mcsh_q = FN_H6B[x_f6h6];
+		mcsh_r = 'Q.7';
+	}
+	let d_ccr = '';
+	if(x_e7==2) {
+		d_ccr = '  => ALUFlag_LD';
+		if(disp_f.length == 0) disp_f = '_';
+	}
+	const lh = ALU.trace_str(aluc_s, aluc_f, aluc_d, aluc_a, aluc_b,
+		mcsh_q, mcsh_r, disp_f, mcd_d45, FN_F6[x_f6h6]);
 
-	const d_k11 = [// FN_K11[x_k11]
-	/* 0 */ '',
-	/* 1 */ 'DMAEndReset',
-	/* 2 */ 'SysCtl:' + [ // M13 maybe, I have no input signals for this, but it works
-	/* . */ 'P2.3','P2.4','RTC','MapDis',
-	/* . */ 'FP.Run','RTC.R','FP.ABT','INT_ACK'][busctla] + '=' + busctld,
-	/* 3 */ 'BusCtl:' + [
-	/* . */ 'IntEN','AddrToSys','DMACountDIS','AddrU/D',
-	/* . */ 'AddrCtlSel','ParityTest','ParityEN','DMA_EN'][busctla] + '=' + busctld,
-	/* 4 */ 'REG_WR(R)',
-	/* 5 */ 'PTR_WR',
-	/* 6 */ 'WA_LD',
-	/* 7 */ 'SysDatOut_WR'][x_k11];
-	const mce7 = ['','BusReady','ALUFlag_LD','DataRD'][x_e7];
-	const mch11 = [
-	'','RD_START','WT_START','WorkAddr_LDH',
-	'WorkAddr_Count','MemAddr_Count','F=MapROM','NibSwap'][x_h11];
-	const mcd_d45 = [
-	'SWAPR','RDR','MA_H','MA_L','SWAPR','RDR','MA_H','MA_L',
-	'PA','CCR_DSense','SysDatIn','R_H14','R_INTDIP',`RCnst(${hex(mpconst_m6)})`,'',''][dp_sel];
+	// CCR load
+	if(x_e6 == 7) {
+		d_ccr += ` V=${FN_J12B[j12_sel]} M=${FN_J12A[j12_sel]
+		} F=${j11_en ? '0' : FN_J11[j11_sel]} L=${j10_en ? '0' : FN_J10[j10_sel]}`;
+	}
+
+	const mce7 = FN_E7[x_e7];
+	let mcbus = mck11;
+	if(mch11.length > 0) {
+		if(mcbus.length > 0) mcbus += ', ' + mch11;
+		else mcbus = mch11;
+	}
+	if(mce6.length > 0) {
+		if(mcbus.length > 0) mcbus += ', ' + mce6;
+		else mcbus = mce6;
+	}
+	if(mce7.length > 0) {
+		if(mcbus.length > 0) mcbus += ', ' + mce7;
+		else mcbus = mce7;
+	}
 	return {
-		seq: `${((datapath != undefined) ? hex(address,3) : '')}`+
-		`:${hex(c1,6)}${hex(c0,8)
-	} ${FN_SEQ_SN[seq2_s]
-	} ${FN_SEQ_SN[seq1_s]
-	} ${FN_SEQ_SN[seq0_s]
-	} ${FN_SEQ_FE[seq_fc]} K9:${k9_fn.padEnd(14)
-	} [${hex(seqjmp,3)}]${d_branch0}${d_branch1}${d_branch2}${d_branch3}`,
-		alu: (alu_y != undefined) ? `${lh} CIn=${d_f6h6} (${hex(data_f as number,2)}:${hex(alu_y,2)}) ${d_ccr}` : `${lh} CIn=${d_f6h6} ${d_ccr}`,
-		bus: 'D4/5:DP' + ((datapath != undefined) ? `(${hex(datapath)})`: '') +
-		`=${mcd_d45.padEnd(10)} R:${x_c14_sel?'Lv':'RI'}${rir0!=0?'|1':'  '} K11:${d_k11.padEnd(18)} H11:${mch11.padEnd(14)} E6:${FN_E6[x_e6].padEnd(12)
-		} E7:${mce7.padEnd(11)}`
+		seq: `${((datapath != undefined) ? hex(address,3) : '')}:${hex(c1,6)}${hex(c0,8)
+	} ${FN_SEQ_SN[seq2_s]} ${FN_SEQ_SN[seq1_s]} ${FN_SEQ_SN[seq0_s]
+	} ${FN_SEQ_FE[seq_fc]} [${hex(seqjmp,3)}>${hex(next,3)}] ${k9_fn} ${d_branch}`,
+		alu: (alu_y != undefined) ? `${lh} (${hex(data_f as number,2)}:${hex(alu_y,2)})${d_ccr}` : `${lh}${d_ccr}`,
+		rdr: `RDR[${x_c14_sel?'Lv':'  '}RI${rir0!=0?'1':' '}]`,
+		bus: mcbus
 	};
 }
 
 const listmax = 100;
-const listing:HTMLDivElement[] = [];
+interface AssmListing {
+	a_ref:number;
+	pre:HTMLDivElement;
+	addr:HTMLDivElement;
+	hex:HTMLDivElement;
+	ascii:HTMLDivElement;
+	inst:HTMLDivElement;
+	param:HTMLDivElement;
+	line:HTMLDivElement;
+	comm:HTMLDivElement;
+}
+const listing:AssmListing[] = [];
 interface MicroListing {
 	line: HTMLDivElement;
+	left: HTMLDivElement;
 	mc1: HTMLDivElement;
 	mc2: HTMLDivElement;
 	mc3: HTMLDivElement;
 	bp: boolean;
 	bpc: HTMLInputElement;
+	flow: FlowTrace;
+}
+interface FlowBranch {
+	address: number,
+	source?: string[],
+	is_push?: true,
+}
+interface FlowFrom {
+	from: number,
+	origin?: number,
+}
+interface FlowTrace {
+	id: number,
+	reached: boolean,
+	processed: boolean,
+	from: FlowFrom[],
+	from_main: string[],
+	next: number,
+	stack_op: boolean
+	stack_push: boolean,
+	stack_mask: number,
+	reg_mask: number,
+	frame?: FlowFrame[],
+	frame_ref?: number,
+	branches: FlowBranch[],
+}
+interface FlowFrame {
+	ret: number,
+	orig: number,
+	entry: number,
 }
 (function(){
 	for (let i = 0; i < listmax; i++) {
-		let listnode = document.createElement('div');
-		listing.push(listnode);
+		const listnode = document.createElement('div');
+		const item:AssmListing = {
+			a_ref: 0,
+			pre: document.createElement('div'),
+			addr: document.createElement('div'),
+			line: document.createElement('div'),
+			hex: document.createElement('div'),
+			ascii: document.createElement('div'),
+			inst: document.createElement('div'),
+			param: document.createElement('div'),
+			comm: document.createElement('div')
+		}
+		listnode.appendChild(item.pre);
+		listnode.appendChild(item.line);
+		item.line.classList.add('line');
+		item.addr.addEventListener('click', function() {
+			console.log('bpt', hex(item.a_ref,5));
+			let v = bpl.readmeta(item.a_ref);
+			v ^= MEMSTAT.ACC_BRK;
+			bpl.writemeta(item.a_ref, v);
+			show_disasm();
+		});
+		item.line.appendChild(item.addr);
+		item.line.appendChild(item.hex);
+		item.line.appendChild(item.inst);
+		item.line.appendChild(item.param);
+		item.line.appendChild(item.comm);
+		listing.push(item);
 		d_listing.appendChild(listnode);
+		d_listingc.appendChild(item.ascii);
 	}
 	for (let i = 0; i < 2048; i++) {
 		const listnode = document.createElement('div');
@@ -3792,42 +4090,320 @@ interface MicroListing {
 		listnode.appendChild(rightnode);
 		const listobj:MicroListing = {
 			line: listnode,
+			left: leftnode,
 			mc1: document.createElement('div'),
 			mc2: document.createElement('div'),
 			mc3: document.createElement('div'),
 			bp: false,
 			bpc: bpcnode,
+			flow: {
+				id: i,
+				reached: false,
+				processed: false,
+				from: [],
+				from_main: [],
+				branches: [],
+				next: 0,
+				stack_op: false,
+				stack_push: false,
+				stack_mask: 0,
+				reg_mask: 0,
+			}
 		};
 		bpcnode.addEventListener('click', function(ev) {
 			const lst = listobj;
 			lst.bp = this.checked;
 		});
+		listobj.mc1.classList.add('mcc');
+		listobj.mc2.classList.add('mcc');
+		listobj.mc3.classList.add('mcc');
 		rightnode.appendChild(listobj.mc1);
 		rightnode.appendChild(listobj.mc2);
 		rightnode.appendChild(listobj.mc3);
-		let lo = mc_listing(i);
+		let lo = mc_listing(i, undefined, undefined, undefined, listobj.flow);
 		listobj.mc1.innerText = lo.seq;
-		listobj.mc2.innerText = lo.alu;
-		listobj.mc3.innerText = lo.bus;
+		listobj.mc2.innerText = `${lo.rdr}, ${lo.bus}${lo.bus.length>0?', ':''}${lo.alu}`;
 		mclisting.push(listobj);
 		d_micro.appendChild(listnode);
 	}
+	let proc_flag = true;
+	mclisting[0].flow.reached = true;
+	mclisting[0].flow.from_main = ['Reset'];
+	mclisting[0x100].flow.from_main = ['PreFetch'];
+	mclisting[0x101].flow.from_main = ['Fetch'];
+	let decent = 4096;
+	function markflow(target:FlowTrace, source:FlowTrace, marker?:string) {
+		target.reached = true;
+		if(marker != undefined) {
+			marker = marker;
+		} else if(source.from_main.length > 0) {
+			marker = source.from_main[0];
+		}
+		if(marker != undefined && !target.from_main.includes(marker)) {
+			target.from_main.push(marker);
+		}
+		if(!target.processed) proc_flag = true;
+		if(!target.from.find((v)=>v.from == source.id)) {
+			let f = undefined;
+			if(source.frame != undefined) {
+				f = source.frame.find((v)=>v.ret == target.id);
+			}
+			if(f) target.from.push({from:source.id, origin:f.orig});
+			else target.from.push({from:source.id});
+		}
+	}
+	function flow_frame(target:MicroListing, from:FlowTrace, is_stk:boolean, pushframe?:FlowFrame) {
+		if(pushframe != undefined && target.flow.frame_ref !== undefined) { // pre-processed chain
+			const poplisting = mclisting[target.flow.frame_ref];
+			const popflow = poplisting.flow;
+			const popframe = popflow.frame; // the frame containing a POP
+			if(popframe) {
+				const is_refpop = popflow.stack_op && !popflow.stack_push;
+				if(is_refpop) {
+					// copy pasta? or common function?
+					let r = pushframe.ret;
+					popframe.push(pushframe);
+					r = (popflow.next & (popflow.stack_mask ^ 0xfff)) | (r & popflow.stack_mask);
+					// the return point flows from the end of the call
+					const retflow = mclisting[r].flow;
+					markflow(retflow, popflow);
+					//const frame = from.frame;
+					//if(frame) { // if the entry point is also a PUSH/CALL, move it's frames to the return point
+					//	delete from.frame;
+					//	retflow.frame = frame;
+					//	frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
+					//}
+				} else {
+					popframe.push(pushframe);
+				}
+			}
+		} else if(pushframe != undefined) { // push a new frame
+			target.left.classList.add('stk');
+			//console.log('NEW FRAME', hex(from.id,3), hex(target.flow.id,3), hex(pushframe.orig,3));
+			if(target.flow.frame == undefined) {
+				target.flow.frame = [pushframe];
+			} else {
+				target.flow.frame.push(pushframe);
+				console.log('FRAME OVERLAP', hex(from.id,3), hex(target.flow.id,3), hex(pushframe.orig,3))
+			}
+		} else if(from.frame != undefined && (!is_stk || pushframe)) { // move existing frame along a chain
+			if(target.flow.processed) {
+				const frame = from.frame;
+				delete from.frame;
+				if(target.flow.frame == undefined) {
+					console.log('MOVE FRAME (PROC!)', hex(from.id,3), hex(target.flow.id,3));
+					target.flow.frame = frame;
+				} else {
+					console.log('MERGE FRAME (PROC!)', hex(from.id,3), hex(target.flow.id,3));
+				}
+				frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = target.flow.id;});
+			} else if(target.flow.frame == undefined) {
+				//console.log('MOVE FRAME', hex(from.id,3), hex(target.flow.id,3));
+				const frame = from.frame;
+				delete from.frame;
+				target.flow.frame = frame;
+				frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = target.flow.id;});
+			} else {
+				const tframe = target.flow.frame;
+				// from.frame.forEach((v)=>{
+				// 	if(!tframe.ret.includes(v)) tframe.ret.push(v);
+				// });
+				// frame.entry.forEach((v)=>{
+				// 	mclisting[v].flow.frame_ref = target.flow.id;
+				// 	if(!tframe.entry.includes(v)) tframe.entry.push(v);
+				// });
+				console.warn('mc frame merge at', hex(target.flow.id,3));
+			}
+		}
+	}
+	/////
+	while(proc_flag) {
+		proc_flag = false;
+		for (let i = 0; i < 2048; i++) {
+			const listobj = mclisting[i];
+			const flow = listobj.flow;
+			if(flow.reached && !flow.processed) {
+				flow.processed = true;
+				listobj.left.classList.add('mcrec');
+				const frame:FlowFrame[]|undefined = flow.frame;
+				const is_push = flow.stack_op && flow.stack_push;
+				const is_pop = flow.stack_op && !flow.stack_push;
+				if(flow.next != i && flow.stack_mask == 0 && flow.reg_mask == 0) {
+					const tn = mclisting[flow.next];
+					const tf = tn.flow;
+					if(is_push) {
+						flow_frame(tn, flow, true, { ret: (i + 1) & 0x7ff, orig:i, entry:tf.id });
+					} else {
+						flow_frame(tn, flow, flow.stack_op);
+					}
+					markflow(tf, flow);
+				} else if(is_pop && flow.stack_mask != 0) {
+					// return to stack
+					if(frame != undefined) {
+						console.log('RETURN', hex(i,3));
+						for(let k = 0; k < frame.length; k++) {
+							let r = frame[k].ret;
+							const retorigin = mclisting[frame[k].orig].flow
+							r = (flow.next & (flow.stack_mask ^ 0xfff)) | (r & flow.stack_mask);
+							const retflow = mclisting[r].flow;
+							// if the entry point is also a PUSH/CALL, move it's frames to the return point
+							//frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
+							const origframe = retorigin.frame;
+							// if the return origin was carrying a frame
+							if(origframe) {
+								delete retorigin.frame;
+								retflow.frame = origframe;
+								if(retflow.processed) console.warn('RETURN ORIGIN ALREADY PROCESSED');
+								origframe.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
+							}
+							markflow(retflow, flow);
+						}
+					} else {
+						console.log('UNTRACED RETURN', hex(i,3));
+					}
+				} else if(flow.reg_mask != 0) {
+					const r_base = flow.next & (flow.reg_mask ^ 0xfff);
+					console.log('AHR JMP',hex(i,3),hex(r_base,3),hex(flow.reg_mask,3));
+					// TODO
+				}
+				let br = flow.branches;
+				let clearflow = false;
+				for(let b = 0; b < br.length; b++) {
+					const n = br[b];
+					const brlisting = mclisting[n.address];
+					const brflow = brlisting.flow;
+					if(n.is_push) {
+						flow_frame(brlisting, flow, true, { ret: (i + 1) & 0x7ff, orig:i, entry:brflow.id });
+					} else {
+						flow_frame(brlisting, flow, false);
+						clearflow = true;
+						flow.frame = frame;
+					}
+					if(n.source != undefined) {
+						markflow(brflow, flow, n.source[0]);
+					} else {
+						markflow(brflow, flow);
+					}
+				}
+				if(clearflow) {
+					delete flow.frame;
+				}
+			}
+		}
+	}
+	for (let i = 0; i < 2048; i++) {
+		const listobj = mclisting[i];
+		const flow = listobj.flow;
+		if(!flow.reached) continue;
+		let br = '';
+		for(let i = 0; i < flow.branches.length; i++) {
+			let branch = flow.branches[i];
+			if(branch.source) br += `[${hex(branch.address,3)} ${branch.source.join(' & ')}]`;
+			else br += `[${hex(branch.address,3)}]`;
+		}
+		let f = [];
+		for(let i = 0; i < flow.from_main.length; i++) {
+			let v = flow.from_main[i];
+			f.push(v);
+		}
+		for(let i = 0; i < flow.from.length; i++) {
+			let v = flow.from[i];
+			if(v.origin != undefined) {
+				f.push(`${hex(v.origin, 3)}>${hex(v.from, 3)}`);
+			} else f.push(hex(v.from, 3));
+		}
+		let fr = '';
+		if(flow.frame_ref !== undefined) {
+			fr += ` retn:${hex(flow.frame_ref, 3)}`;
+		}
+		if(flow.frame) {
+			fr += flow.frame.map((v)=>`<ret:${hex(v.ret,3)} ent:${hex(v.entry,3)} o:${hex(v.orig,3)}>`).join(';');
+		}
+		listobj.mc3.innerText = `next:${hex(flow.next,3)}/${hex(flow.stack_mask,3)} from:${f.join(',')}${fr} ${br}`;
+	}
 })();
+let last_memv_line = -1;
+function update_memview(is_scroll = false) {
+	const mem_con = memory_view.children[0] as HTMLDivElement;
+	const col_a = mem_con.children[1] as HTMLDivElement;
+	const col_d = mem_con.children[2] as HTMLDivElement;
+	const col_t = mem_con.children[3] as HTMLDivElement;
+	if(memory_elem.length == 0) {
+		mem_con.addEventListener('scroll', function() {
+			update_memview(true);
+		});
+		for(let i = 0; i < 32; i++) {
+			const node_a = document.createElement('div');
+			const node_d = document.createElement('div');
+			const node_t = document.createElement('div');
+			const line = {a:node_a, d:node_d, t:node_t};
+			col_a.appendChild(node_a);
+			col_d.appendChild(node_d);
+			col_t.appendChild(node_t);
+			memory_elem.push(line);
+		}
+	}
+	const line_height = 22;
+	const line_limit = 16384 - 32;
+	let lines = (mem_con.scrollTop / line_height) | 0;
+	if(lines > line_limit) lines = line_limit;
+	if(is_scroll && last_memv_line == lines) return;
+	last_memv_line = lines;
+	memv_begin = lines * 16;
+	memv_end = (lines + 32) * 16;
+	let ofs = (lines * line_height);
+	let top = `${ofs}px`;
+	col_a.style.top = top;
+	col_d.style.top = top;
+	col_t.style.top = top;
+	for(let i = 0; i < 32; i++) {
+		const e = memory_elem[i];
+		let n = (lines + i) * 16;
+		e.a.innerText = hex(n, 5);
+		let c = bpl.readmeta(n) & 255;
+		let hs = hex(c);
+		let ts:string;
+		if(c > 159 && c < 255) {
+			ts = String.fromCharCode(c & 127);
+		} else {
+			ts = '.';
+		}
+		for(let b = 1; b < 16; b++) {
+			c = bpl.readmeta(n + b) & 255;
+			hs += ' ' + hex(c);
+			if(c > 159 && c < 255) {
+				ts += String.fromCharCode(c & 127);
+			} else {
+				ts += '.';
+			}
+		}
+		e.d.innerText = hs;
+		e.t.innerText = ts;
+	}
+}
 function update_microlist() {
 	for (let i = 0; i < 2048; i++) {
 		const m = mclisting[i];
 		m.bpc.checked = m.bp;
 	}
 }
-
+const enum MEMSTAT {
+	IO = 0x200,
+	P_ODD = 0x100,
+	ACC_BRK = 0x1000,
+	RD_BRK = 0x2000,
+	WT_BRK = 0x4000,
+	ALL_BRK = 0x7000,
+	OPEN = 0x8000,
+}
 class DiagIO implements MemAccess {
-	is_io: boolean = true;
-	is_write = true;
 	// TOS:1a, Aux:1d, Hawk:17-19, MUXINT:16, DMA:11/13
 	dip = 0x0d;
 	hexout = 0;
 	points = 0;
 	blank = false;
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	readbyte(f:number):number {
 		let v;
 		switch(f) {
@@ -3863,9 +4439,9 @@ let cx_dip = cx_diag0.dip;
 
 interface MemAccess {
 	readbyte(address:number):number;
+	readmeta(address:number):number;
+	writemeta(address:number, value:number):void;
 	writebyte(address:number, value:number):void;
-	is_io:boolean;
-	is_write:boolean;
 }
 interface IOAccess {
 	is_interrupt():boolean;
@@ -3887,8 +4463,8 @@ class DSK2Unit implements DiskContainer {
 	image:DiskImage|null = null;
 }
 class DSK2 implements MemAccess, IOAccess, DMADevice {
-	is_io = true;
-	is_write = true;
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	sel_unit = 0;
 	units = [new DSK2Unit(), new DSK2Unit()];
 	busy = false;
@@ -4149,8 +4725,8 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 }
 
 class MockPrinter implements MemAccess {
-	is_io = true;
-	is_write = true;
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	readbyte(address: number): number {
 		let value = 0;
 		if(address == 1) {
@@ -4179,8 +4755,6 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 	is_interrupt(): boolean { return false; }
 	getlevel(): number { return 0; }
 	acknowledge(): boolean { return false; }
-	is_io = true;
-	is_write = true;
 	sys_data: number = 0;
 	flag_cardtocpu: boolean = false; // bit 0
 	flag_cputocard: boolean = false; // bit 1
@@ -4222,7 +4796,6 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 	// sector address block:
 	// Pre:(0xA5) TrackH TrackL Platter# Sector# BlockCRC
 	// a5 00 12 00 00 RR RR
-	// 
 	// 0,0,0,0,0,0,0,0, // Address=>Data blank
 	// 0x96,0, // data mark
 	// 400 bytes of data
@@ -4256,6 +4829,8 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 		});
 		style_if(ffc_log, 'active', this.log_enable);
 	}
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	// Clocks:
 	// Count:  0   1   2   3   4   5   6   7   8   9  10  11  12
 	// Shift . 1 . 1 . 1 . 1 . 1 . 1 . 1 . 1 . 1 . 1 . 1 . 1 . 1
@@ -4710,20 +5285,24 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 		const seq_branch_hi = ((m7<<2) & 0x200) | ((m7<<5) & 0x100);
 
 		const FFC_DATA_IN = [
-			'ReadFS1','ReadFS3','ReadFS2','ReadMCSR',
-			'ReadFDSR1','nop5','ReadFDSR2','nop7',
-			'ReadAddrL','ReadRAM','ReadSysReg','ReadStatus',
-			'ReadAddrH','nop13','nop14','ReadConst'
+			'FS1','FS3','FS2','MCSR',
+			'FDSR1','nop5','FDSR2','nop7',
+			'AddrL','FFCRAM','SysReg','Status',
+			'AddrH','nop13','nop14',''
 		];
 		const FFC_CARRY = ['0','1','SROut','SQOut','~F','F','ALU.C','ALU.S'];
 		const FFC_FLAGI = ['1     ','Flag  ','SRO   ','SQO   ','ALU.C ','ALU.V ','ALU.S ','ALU.H '];
 		const FFC_FLAGN = ['0     ','~Flag ','~SRO  ','~SQO  ','~ALU.C','~ALU.V','~ALU.S','~ALU.H']
 		const FFC_SHIFT_IN = ['0','1','SROut','SQOut','~Flag','Flag','ALU.C','ALU.S'];
 		const FFC_K1 = [
-			'WriteDCR1','WriteDCR2','WriteSSBCL','WriteMCSR',
-			'WriteFDSRs','WriteFDDPulse','WriteSSBCH','WriteTSM',
-			'WriteAddrL','WriteRAM','WriteSys','WriteAddrH',
-			'WriteCtrlReg','WriteIPL','nop14','nop'
+			'DCR1','DCR2','SSBCL','MCSR',
+			'FDSRs','','SSBCH','TSM',
+			'AddrL','FFCRAM','SysReg','AddrH',
+			'CtrlReg','IPL','',''
+		];
+		const FFC_K1_SPL = [
+			'','','','VerifyDat','','FDDPulse','','TSMReset',
+			'','','','','','','nop14',''
 		];
 		const FFC_TESTI = ['Alway','Flag ','Zero ','Carry','Ovr  ','Neg  ','fiDNE','MFMEr'];
 		const FFC_TESTN = ['Never','~Flag','NotZ ','NoCar','NoOvr','Pos  ','fiDOk','MFMOk'];
@@ -4733,10 +5312,17 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 		} else {
 			nextop = `AC:${FN_8X02_C[seq_ac]} ${test_inv ? FFC_TESTI[d1_sel] : FFC_TESTN[d1_sel]} Branch=${hex(seq_branch_hi|data_out,3)}`;
 		}
+		const disp_data_in = k2_sel<13 ? `${FFC_DATA_IN[k2_sel]}(${hex(data_in)})` : (k2_sel == 15 ? `#${hex(data_in)}`:'');
+		const disp_data_out = k1_sel<14 ? `${FFC_K1[k1_sel]}(${hex(data_out)})` : '';
 		const seq = `${hex(this.seq.p,3)}:${hex(mcw2,4)}${hex(mcw1,4)}:${hex(mval)}:${hex(mcw0,6)} ${nextop}`;
-		const alu = ALU.trace_str(alu_s, alu_f, alu_d, alu_a, alu_b).padEnd(30) +
-		` (${hex(data_in)}:${hex(this.aluc.y)}) CIn=${FFC_CARRY[e2_sel]} SQI=${FFC_SHIFT_IN[f2_sel]} SRI=${FFC_SHIFT_IN[f1_sel]} Flag=${flag_inv ? FFC_FLAGI[e1_sel] : FFC_FLAGN[e1_sel]}`;
-		const bus = `IN=${FFC_DATA_IN[k2_sel].padEnd(10)} F(${hex(data_out)})=${data_bridge?'~IN':'ALU'} K1:${FFC_K1[k1_sel].padEnd(13)} [${addr_inc?'A+':'--'} ${dma_inc?'D+':'--'} ${tp_d?'TP':'--'} ${rds_sel?'fdd':'cry'} ${tsm_csel?'fic':'vco'} CRC${crc_out?'Out':'---'}${crc_reset?'Rst':'---'}${crc_ena?'EN':'--'}]`;
+		const alu = (
+		ALU.trace_str(alu_s, alu_f, alu_d, alu_a, alu_b,
+			FFC_SHIFT_IN[f2_sel], FFC_SHIFT_IN[f1_sel],
+			data_bridge||disp_data_out.length==0?'_':disp_data_out, disp_data_in, FFC_CARRY[e2_sel]) + ` (${hex(this.aluc.y)})` +
+			(data_bridge && disp_data_out.length > 0?`${disp_data_out} = ~${disp_data_in} `:'') // ~36ch max
+		).padEnd(30) +
+		` Flag=${flag_inv ? FFC_FLAGI[e1_sel] : FFC_FLAGN[e1_sel]}`;
+		const bus = `${FFC_K1_SPL[k1_sel].padEnd(9)} [${addr_inc?'A+':'  '}${dma_inc?'D+':'  '}${tp_d?'TP':'  '} ${rds_sel?'fdd':'cry'} ${tsm_csel?'fic':'vco'} CRC${crc_out?'Out':'_  '}${crc_reset?'Rst':'_  '}${crc_ena?'EN':'DS'}]`;
 		ffc_op_seq.innerText = seq;
 		ffc_op_alu.innerText = alu;
 		ffc_op_bus.innerText = bus;
@@ -4820,8 +5406,8 @@ const enum CMDERR {
 	EXEC_COMMAND_STRING_ERROR = 0x45,
 }
 class TestCMD implements MemAccess, Run, DMADevice {
-	is_io = true;
-	is_write = true;
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	data_in = 0;
 	data_out = 0;
 	data_fout = false;
@@ -4854,7 +5440,7 @@ class TestCMD implements MemAccess, Run, DMADevice {
 			this.cancel_request = reject;
 			this.read_request = resolve;
 		});
-		console.log('CMD-RQ:', hex(v));
+		//console.log('CMD-RQ:', hex(v));
 		this.cancel_request = null;
 		return v;
 	}
@@ -4922,12 +5508,10 @@ class TestCMD implements MemAccess, Run, DMADevice {
 		});
 	}
 	async io_command(index:number):Promise<number> {
-		console.log('CMD-C', hex(index));
 		switch(index) {
 		case 0: // CMD reset?
-			console.log('CMD-RST');
 			await this.request_delay();
-			console.log('CMD-RSTOK');
+			console.log('CMD-RESET');
 			return 0;
 		case 0x43: // DMA to cmdbuf
 			this.address = 0x11; // TODO: same as FFC?
@@ -4948,6 +5532,8 @@ class TestCMD implements MemAccess, Run, DMADevice {
 			if (this.dma_len > 0xfff) return CMDERR.DATA_LENGTH_ERROR;
 			await this.dma_out();
 			return 0;
+		default:
+			//console.log('CMD-C', hex(index));
 		}
 		return CMDERR.INVALID_COMMAND;
 	}
@@ -4967,7 +5553,7 @@ class TestCMD implements MemAccess, Run, DMADevice {
 				}).catch(()=>{
 					console.log('CMD: io-cancel');
 				}).finally(()=>{
-					console.log('CMD-done');
+					//console.log('CMD-done');
 					this.busy = false;
 				});
 			} else {
@@ -4981,7 +5567,7 @@ class TestCMD implements MemAccess, Run, DMADevice {
 			if(this.data_fout) value |= 1;
 			if(this.data_fin) value |= 2;
 			if(this.busy) {
-				console.log('CMD-rdbusy');
+				//console.log('CMD-rdbusy');
 				value |= 8;
 			}
 		} else {
@@ -4993,7 +5579,7 @@ class TestCMD implements MemAccess, Run, DMADevice {
 	writebyte(address: number, value: number): void {
 		if(address == 0) {
 			this.data_in = value;
-			console.log('CMD:W:', hex(value), this.data_fin, this.read_request != null);
+			//console.log('CMD:W:', hex(value), this.data_fin, this.read_request != null);
 			this.data_fin = true;
 			this.process();
 		} else if (this.cancel_request != null) {
@@ -5003,9 +5589,9 @@ class TestCMD implements MemAccess, Run, DMADevice {
 	}
 }
 class MMIOTrace implements MemAccess {
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	v = new Uint8Array(20);
-	is_io = true;
-	is_write = true;
 	readbyte(address: number): number {
 		let value = this.v[address];
 		console.log('IOTrace-R', address, value);
@@ -5020,8 +5606,25 @@ class MMIOTrace implements MemAccess {
 	}
 }
 class MMIOMulti implements MemAccess {
-	is_io = true;
-	is_write = true;
+	readmeta(address: number):number {
+		for (let i = 0;;i++) {
+			const devlist = this.devices[i];
+			if (devlist == null) return 0;
+			if ((address >= devlist.address) && (address < devlist.end)) {
+				return devlist.dev.readmeta(address - devlist.address);
+			}
+		}
+	}
+	writemeta(address: number, value: number): void {
+		for (let i = 0;;i++) {
+			const devlist = this.devices[i];
+			if (devlist == null) return;
+			if ((address >= devlist.address) && (address < devlist.end)) {
+				devlist.dev.writemeta(address - devlist.address, value);
+				return;
+			}
+		}
+	}
 	devices:{address:number,end:number,dev:MemAccess}[] = [];
 	adddev(subaddr:number, size:number, dev:MemAccess) {
 		this.devices.push({address:subaddr, end:subaddr+size, dev});
@@ -5064,6 +5667,14 @@ class MUXPort {
 		this._cts = value;
 		if(!rate_match_input && this.line != null) this.line.check_read();
 	}
+	reset():void {
+		this.write_busy = false;
+		this.read_busy = false;
+		this._cts = true;
+		if(this.line) {
+			this.line.clear_buffer();
+		}
+	}
 	read_status():number {
 		return (this.write_busy ? 0 : 2) | (this.read_busy ? 1 : 0) | 0x20;
 	}
@@ -5093,6 +5704,8 @@ class MUXPort {
 	}
 }
 class MMIOMux implements MemAccess, IOAccess {
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	is_interrupt():boolean {
 		return this.interrupt_en && this.interrupt_pend;
 	}
@@ -5112,17 +5725,15 @@ class MMIOMux implements MemAccess, IOAccess {
 		this.interrupt_level = 0;
 		this.interrupt_pend = false;
 		this.mux_cause = false;
-		this.muxports[0].cts = true;
-		this.muxports[1].cts = true;
-		this.muxports[2].cts = true;
-		this.muxports[3].cts = true;
+		this.muxports[0].reset();
+		this.muxports[1].reset();
+		this.muxports[2].reset();
+		this.muxports[3].reset();
 	}
 	muxports:MUXPort[] = [
 		new MUXPort(this), new MUXPort(this),
 		new MUXPort(this), new MUXPort(this)
 	];
-	is_io = true;
-	is_write:true = true;
 	interrupt_level = 0;
 	interrupt_en = false;
 	interrupt_pend = false;
@@ -5204,19 +5815,19 @@ class MMIOMux implements MemAccess, IOAccess {
 	}
 }
 class NullROM implements MemAccess {
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
 	writebyte(address: number, value: number): void {}
 	readbyte(address: number): number {
 		return 0;
 	}
-	is_io = false;
-	is_write = false;
 }
 
 function loadbin(mem:MemAccess, v:Uint8Array, addrfn?:AddressTransform):MemAccess {
 	const l = v.length;
 	if (addrfn == null) {
 		for (let a = 0; a < l; a++) {
-			mem.writebyte(a, v[a]);
+			mem.writemeta(a, v[a]);
 		}
 	} else {
 		let xm = addrfn.invert ? (l - 1) : 0;
@@ -5231,12 +5842,12 @@ function loadbin(mem:MemAccess, v:Uint8Array, addrfn?:AddressTransform):MemAcces
 			};
 			for (let a = 0; a < l; a++) {
 				let txa = aremapfn(a ^ xm);
-				mem.writebyte(a, v[txa]);
+				mem.writemeta(a, v[txa]);
 			}
 		} else {
 			for (let a = 0; a < l; a++) {
 				let txa = a ^ xm;
-				mem.writebyte(a, v[txa]);
+				mem.writemeta(a, v[txa]);
 			}
 		}
 	}
@@ -5249,22 +5860,34 @@ function loadhex(mem:MemAccess, h:string, ofs:number = 0):void {
 	msh.forEach(value=>{
 		if (value !== '') {
 			let v = parseInt(value, 16);
-			mem.writebyte(vpc, v & 0xff);
+			mem.writemeta(vpc, v & 0xff);
 			vpc++;
 		}
 	});
 }
 class SysMem implements MemAccess {
-	is_io = false;
-	is_write = true;
 	memory = new Uint8Array(0x20000);
 	pram = new Uint8Array(0x20000);
+	readmeta(address: number): number {
+		return this.memory[address] | (this.pram[address] << 8);
+	}
+	writemeta(address: number, value: number):void {
+		this.memory[address] = value & 255;
+		const vhi = (value >> 8) & 254;
+		value = value & 255;
+		let pval = value ^ (value >> 4);
+		pval = pval ^ (pval >> 2);
+		pval = (pval ^ (pval >> 1)) & 1;
+		this.pram[address] = vhi | pval;
+	}
 	readbyte(address:number):number {
 		const value = this.memory[address];
 		let pval = value ^ (value >> 4);
 		pval = pval ^ (pval >> 2);
 		pval = (pval ^ (pval >> 1)) & 1;
-		mcsim.memfault = pval ^ (this.pram[address] & 1);
+		const mval = this.pram[address];
+		mcsim.memfault = pval ^ (mval & 1);
+		if((mval & 112) != 0) handle_break();
 		return value & 255;
 	}
 	writebyte(address: number, value: number): void {
@@ -5272,36 +5895,44 @@ class SysMem implements MemAccess {
 		let pval = value ^ (value >> 4);
 		pval = pval ^ (pval >> 2);
 		pval = (pval ^ (pval >> 1) ^ mcsim.parity) & 1;
-		this.pram[address] = (this.memory[address] & 0xfe) | pval;
+		this.pram[address] = (this.pram[address] & 254) | pval;
 		this.memory[address] = value;
 	}
 }
 class ROM512 implements MemAccess {
-	is_io: boolean = false;
-	is_write: boolean = false;
+	readmeta(address: number): number {
+		return this.contents[address];
+	}
+	writemeta(address: number, value: number): void {
+		this.contents[address] = value & 255;
+	}
 	contents = new Uint8Array(512);
 	readbyte(address:number):number {
 		return this.contents[address];
 	}
-	writebyte(address: number, value: number):void {
-		this.contents[address] = value & 255;
-	}
+	writebyte(address: number, value: number):void {}
 }
 class ROM2k implements MemAccess {
-	is_io = false;
-	is_write = false;
 	contents = new Uint8Array(2048);
+	readmeta(address: number): number {
+		return this.contents[address];
+	}
+	writemeta(address: number, value: number): void {
+		this.contents[address] = value & 255;
+	}
 	readbyte(address:number):number {
 		return this.contents[address];
 	}
-	writebyte(address: number, value: number):void {
-		this.contents[address] = value & 255;
-	}
+	writebyte(address: number, value: number):void {}
 }
 class RAM2k implements MemAccess {
-	is_io = false;
-	is_write = true;
 	contents = new Uint8Array(2048);
+	readmeta(address: number): number {
+		return this.contents[address];
+	}
+	writemeta(address: number, value: number): void {
+		this.contents[address] = value & 255;
+	}
 	readbyte(address:number):number {
 		return this.contents[address];
 	}
@@ -5313,7 +5944,7 @@ class RAM2k implements MemAccess {
 const enum OPM {
 	IMPL,
 	IMM, DIR, IND, PCO, IPO, MOD,
-	RR, RC, RRX,
+	RR, RRX, RRSR, RRS, RC,
 	IMPL_R,
 	IMPL_R_DIR,
 }
@@ -5322,9 +5953,34 @@ const enum TXS {
 }
 const enum OPL_EXT {
 	MPUSH, MPOP,
-	PAGE, DMA,
+	PAGE, DMA, BIG, MEM,
+	RII, XIO,
 }
-interface OPLEntry {
+interface OPL_EXT_MPUSH { x:OPL_EXT.MPUSH }
+interface OPL_EXT_MPOP { x:OPL_EXT.MPOP }
+interface OPL_EXT_PAGE {
+	x:OPL_EXT.PAGE,
+	xd:[string[],string[],string[]]
+}
+interface OPL_EXT_DMA {
+	x:OPL_EXT.DMA,
+	xd:[[],string[],string[]]
+}
+interface OPL_EXT_BIG {
+	x:OPL_EXT.BIG,
+	xd:[string[],string[]]
+}
+interface OPL_EXT_MEM {
+	x:OPL_EXT.MEM,
+	xd:[number[],string[],string[]]
+}
+interface OPL_EXT_RII {
+	x:OPL_EXT.RII,
+}
+interface OPL_EXT_XIO {
+	x:OPL_EXT.XIO,
+}
+interface OPLBase {
 	n:string,
 	nm?:string,
 	l?:number,
@@ -5334,8 +5990,11 @@ interface OPLEntry {
 	w?:TXS,
 	sr?:REG,
 	dr?:REG,
-	x?:OPL_EXT,
 }
+type OPLEntry = OPLBase & ( { x?:never } |
+	OPL_EXT_MEM | OPL_EXT_PAGE | OPL_EXT_DMA | OPL_EXT_BIG
+	| OPL_EXT_MPUSH | OPL_EXT_MPOP | OPL_EXT_RII | OPL_EXT_XIO
+);
 
 const enum REG {
 	A, AL, B, BL, X, XL, Y, YL,
@@ -5343,9 +6002,9 @@ const enum REG {
 }
 const regname = [
 	'AH','AL','BH','BL','XH','XL','YH','YL',
-	'ZH','ZL','SH','SL','CH','CL','PCH','PCL',
+	'ZH','ZL','SH','SL','CH','CL','PH','PL',
 	'A','A!','B','B!','X','X!','Y','Y!',
-	'Z','Z!','S','S!','C','C!','PC','PC!',
+	'Z','Z!','S','S!','C','C!','P','P!',
 ]
 const mmwlist = new Map<number, string>([]);
 
@@ -5392,46 +6051,73 @@ if(true) {
 
 const oplist:OPLEntry[] = [
 	// 0x0H
-	{n:'HALT',md:OPM.IMPL},{n:'NOP',md:OPM.IMPL},
-	{n:'SF',md:OPM.IMPL},{n:'RF',md:OPM.IMPL},
-	{n:'EI',md:OPM.IMPL},{n:'DI',md:OPM.IMPL},
-	{n:'SL',md:OPM.IMPL},{n:'RL',md:OPM.IMPL},
+	{n:'HALT',md:OPM.IMPL},
+	{n:'NOP',md:OPM.IMPL},
+	{n:'SF',md:OPM.IMPL},
+	{n:'RF',md:OPM.IMPL},
+	{n:'EI',md:OPM.IMPL},
+	{n:'DI',md:OPM.IMPL},
+	{n:'SL',md:OPM.IMPL},
+	{n:'RL',md:OPM.IMPL},
 	{n:'CL',nm:'COML',md:OPM.IMPL},
 	{n:'RSR',nm:'RET',md:OPM.IMPL},
 	{n:'RI',nm:'RETI',md:OPM.IMPL},
 	{n:'!ill0B',md:OPM.IMPL},
-	{n:'SYN',md:OPM.IMPL}, // TODO
+	{n:'SYN',md:OPM.IMPL}, // dis-ok TODO: micro trace?
 	{n:'PCX',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.PC,dr:REG.X},
 	{n:'DLY',nm:'DELAY',md:OPM.IMPL},
-	{n:'RSV',nm:'SPVRET',md:OPM.IMPL},
+	{n:'RSV',nm:'SVRET',md:OPM.IMPL},
 	// 0x1H
-	{n:'BL',md:OPM.PCO,w:TXS.F},{n:'BNL',md:OPM.PCO,w:TXS.F},
-	{n:'BF',md:OPM.PCO,w:TXS.F},{n:'BNF',md:OPM.PCO,w:TXS.F},
-	{n:'BZ',md:OPM.PCO,w:TXS.F},{n:'BNZ',md:OPM.PCO,w:TXS.F},
-	{n:'BM',md:OPM.PCO,w:TXS.F},{n:'BP',md:OPM.PCO,w:TXS.F},
-	{n:'BGE',md:OPM.PCO,w:TXS.F},{n:'BLE',md:OPM.PCO,w:TXS.F},
-	{n:'BS1',md:OPM.PCO,w:TXS.F},{n:'BS2',md:OPM.PCO,w:TXS.F},
-	{n:'BS3',md:OPM.PCO,w:TXS.F},{n:'BS4',md:OPM.PCO,w:TXS.F},
-	{n:'?BTM?',md:OPM.IMPL},
-	{n:'?BEP?',md:OPM.IMPL},
+	{n:'BL',md:OPM.PCO,w:TXS.F},
+	{n:'BNL',md:OPM.PCO,w:TXS.F},
+	{n:'BF',md:OPM.PCO,w:TXS.F},
+	{n:'BNF',md:OPM.PCO,w:TXS.F},
+	{n:'BZ',md:OPM.PCO,w:TXS.F},
+	{n:'BNZ',md:OPM.PCO,w:TXS.F},
+	{n:'BM',md:OPM.PCO,w:TXS.F},
+	{n:'BP',md:OPM.PCO,w:TXS.F},
+	{n:'BGE',md:OPM.PCO,w:TXS.F},
+	{n:'BLE',md:OPM.PCO,w:TXS.F},
+	{n:'BS1',md:OPM.PCO,w:TXS.F},
+	{n:'BS2',md:OPM.PCO,w:TXS.F},
+	{n:'BS3',md:OPM.PCO,w:TXS.F},
+	{n:'BS4',md:OPM.PCO,w:TXS.F},
+	{n:'BI',md:OPM.PCO,w:TXS.F},
+	{n:'BCK',md:OPM.PCO,w:TXS.F},
 	// 0x2H
-	{n:'INRB',nm:'INC',md:OPM.RC,w:TXS.B,i:1},{n:'DCRB',nm:'DEC',md:OPM.RC,w:TXS.B,i:1},
-	{n:'CLRB',md:OPM.RC,w:TXS.B},{n:'IVR',nm:'NOT',md:OPM.RC,w:TXS.B},
-	{n:'SRRB',nm:'SRA',md:OPM.RC,w:TXS.B,i:1},{n:'SLRB',nm:'SLL',md:OPM.RC,w:TXS.B,i:1},
-	{n:'RRRB',nm:'RORC',md:OPM.RC,w:TXS.B,i:1},{n:'RLRB',nm:'ROLC',md:OPM.RC,w:TXS.B,i:1},
+	{n:'INRB',nm:'INC',md:OPM.RC,w:TXS.B,i:1},
+	{n:'DCRB',nm:'DEC',md:OPM.RC,w:TXS.B,i:1},
+	{n:'CLRB',md:OPM.RC,w:TXS.B},
+	{n:'IVR',nm:'NOT',md:OPM.RC,w:TXS.B},
+	{n:'SRRB',nm:'SRA',md:OPM.RC,w:TXS.B,i:1},
+	{n:'SLRB',nm:'SLL',md:OPM.RC,w:TXS.B,i:1},
+	{n:'RRRB',nm:'RORC',md:OPM.RC,w:TXS.B,i:1},
+	{n:'RLRB',nm:'ROLC',md:OPM.RC,w:TXS.B,i:1},
 	{n:'INAB',nm:'INC',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'DCAB',nm:'DEC',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'CLAB',nm:'CLR',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'IVAB',nm:'NOT',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'SRAB',nm:'SRA',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'SLAB',nm:'SLL',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'page',md:OPM.IMPL,x:OPL_EXT.PAGE}, // TODO
-	{n:'dma.',md:OPM.IMPL,x:OPL_EXT.DMA}, // TODO
+	{n:'page',md:OPM.IMPL,x:OPL_EXT.PAGE,xd:[ // 2E
+		['c','c','i','i','i','i'],
+		["WPF","RPF","WPF1","RPF1","WPFH","RPFH"],
+		["LDM","STM","LSM","SSM","FLM","FFM"]
+	]},
+	{n:'dma.',md:OPM.IMPL,x:OPL_EXT.DMA,xd:[ // 2F
+		[],
+		['LDDMAA','STDMAA','LDDMAC','STDMAC','SETDMAM','SETDMAMR','EDMA','DDMA','LDISR','STISR'],
+		['LD.A','ST.A','LD.C','ST.C','LD.M','LD.M','EN'  ,'DIS' ,'LD.S','ST.S']
+	]},
 	// 0x3H
-	{n:'INR',nm:'INC',md:OPM.RC,w:TXS.W,i:1},{n:'DCR',nm:'DEC',md:OPM.RC,w:TXS.W,i:1},
-	{n:'CLR',md:OPM.RC,w:TXS.W},{n:'IVR',nm:'NOT',md:OPM.RC,w:TXS.W},
-	{n:'SRR',nm:'SRA',md:OPM.RC,w:TXS.W,i:1},{n:'SLR',nm:'SLL',md:OPM.RC,w:TXS.W,i:1},
-	{n:'RRR',nm:'RORC',md:OPM.RC,w:TXS.W,i:1},{n:'RLR',nm:'ROLC',md:OPM.RC,w:TXS.W,i:1},
+	{n:'INR',nm:'INC',md:OPM.RC,w:TXS.W,i:1},
+	{n:'DCR',nm:'DEC',md:OPM.RC,w:TXS.W,i:1},
+	{n:'CLR',md:OPM.RC,w:TXS.W},
+	{n:'IVR',nm:'NOT',md:OPM.RC,w:TXS.W},
+	{n:'SRR',nm:'SRA',md:OPM.RC,w:TXS.W,i:1},
+	{n:'SLR',nm:'SLL',md:OPM.RC,w:TXS.W,i:1},
+	{n:'RRR',nm:'RORC',md:OPM.RC,w:TXS.W,i:1},
+	{n:'RLR',nm:'ROLC',md:OPM.RC,w:TXS.W,i:1},
 	{n:'INA',nm:'INC',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
 	{n:'DCA',nm:'DEC',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
 	{n:'CLA',nm:'CLR',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
@@ -5441,12 +6127,21 @@ const oplist:OPLEntry[] = [
 	{n:'INX',nm:'INC',md:OPM.IMPL_R,w:TXS.W,dr:REG.X},
 	{n:'DCX',nm:'DEC',md:OPM.IMPL_R,w:TXS.W,dr:REG.X},
 	// 0x4H
-	{n:'ADDB',md:OPM.RR,w:TXS.B},{n:'SUBB',md:OPM.RR,w:TXS.B},
-	{n:'ANDB',md:OPM.RR,w:TXS.B},{n:'ORIB',nm:'OR',md:OPM.RR,w:TXS.B},
+	{n:'ADDB',md:OPM.RR,w:TXS.B},
+	{n:'SUBB',md:OPM.RR,w:TXS.B},
+	{n:'ANDB',md:OPM.RR,w:TXS.B},
+	{n:'ORIB',nm:'OR',md:OPM.RR,w:TXS.B},
 	{n:'OREB',nm:'XOR',md:OPM.RR,w:TXS.B},
 	{n:'XFRB',nm:'MOV',md:OPM.RR,w:TXS.B},
-	{n:'big',md:OPM.IMPL}, // TODO
-	{n:'mem',md:OPM.IMPL}, // TODO
+	{n:'BIG',md:OPM.IMPL,x:OPL_EXT.BIG,xd:[ // 46
+		['ADD','SUB','CMP','MOV','NEG','SMUL','DIV','DIVMOD','TOBIN','FMBIN'],
+		['A','S','C','ZAD','ZSU','M','D','DRM','CTB','CFB'],
+	]},
+	{n:'MEM',md:OPM.IMPL,x:OPL_EXT.MEM,xd:[ // 47
+		[0,1,3,2,2,2,2,2,2,6],
+		['CVXR','CPVR','MVVR','SCNR','MVFR','ANCR','ORCR','XRCR','CPFR','FILR'],//1
+		['XREC','CMPC','MOVEC','SCANC','MOVEF','ANDC','ORC','XORC','CMPF','FILL'],//2
+	]},
 	{n:'AABB',nm:'ADD',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
 	{n:'SABB',nm:'SUB',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
 	{n:'NABB',nm:'AND',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
@@ -5456,11 +6151,14 @@ const oplist:OPLEntry[] = [
 	{n:'XAZB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.ZL},
 	{n:'XASB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.SL},
 	// 0x5H
-	{n:'ADD',md:OPM.RRX,w:TXS.W},{n:'SUB',md:OPM.RRX,w:TXS.W},
-	{n:'AND',md:OPM.RRX,w:TXS.W},{n:'ORI',nm:'OR',md:OPM.RRX,w:TXS.W},
-	{n:'ORE',nm:'XOR',md:OPM.RRX,w:TXS.W},{n:'XFR',nm:'MOV',md:OPM.RRX,w:TXS.W},
-	{n:'EAO',md:OPM.IMPL}, // TODO
-	{n:'DAO',md:OPM.IMPL}, // TODO
+	{n:'ADD',md:OPM.RR,w:TXS.W},
+	{n:'SUB',md:OPM.RR,w:TXS.W},
+	{n:'AND',md:OPM.RR,w:TXS.W},
+	{n:'ORI',nm:'OR',md:OPM.RR,w:TXS.W},
+	{n:'ORE',nm:'XOR',md:OPM.RR,w:TXS.W},
+	{n:'XFR',nm:'MOV',md:OPM.RRS,w:TXS.W},
+	{n:'EAO',md:OPM.IMPL}, // 56
+	{n:'DAO',md:OPM.IMPL}, // 57
 	{n:'AAB',nm:'ADD',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'SAB',nm:'SUB',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'NAB',nm:'AND',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
@@ -5476,25 +6174,35 @@ const oplist:OPLEntry[] = [
 	{n:'LDX',nm:'LD',ms:OPM.PCO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
 	{n:'LDX',nm:'LD',ms:OPM.IPO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
 	{n:'LDX',nm:'LD',ms:OPM.MOD,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'SVC',md:OPM.IMPL}, // TODO
-	{n:'mem',md:OPM.IMPL}, // TODO
+	{n:'SVC',nm:'SVCALL',ms:OPM.IMM,w:TXS.B,md:OPM.IMPL},
+	{n:'MEM',md:OPM.IMPL,x:OPL_EXT.MEM,sr:REG.A,xd:[ // 67
+		[0,1,3,2,2,2,2,2,2,6],
+		['CVXR','CPVR','MVVR','SCNR','MVFR','ANCR','ORCR','XRCR','CPFR','FILR'],//1
+		['XREC','CMPC','MOVEC','SCANC','MOVEF','ANDC','ORC','XORC','CMPF','FILL'],//2
+	]},
 	{n:'STX',nm:'ST',md:OPM.IMM,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.DIR,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.IND,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.PCO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.IPO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
 	{n:'STX',nm:'ST',md:OPM.MOD,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'LST',md:OPM.IMPL}, // TODO
-	{n:'SST',md:OPM.IMPL}, // TODO
+	{n:'LST',nm:'LDST',md:OPM.DIR,w:TXS.B}, // 6E
+	{n:'SST',nm:'STST',md:OPM.IMPL,ms:OPM.DIR,w:TXS.B}, // 6F
 	// 0x7H
-	{n:'!ill',md:OPM.IMM,w:TXS.F},{n:'JMP',md:OPM.DIR,w:TXS.F},
-	{n:'JMP',md:OPM.IND,w:TXS.F},{n:'JMP',md:OPM.PCO,w:TXS.F},
-	{n:'JMP',md:OPM.IPO,w:TXS.F},{n:'JMP',md:OPM.MOD,w:TXS.F},
-	{n:'EPE',md:OPM.IMPL}, // TODO
-	{n:'MUL',md:OPM.RRX,w:TXS.F}, // TODO
-	{n:'JSR',nm:'CALL',md:OPM.RRX,w:TXS.F},{n:'JSR',nm:'CALL',md:OPM.DIR,w:TXS.F},
-	{n:'JSR',nm:'CALL',md:OPM.IND,w:TXS.F},{n:'JSR',nm:'CALL',md:OPM.PCO,w:TXS.F},
-	{n:'JSR',nm:'CALL',md:OPM.IPO,w:TXS.F},{n:'JSR',nm:'CALL',md:OPM.MOD,w:TXS.F},
+	{n:'!ill',md:OPM.IMM,w:TXS.F},//0
+	{n:'JMP',md:OPM.DIR,w:TXS.F},//1
+	{n:'JMP',md:OPM.IND,w:TXS.F},//2
+	{n:'JMP',md:OPM.PCO,w:TXS.F},//3
+	{n:'JMP',md:OPM.IPO,w:TXS.F},//4
+	{n:'JMP',md:OPM.MOD,w:TXS.F},//5
+	{n:'EPE',nm:'EN.PEF',md:OPM.IMPL}, //6
+	{n:'MUL',md:OPM.RRX,w:TXS.W}, //7
+	{n:'DIV',md:OPM.RRX,w:TXS.W}, //8
+	{n:'JSR',nm:'CALL',md:OPM.DIR,w:TXS.F},
+	{n:'JSR',nm:'CALL',md:OPM.IND,w:TXS.F},
+	{n:'JSR',nm:'CALL',md:OPM.PCO,w:TXS.F},
+	{n:'JSR',nm:'CALL',md:OPM.IPO,w:TXS.F},
+	{n:'JSR',nm:'CALL',md:OPM.MOD,w:TXS.F},
 	{n:'STK',md:OPM.IMPL,x:OPL_EXT.MPUSH},
 	{n:'POP',md:OPM.IMPL,x:OPL_EXT.MPOP},
 	// 0x8H
@@ -5504,7 +6212,7 @@ const oplist:OPLEntry[] = [
 	{n:'LDAB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'LDAB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
 	{n:'LDAB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'DPE',md:OPM.IMPL}, // TODO
+	{n:'DPE',nm:'DIS.PEF',md:OPM.IMPL}, // 86
 	{n:'!ill87',md:OPM.IMPL},
 	{n:'LAAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.AL},
 	{n:'LABB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.AL},
@@ -5521,7 +6229,7 @@ const oplist:OPLEntry[] = [
 	{n:'LDA',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
 	{n:'LDA',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
 	{n:'LDA',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'SOP',md:OPM.IMPL},
+	{n:'SOP',nm:'SET.PO',md:OPM.IMPL},
 	{n:'!ill97',md:OPM.IMPL},
 	{n:'LAA',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.A},
 	{n:'LAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.A},
@@ -5538,8 +6246,8 @@ const oplist:OPLEntry[] = [
 	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.AL},
 	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.AL},
 	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.AL},
-	{n:'SEP',md:OPM.IMPL}, // TODO
-	{n:'!illA7',md:OPM.IMPL}, // TODO
+	{n:'SEP',nm:'SET.PE',md:OPM.IMPL}, // A6
+	{n:'!illA7',md:OPM.IMPL},
 	{n:'SAAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.A},
 	{n:'SABB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.B},
 	{n:'SAXB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.X},
@@ -5555,8 +6263,8 @@ const oplist:OPLEntry[] = [
 	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.A},
 	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.A},
 	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.A},
-	{n:'ECK',md:OPM.IMPL}, // TODO
-	{n:'!illB7',md:OPM.IMPL}, // TODO
+	{n:'ECK',nm:'EN.CK',md:OPM.IMPL}, // B6
+	{n:'!illB7',md:OPM.IMPL},
 	{n:'SAA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.A},
 	{n:'SAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'SAX',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.X},
@@ -5572,7 +6280,7 @@ const oplist:OPLEntry[] = [
 	{n:'LDBB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
 	{n:'LDBB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
 	{n:'LDBB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'DCK',md:OPM.IMPL},
+	{n:'DCK',nm:'DIS.CK',md:OPM.IMPL}, // C6
 	{n:'!illC7',md:OPM.IMPL},
 	{n:'LBAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.BL},
 	{n:'LBBB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.BL},
@@ -5589,8 +6297,8 @@ const oplist:OPLEntry[] = [
 	{n:'LDB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
 	{n:'LDB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
 	{n:'LDB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'STR',md:OPM.IMPL}, // TODO
-	{n:'SAR',md:OPM.IMPL}, // TODO
+	{n:'STR',nm:'STR',w:TXS.W,md:OPM.RRSR}, // D6
+	{n:'SAR',nm:'SAR',ms:OPM.IMPL_R,sr:REG.A,w:TXS.W,md:OPM.IMPL,x:OPL_EXT.RII}, // D7
 	{n:'LBA',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
 	{n:'LBB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.B},
 	{n:'LBX',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.B},
@@ -5606,7 +6314,7 @@ const oplist:OPLEntry[] = [
 	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.BL},
 	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.BL},
 	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.BL},
-	{n:'LAR',md:OPM.IMPL},
+	{n:'LAR',nm:'LAR',w:TXS.W,md:OPM.IMPL_R,dr:REG.A,ms:OPM.IMPL,x:OPL_EXT.RII}, // E6
 	{n:'!illE7',md:OPM.IMPL},
 	{n:'SBAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.A},
 	{n:'SBBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.B},
@@ -5623,8 +6331,8 @@ const oplist:OPLEntry[] = [
 	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.B},
 	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.B},
 	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.B},
-	{n:'LIO/SIO',md:OPM.IMPL,l:3}, // TODO
-	{n:'MVL',md:OPM.IMPL}, // TODO
+	{n:'LIO',md:OPM.IMPL,x:OPL_EXT.XIO}, // F6 LIO/SIO
+	{n:'MVL',nm:'MOVLGA',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y}, // F7
 	{n:'SBA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.A},
 	{n:'SBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.B},
 	{n:'SBX',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.X},
@@ -5772,26 +6480,18 @@ function annotation_import(src:string) {
 }
 
 interface DisAsmResult {
-	t:string,
+	hb:string,
+	asc:string,
+	ins:string,
+	par:string,
 	l:number,
-	pre?:string,
-	post?:string
+	ic:string|null,
+	pre:string,
+	post:string,
+	is_brk:boolean,
 }
 
 class CPU6 {
-
-	// backing buffers
-	register_buffer = new ArrayBuffer(256);
-	page_buffer = new ArrayBuffer(256);
-	// the system registers in various interrupt levels
-	register_file = new DataView(this.register_buffer);
-	// memory management
-	page_file = new DataView(this.page_buffer);
-	// global registers
-	reg_s:number = 0;
-	reg_p:number = 0x100;
-	reg_c:number = 0; // context
-
 
 	// TODO backplane
 	mem: Backplane;
@@ -5799,30 +6499,32 @@ class CPU6 {
 		this.mem = m;
 	}
 
-	// load an instruction byte from the memory sub-system
-	// TODO address routing, MMIO
-	fetch(addr:number) {
-		return this.mem.readbyte(addr);
+	fetch(address:number):number {
+		return this.mem.readmeta(address) & 255;
 	}
-
-	disassembly(address:number) {
-		const DREF_L = NAME_CONV == 1 ? '[' : '(';
-		const DREF_R = NAME_CONV == 1 ? ']' : ')';
-		const DDREF_L = DREF_L + DREF_L;
-		const DDREF_R = DREF_R + DREF_R;
+	disassembly(address:number, ret:DisAsmResult):void {
+		const DREF_L = name_conv == NAMECON.MEI ? '[' : '(';
+		const DREF_R = name_conv == NAMECON.MEI ? ']' : ')';
+		const DDREF_L = name_conv == NAMECON.MEI ? '[[' : '((';
+		const DDREF_R = name_conv == NAMECON.MEI ? ']]' : '))';
 		let vpc = address;
-		if (this.mem.is_mmio(vpc)) {
-			return {t:'??', l:1};
+		let meta = this.mem.readmeta(vpc++);
+		if ((meta & MEMSTAT.IO) != 0) {
+			ret.hb = '??';
+			ret.asc = '';
+			ret.l = 1;
+			return;
 		}
-		let op = this.fetch(vpc++);
-		let dstr = '';
+		let op = meta & 255;
+		let is_brk = (meta & MEMSTAT.ALL_BRK) != 0;
+		let datah:number[] = [];
 
 		let opcs = oplist[op];
 		let anpre = '';
 		let anstr = '';
 		let opname = opcs.n;
 		let anno_data = '';
-		dstr += `${hex(op)}`;
+		datah.push(op);
 		function check_anno(a:number) {
 			let anno = annotation_data.get(a);
 			if (anno) {
@@ -5850,32 +6552,27 @@ class CPU6 {
 			return (v > 0x9f && v < 0xff) || (v == 0x89) || (v == 0x8a) || (v == 0x8c) || (v == 0x8d);
 		}
 		function ascenc(v:number):string {
-			let vasc = v & 0x7f;
-			let rcp;
-			if (vasc > 0x20 && vasc < 0x7f) {
-				rcp = String.fromCodePoint(vasc);
-			} else if (vasc == 32) {
-				rcp = NB;
-			} else if (vasc == 9) {
-				rcp = "\u2192";
-			} else if (vasc == 10) {
-				rcp = "\u2193";
-			} else if (vasc == 12) {
-				rcp = "\u21ca";
-			} else if (vasc == 13) {
-				rcp = "\u21b5";
+			if (v >= 0xa0 && v < 0xff) {
+				return String.fromCodePoint(v & 0x7f);
+			} else if (v == 0x89) {
+				return "\u2192";
+			} else if (v == 0x8a) {
+				return "\u2193";
+			} else if (v == 0x8c) {
+				return "\u21ca";
+			} else if (v == 0x8d) {
+				return "\u21b5";
 			} else {
-				rcp = "\u2588";
+				return "_";
 			}
-			return rcp;
 		}
 		function addrrefw(a:number):string {
 			if (mmwlist.has(a)) {
-				return `${hexlist(a, 4)} &lt;${mmwlist.get(a)}>`;
+				return `${hexlist(a, 4)} <${mmwlist.get(a)}>`;
 			} else {
 				let anno = annotation_data.get(a);
 				if (anno && anno.label && anno.label.length > 0) {
-					return `${hexlist(a, 4)} &lt;${anno.label[0]}>`;
+					return `${hexlist(a, 4)} <${anno.label[0]}>`;
 				}
 				return hexlist(a, 4);
 			}
@@ -5883,11 +6580,11 @@ class CPU6 {
 		function addrref(a:number):string {
 			a &= 0xffff;
 			if (mmiolist.has(a)) {
-				return `${hexlist(a, 4)} &lt;${mmiolist.get(a)}>`;
+				return `${hexlist(a, 4)} <${mmiolist.get(a)}>`;
 			} else {
 				let anno = annotation_data.get(a);
 				if (anno && anno.label && anno.label.length > 0) {
-					return `${hexlist(a, 4)} &lt;${anno.label[0]}>`;
+					return `${hexlist(a, 4)} <${anno.label[0]}>`;
 				}
 				return hexlist(a, 4);
 			}
@@ -5895,8 +6592,10 @@ class CPU6 {
 		let astr = ascenc(op);
 		let dfetch = ()=> {
 			check_anno(vpc);
-			let rv = this.fetch(vpc++);
-			dstr += ` ${hex(rv)}`;
+			let emeta = this.mem.readmeta(vpc++);
+			if((meta & MEMSTAT.ALL_BRK) != 0) is_brk = true;
+			let rv = emeta & 255;
+			datah.push(rv)
 			astr += ascenc(rv);
 			return rv;
 		}
@@ -5905,19 +6604,32 @@ class CPU6 {
 
 		check_anno(address);
 		if (anno_data == 'byte') {
-			
-			dstr = `${dstr.padEnd(12, NB)}${astr.padEnd(4, NB)} .byte ${hexlist(op, 2)}`;
-			const ret:DisAsmResult = {t:dstr, l:vpc - address};
+			for(let i = 0; i < datah.length; i++) {
+				//@ts-ignore
+				datah[i] = hex(datah[i]);
+			}
+			ret.hb = datah.join(' ');
+			ret.asc = astr;
+			ret.ins = '.byte';
+			ret.par = hexlist(op, 2);
+			ret.l = vpc - address;
 			if (anpre.length > 0) ret.pre = anpre;
 			if (anstr.length > 0) ret.post = anstr;
-			return ret;
+			return;
 		} else if (anno_data == 'word') {
 			let vl = dfetch();
-			dstr = `${dstr.padEnd(12, NB)}${astr.padEnd(4, NB)} .word ${hexlist((op << 8) | vl, 4)}`;
-			const ret:DisAsmResult = {t:dstr, l:vpc - address};
+			for(let i = 0; i < datah.length; i++) {
+				//@ts-ignore
+				datah[i] = hex(datah[i]);
+			}
+			ret.hb = datah.join(' ');
+			ret.asc = astr;
+			ret.ins = '.word';
+			ret.par = hexlist((op << 8) | vl, 4);
+			ret.l = vpc - address;
 			if (anpre.length > 0) ret.pre = anpre;
 			if (anstr.length > 0) ret.post = anstr;
-			return ret;
+			return;
 		}
 		let vstr = '';
 		if (op == 0 && this.fetch(vpc) > 3) { // TODO does not cover long strings!
@@ -5944,14 +6656,19 @@ class CPU6 {
 				}
 				if (pre == slen && slen >= 2 && nonspace) {
 					// pascal string
-					const ret:DisAsmResult = {t:`<span class="pstr">.npstringhi "${vstr}"</span>`, l:vpcs - address};
+					ret.hb = '';
+					ret.asc = '';
+					ret.ins = '.npstringhi';
+					ret.ic = 'pstr';
+					ret.par = vstr;
+					ret.l = vpcs - address;
 					if (anpre.length > 0) {
 						ret.pre = anpre;
 					}
 					if (anstr.length > 0) {
 						ret.post = anstr;
 					}
-					return ret;
+					return;
 				}
 				//check_anno(vpcs);
 				f = this.fetch(vpcs++);
@@ -5960,14 +6677,19 @@ class CPU6 {
 			if (pre == slen && slen >= 2 && nonspace) {
 				// pascal string
 				vpcs--;
-				const ret:DisAsmResult = {t:`<span class="pstr">.npstringhi "${vstr}"</span>`, l:vpcs - address};
+				ret.hb = '';
+				ret.asc = '';
+				ret.ins = '.npstringhi';
+				ret.par = vstr;
+				ret.ic = "pstr";
+				ret.l = vpcs - address;
 				if (anpre.length > 0) {
 					ret.pre = anpre;
 				}
 				if (anstr.length > 0) {
 					ret.post = anstr;
 				}
-				return ret;
+				return;
 			}
 			if (!nonspace) {
 				vstr = '';
@@ -5994,14 +6716,16 @@ class CPU6 {
 				slen = (vpcs - vpc);
 				if (pre == slen && slen >= 2 && nonspace) {
 					// pascal string
-					const ret:DisAsmResult = {t:`<span class="pstr">.pstringhi "${vstr}"</span>`, l:vpcs - address};
+					ret.hb = ''; ret.asc = ''; ret.ic = "pstr";
+					ret.ins = '.pstringhi'; ret.par = vstr;
+					ret.l = vpcs - address;
 					if (anpre.length > 0) {
 						ret.pre = anpre;
 					}
 					if (anstr.length > 0) {
 						ret.post = anstr;
 					}
-					return ret;
+					return;
 				}
 				//check_anno(vpcs);
 				f = this.fetch(vpcs++);
@@ -6010,30 +6734,33 @@ class CPU6 {
 			if (pre == slen && slen >= 2 && nonspace) {
 				// pascal string
 				vpcs--;
-				const ret:DisAsmResult = {t:`<span class="pstr">.pstringhi "${vstr}"</span>`, l:vpcs - address};
+				ret.hb = ''; ret.asc = ''; ret.ic = "pstr";
+				ret.ins = '.pstringhi'; ret.par = vstr;
+				ret.l = vpcs - address;
 				if (anpre.length > 0) {
 					ret.pre = anpre;
 				}
 				if (anstr.length > 0) {
 					ret.post = anstr;
 				}
-				return ret;
+				return;
 			} else if(f == 0 && slen > 3 && nonspace) {
 				// zstring/cstring
-				const ret:DisAsmResult = {t:`<span class="zstr">.zstringhi "${vstr}"</span>`, l:vpcs - address};
+				ret.hb = ''; ret.asc = ''; ret.ic = "zstr";
+				ret.ins = '.zstringhi'; ret.par = vstr;
+				ret.l = vpcs - address;
 				if (anpre.length > 0) {
 					ret.pre = anpre;
 				}
 				if (anstr.length > 0) {
 					ret.post = anstr;
 				}
-				return ret;
+				return;
 			}
 			if (!nonspace) {
 				vstr = '';
 			}
 		}
-		
 		let r = 1;
 		if (opcs.l !== undefined) {
 			while(r < opcs.l) {
@@ -6041,15 +6768,14 @@ class CPU6 {
 				r++;
 			}
 		}
-		
 		let rsh = 0;
 		if (opcs.w == TXS.W) {
 			rsh = 16;
 		}
 		function decode_mode(mode:OPM, is_write:boolean, regm?:REG):string {
 			let disp;
-			let rvc;
-			let advh, advl, adr;
+			let rvc:number;
+			let advh:number, advl:number, adr:number;
 			switch(mode) {
 			case OPM.IMPL: return '';
 			case OPM.IMM:
@@ -6061,7 +6787,7 @@ class CPU6 {
 					let lo = dfetch();
 					return (is_write?'>#':'#') + hexlist((hi << 8) | lo, 4);
 				}
-				return (is_write?'>#':'#') + '&lt;invalid&gt;';
+				return (is_write?'>#':'#') + '<invalid>';
 			case OPM.DIR:
 				advh = dfetch();
 				advl = dfetch();
@@ -6071,7 +6797,7 @@ class CPU6 {
 				case TXS.B: return `${DREF_L}${addrref(adr)}${DREF_R}`;
 				case TXS.W: return `${DREF_L}${addrrefw(adr)}${DREF_R}`;
 				}
-				return '#&lt;invalid&gt;';
+				return '#<invalid>';
 			case OPM.IND:
 				advh = dfetch();
 				advl = dfetch();
@@ -6083,27 +6809,31 @@ class CPU6 {
 			case OPM.PCO:
 				disp = sbyte(dfetch());
 				if (opcs.w == TXS.F) {
-					return 'PC' + (disp<0?'':'+') + hexlist(disp) + ' \u21d2 ' + addrrefw(vpc + disp);
+					return `PC${hexlistp(disp)} \u21d2 ${addrrefw(vpc + disp)}`;
 				} else if (opcs.w == TXS.W) {
-					return DREF_L + 'PC' + (disp<0?'':'+') + hexlist(disp) + ' \u21d2 ' + addrrefw(vpc + disp) + DREF_R;
+					return `${DREF_L} PC${hexlistp(disp)} \u21d2 ${addrrefw(vpc + disp)} ${DREF_R}`;
 				}
-				return DREF_L + 'PC' + (disp<0?'':'+') + hexlist(disp) + ' \u21d2 ' + addrref(vpc + disp) + DREF_R;
+				return `${DREF_L} PC${hexlistp(disp)} \u21d2 ${addrref(vpc + disp)} ${DREF_R}`;
 			case OPM.IPO:
 				disp = sbyte(dfetch());
 				if (opcs.w == TXS.F) {
-					return 'PC' + (disp<0?'':'+') + hexlist(disp) + ' \u21d2 ' + DREF_L + addrrefw(vpc + disp) + DREF_R;
+					return `${DREF_L} PC${hexlistp(disp)} \u21d2 ${addrrefw(vpc + disp)} ${DREF_R}`;
 				} else if (opcs.w == TXS.W) {
-					return DREF_L + ' PC' + (disp<0?'':'+') + hexlist(disp) + ' \u21d2 ' + DREF_L + addrrefw(vpc + disp) + DREF_R + ' ' + DREF_R;
+					return `${DDREF_L} PC${hexlistp(disp)} \u21d2 ${addrrefw(vpc + disp)} ${DDREF_R}`;
 				}
-				return DREF_L + ' PC' + (disp<0?'':'+') + hexlist(disp) + ' \u21d2 ' + DREF_L + addrref(vpc + disp) + DREF_R + ' ' + DREF_R;
-			case OPM.MOD:
+				return `${DDREF_L} PC${hexlistp(disp)} \u21d2 ${addrref(vpc + disp)} ${DDREF_R}`;
+			case OPM.MOD: {
 				rvc = dfetch();
 				let modv = rvc & 15;
+				let reg = rvc >> 4;
 				disp = 0;
+				let res = regname[16 + reg];
+				if((reg & 1) != 0) {
+					return '<invalid>' + res;
+				}
 				if ((modv & 8) > 0) {
 					disp = sbyte(dfetch());
 				}
-				let res = regname[16 + (rvc >> 4)];
 				if ((modv & 3) == 2){
 					res = '--' + res;
 				} else if ((modv & 3) == 1) {
@@ -6117,37 +6847,99 @@ class CPU6 {
 					res = `${DREF_L}${res}${DREF_R}`;
 				}
 				return res;
+			}
 			case OPM.RR:
 			case OPM.RRX:
-			case OPM.RC:
-				if(!is_write) throw new Error('RR/RC in source operand, should be in dest');
+			case OPM.RRS:
+			case OPM.RRSR: {
+				if(!is_write) throw new Error('RR* in source operand, should be in dest');
 				rvc = dfetch();
-				let regdst = (rvc >> 4);
-				let regsrc = (rvc & 15);
-				let rrxmode = ((regdst & 1) << 1) | (regsrc & 1);
-				if (opcs.md == OPM.RRX && rrxmode > 0) {
+				let regsrc = (rvc >> 4);
+				let regdst = (rvc & 15);
+				const rrmode = ((regsrc & 1) << 1) | (regdst & 1);
+				let strdst:string;
+				if(opcs.w == TXS.W) {
+					regsrc = regsrc & 14;
+					regdst = regdst & 14;
+					if (mode == OPM.RRX && (regdst != (regdst|2)))
+						strdst = `${regname[16+regdst]}:${regname[16+(regdst|2)]}`;
+					else
+						strdst = regname[16+regdst];
+				} else {
+					strdst = regname[regdst];
+				}
+				if (opcs.w == TXS.W && rrmode > 0) {
 					// nibbles mismatch
+					// example with SUB:
+					// 51 12 hh ll: (mode 2)
+					//    ^ 1:odd src A, 2:even dst B
+					//    B = hhll - A  ; uses literal
+					// 51 03 hh ll: (mode 1)
+					//    ^ 0:even src A, 3:odd dst B
+					//    B = [hhll] - A
+					// 51 13 hh ll: (mode 3)
+					//    ^ 1:odd src A, 3:odd dst B
+					//    B = [hhll + A] - B
 					advh = dfetch();
 					advl = dfetch();
 					adr = (advh << 8) | advl;
-					if (rrxmode == 1) {
-						// MSN even
-						return regname[rsh + regdst] + `:&lt;${regname[rsh + regsrc]}> + ${DREF_L}${addrref(adr)}${DREF_R}`;
-					} else if (rrxmode == 2) {
+					if (mode == OPM.RRSR) {
+						if (rrmode == 2) {
+							// MSN odd
+							return `${strdst}, >#${hexlist(adr, 4)}`;
+						} else if (rrmode == 1) {
+							// MSN even
+							return `${strdst}, ${DREF_L}${addrrefw(sword(adr))}${DREF_R}`;
+						} else {
+							return `${strdst}, ${DREF_L}${regname[16 + regsrc]}${hexlistp(sword(adr))}${DREF_R}`;
+						}
+					} else if (mode == OPM.RRS) {
+						if (rrmode == 2) {
+							// MSN odd
+							return `#${hexlist(adr, 4)}, ${strdst}`;
+						} else if (rrmode == 1) {
+							// MSN even
+							return `${DREF_L}${addrrefw(sword(adr))}${DREF_R}, ${strdst}`;
+						} else {
+							return `${DREF_L}${regname[16 + regsrc]}${hexlistp(sword(adr))}${DREF_R}, ${strdst}`;
+						}
+					} else if (rrmode == 2) {
 						// MSN odd
-						return regname[rsh + regdst] + `:&lt;${regname[rsh + regsrc]}> + ${hexlist(adr, 4)}`;
+						return `#${hexlist(adr, 4)}, ${regname[16 + regsrc]} \u21d2 ${strdst}`;
+					} else if (rrmode == 1) {
+						// MSN even
+						return `${DREF_L}${addrrefw(sword(adr))}${DREF_R}, ${regname[16 + regsrc]} \u21d2 ${strdst}`;
 					} else {
-						return regname[rsh + regdst] + `:${DREF_L}&lt;${regname[rsh + regsrc]}> + ${addrref(adr)}${DREF_R}`;
+						return `${DREF_L}${regname[16 + regsrc]} + ${hexlistp(sword(adr))}${DREF_R}, ${regname[16 + regdst]} \u21d2 ${strdst}`;
 					}
-				} else if (opcs.md == OPM.RR || opcs.md == OPM.RRX) {
-					return regname[rsh + regdst] + ',' + regname[rsh + regsrc];
-				} else if (opcs.i != undefined) {
-					return regname[rsh + regdst] + ',' + hexlist(regsrc + opcs.i, 1);
+				} else {
+					return `${regname[rsh + regsrc]}, ${regname[rsh + regdst]}`;
+				}
+				break;
+			}
+			case OPM.RC: {
+				if(!is_write) throw new Error('RC in source operand, should be in dest');
+				rvc = dfetch();
+				let regdst = rvc >> 4;
+				let regsrc = rvc & 15;
+				if (opcs.i !== undefined) {
+					regsrc += opcs.i;
+				}
+				if (opcs.w == TXS.W && (regdst & 1) != 0) {
+					advh = dfetch();
+					advl = dfetch();
+					adr = sword((advh << 8) | advl);
+					regdst = regdst & 14;
+					if(regdst == 0) {
+						return `${DREF_L}${addrref(adr)}${DREF_R}, ${hexlist(regsrc, 1)}`;
+					}
+					return `${DREF_L}${addrref(adr)} + ${regname[16 + regdst]}${DREF_R}, ${hexlist(regsrc, 1)}`;
 				} else {
 					return regname[rsh + regdst] + ',' + hexlist(regsrc, 1);
 				}
+			}
 			case OPM.IMPL_R:
-				if (NAME_CONV != 1) {
+				if (name_conv != NAMECON.MEI) {
 					return '';
 				}
 				if (regm != undefined) {
@@ -6156,7 +6948,7 @@ class CPU6 {
 					return '!R';
 				}
 			case OPM.IMPL_R_DIR:
-				if (NAME_CONV != 1) {
+				if (name_conv != NAMECON.MEI) {
 					return '';
 				}
 				if (regm != undefined) {
@@ -6166,122 +6958,267 @@ class CPU6 {
 				}
 			}
 		}
-		if (opcs.ms != null) {
-			psstr = decode_mode(opcs.ms, false, opcs.sr);
+		let exm_data = 0;
+		let exm_reg = false;
+		function decode_exmode(mode:number, is_dest:boolean):string {
+			let v0:number;
+			if(mode == 2 && exm_reg) v0 = exm_data;
+			else v0 = dfetch();
+			let regh = v0>>4;
+			let regl = v0&15;
+			switch(mode) {
+			case 0:
+				let al = dfetch();
+				return `${DREF_L}${hexlist((v0<<8)|al,4)}${DREF_R}`;
+			case 1:
+				let litv = dfetch();
+				if((regl&1)!=0) {
+					throw 0;
+				}
+				if((regh & 1) != 0) {
+					litv = sword((litv << 8) | dfetch());
+					regh &= 14;
+				} else {
+					litv = sbyte(litv);
+				}
+				return `${DREF_L}${regname[16+regh]}${(regl != 0) ? ' + '+regname[16+regl]:''}${hexlistp(litv)}${DREF_R}`;
+			case 2:
+				if(is_dest) return `${DREF_L}${regname[16+regl]}${DREF_R}`;
+				else {
+					exm_data = v0;
+					exm_reg = true;
+					return `${DREF_L}${regname[16+regh]}${DREF_R}`;
+				}
+			case 3:
+				return `#${hexlist(v0,2)}`;
+			}
+			throw 0;
 		}
-		pstr = decode_mode(opcs.md, true, opcs.dr);
+		if (opcs.ms != null) {
+			pstr = decode_mode(opcs.ms, false, opcs.sr);
+			psstr = decode_mode(opcs.md, true, opcs.dr);
+		} else {
+			pstr = decode_mode(opcs.md, true, opcs.dr);
+		}
 
-		let rvc;
-		switch(opcs.x) {
+		extenc:switch(opcs.x) {
 		case undefined:
 			break;
 		case OPL_EXT.MPUSH:
-		case OPL_EXT.MPOP:
-			rvc = dfetch();
-			{
-				if (opcs.x == OPL_EXT.MPOP) {
-					opname = 'MPOP';
-				} else {
-					opname = 'MPUSH';
-				}
-				let rstart = (rvc >> 4);
-				let rcount = (rvc & 15);
-				pstr = regname[rstart++];
-				while(rcount > 0) {
-					pstr += ',' + regname[rstart++];
-					rcount--;
-				}
+		case OPL_EXT.MPOP: {
+			let rvc = dfetch();
+			if (opcs.x == OPL_EXT.MPOP) {
+				opname = 'MPOP';
+			} else {
+				opname = 'MPUSH';
+			}
+			let rstart = (rvc >> 4);
+			let rcount = (rvc & 15);
+			pstr = regname[rstart++];
+			while(rcount > 0) {
+				pstr += ',' + regname[rstart++];
+				rcount--;
 			}
 			break;
+		}
 		case OPL_EXT.PAGE: {
-			rvc = dfetch();
+			let rvc = dfetch();
 			let mod1 = (rvc >> 2) & 3;
 			let mod2 = rvc & 3;
 			let sel = (rvc >> 4);
-			switch(sel) {
-			case 0: opname = "WPF";
-				break;
-			case 1: opname = "RPF";
-				break;
-			case 2: opname = "WPF1";
-				break;
-			case 3: opname = "RPF1";
-				break;
-			case 4: opname = "WPFH";
-				break;
-			case 5: opname = "RPFH";
-				break;
+			const opr1 = (opcs.xd[0] as string[])[sel];
+			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 1 : 2] as string[];
+			if(sel < ncon.length) {
+				opname += '.'+ncon[sel];
+			} else {
+				opname += '.'+hex(sel, 1);
+			}
+			if(opr1 == undefined) {
+				pstr='#<invalid>';
+			} else try {
+				if(mod1 == 3) {
+					let v = dfetch();
+					pstr = `m=#${hexlist(v&7,1)},${opr1}=#${hexlist(v>>3,2)}`;
+				} else {
+					pstr = `(m,${opr1})=${decode_exmode(mod1, false)}`;
+				}
+				if(mod2 == 3) {
+					pstr = '#<invalid>';
+				} else {
+					psstr = decode_exmode(mod2, true);
+				}
+			} catch(e) {
+				pstr = '#<invalid>';
 			}
 			break; }
 		case OPL_EXT.DMA: {
-			rvc = dfetch();
+			let rvc = dfetch();
 			let reg = (rvc >> 4);
 			let sel = (rvc & 15);
-			switch(sel) {
-			case 0: opname = (NAME_CONV == 1) ? opname + 'LD.A' : 'LDDMAA';
-				pstr = regname[16 + reg];
-				break;
-			case 1: opname = (NAME_CONV == 1) ? opname +'ST.A' : 'STDMAA';
-				psstr = regname[16 + reg];
-				break;
-			case 2: opname = (NAME_CONV == 1) ? opname +'LD.C' : 'LDDMAC';
-				pstr = regname[16 + reg];
-				break;
-			case 3: opname = (NAME_CONV == 1) ? opname +'ST.C' : 'STDMAC';
-				psstr = regname[16 + reg];
-				break;
-			case 4:
-				opname = (NAME_CONV == 1) ? opname +'LD.M' : 'SETDMAM';
-				psstr = `#${hexlist(reg,1)}`;
-				break;
-			case 5:
-				opname = (NAME_CONV == 1) ? opname +'LD.M' : 'SETDMAMR';
-				psstr = regname[16 + reg];
-				break;
-			case 6:
-				opname = (NAME_CONV == 1) ? opname +'EN' : 'EDMA';
-				break;
-			case 7:
-				opname = (NAME_CONV == 1) ? opname +'DIS' : 'DDMA';
-				break;
-			case 8:
-				opname = (NAME_CONV == 1) ? opname +'LD.S' : 'LDISR';
-				psstr = regname[16 + reg];
-				break;
-			case 9:
-				opname = (NAME_CONV == 1) ? opname +'ST.S' : 'STISR';
-				pstr = regname[16 + reg];
-				break;
-			default:
+			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 2:1] as string[];
+			if(sel < ncon.length) {
+				if(name_conv == NAMECON.MEI) opname += '.'+ncon[sel];
+				else opname = ncon[sel];
+			} else {
 				opname += hex(sel, 1);
 			}
+			switch(sel) {
+			case 0: pstr = regname[16 + reg]; break;
+			case 1: psstr = regname[16 + reg]; break;
+			case 2: pstr = regname[16 + reg]; break;
+			case 3: psstr = regname[16 + reg]; break;
+			case 4: psstr = `#${hexlist(reg,1)}`; break;
+			case 5: psstr = regname[reg|1]; break;
+			case 6: break;
+			case 7: break;
+			case 8: psstr = regname[reg|1]; break;
+			case 9: pstr = regname[reg|1]; break;
+			}
 			break; }
+		case OPL_EXT.BIG: {
+			let osb = dfetch();
+			let rvc = dfetch();
+			const oss = (osb>>4)+1;
+			const osd = (osb&15)+1;
+			const mod1 = (rvc >> 2) & 3;
+			const mod2 = rvc & 3;
+			const sel = (rvc >> 4);
+			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 0 : 1] as string[];
+			if(sel < ncon.length) {
+				if(name_conv == NAMECON.MEI) opname += '.'+ncon[sel];
+				else opname = ncon[sel];
+			} else {
+				opname += '.'+hex(sel, 1);
+				pstr='#<invalid>';
+				break;
+			}
+			try {
+				pstr = `${hexlist(oss,1)}/${decode_exmode(mod1, false)}`;
+				if(mod2 == 3) {
+					pstr = '#<invalid>';
+				} else {
+					psstr = `${hexlist(osd,1)}/${decode_exmode(mod2, true)}`;
+				}
+			} catch(e) {
+				pstr = '#<invalid>';
+			}
+			break;
 		}
-		
-		if (NAME_CONV == 1 && opcs.nm !== undefined) {
+		case OPL_EXT.MEM: {
+			const rvc = dfetch();
+			const mod1 = (rvc >> 2) & 3;
+			const mod2 = rvc & 3;
+			const sel = (rvc >> 4);
+			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 2:1];
+			if(sel < ncon.length) {
+				if(name_conv == NAMECON.MEI) opname += '.'+ncon[sel];
+				else opname = ncon[sel];
+			} else {
+				opname += hex(sel, 1);
+				pstr = '#<invalid>';
+				break;
+			}
+			const nci = opcs.xd[0][sel];
+			// 0: none
+			// 1: len=#FF, term=AH
+			// 2: len=AL, term=AH
+			// TODO 3: len=AL
+			// TODO 4: len=AL
+			// TODO 5: len=AL
+			// TODO 6: len=AL
+			// TODO 7: len=AL
+			// TODO 8: len=AL
+			// TODO 9: len=AL
+			if(opcs.sr !== undefined) {
+				if(name_conv == NAMECON.MEI) {
+					if((nci & 2) != 0) {
+						pstr = 'l=AL, ';
+					}
+					if((nci & 1) != 0) {
+						pstr += 't=AH, ';
+					}
+				}
+			} else {
+				if((nci & 2) != 0) {
+					const lvl = dfetch();
+					pstr = `${name_conv == NAMECON.MEI?'l=':''}#${hexlist(lvl)}, `;
+				}
+				if((nci & 1) != 0) {
+					const lvt = dfetch();
+					pstr += `${name_conv == NAMECON.MEI?'t=':''}#${hexlist(lvt)}, `;
+				}
+			}
+			try {
+				if(mod2 == 3 || (mod1 == 3 && (nci & 4) == 0)) {
+					pstr = '#<invalid>';
+				} else {
+					pstr += decode_exmode(mod1, false);
+					psstr = decode_exmode(mod2, true);
+				}
+			} catch(e) {
+				pstr = '#<invalid>';
+			}
+			break;
+		}
+		case OPL_EXT.RII: {
+			const rvc = dfetch();
+			if(opcs.ms == OPM.IMPL) pstr = `r#${hexlist(rvc)}`;
+			else psstr = `r#${hexlist(rvc)}`;
+			break;
+		}
+		case OPL_EXT.XIO: {
+			const rvc = dfetch();
+			const rvd = sbyte(dfetch());
+			const regh = (rvc>>4);
+			const regl = rvc&14;
+			// F6 JK D8
+			// this is a system mode instruction, traps from user mode
+			// uses low bits from J,K
+			// D8 is signed 8 bit displacement
+			// EA = (KW + D8) | 0x3F000 // always I/O area
+			// 0,0: LIO  JW = [EA] // always reads I/O area
+			// 1,0: LIOB JL = [EA] // always reads I/O area
+			// 0,1: SIO  EA = [JW] // always writes I/O area
+			// 1,1: SIOB EA = [JL] // always writes I/O area
+			pstr = `${DREF_L}${regname[16+regl]}${hexlistp(rvd)}${DREF_R}`;
+			if((rvc & 1) != 0) {
+				opname = name_conv == NAMECON.MEI ? 'ST.IO':'SIO';
+				psstr = pstr;
+				pstr = regname[regh + ((rvc & 16) != 0 ? 0:16)];
+			} else {
+				if(name_conv == NAMECON.MEI) opname = 'LD.IO';
+				psstr = regname[regh + ((rvc & 16) != 0 ? 0:16)];
+			}
+			break;
+		}
+		default: opname += '.<unhandled>';
+		}
+		if (name_conv == NAMECON.MEI && opcs.nm !== undefined) {
 			opname = opcs.nm;
 		}
 		if (pstr.length > 0 && psstr.length > 0) {
 			pstr += ', ';
 		}
-		dstr = `${dstr.padEnd(12, NB)}${astr.padEnd(4, NB)} ${opname} ${pstr}${psstr}`;
-		if (vstr.length > 5) {
-			dstr += ` ;; "${vstr}"`;
+		for(let i = 0; i < datah.length; i++) {
+			//@ts-ignore
+			datah[i] = hex(datah[i]);
 		}
-		
-		const ret:DisAsmResult = {t:dstr, l:vpc - address};
+
+		ret.hb = datah.join(datah.length > 5?'':' ');
+		ret.asc = datah.length > 5?'':astr;
+		ret.ins = opname;
+		ret.par = ` ${pstr}${psstr}`;
+		ret.is_brk = is_brk;
+		ret.l = vpc - address;
+
 		if (anpre.length > 0) {
 			ret.pre = anpre;
 		}
 		if (anstr.length > 0) {
 			ret.post = anstr;
+		} else if (vstr.length > 5) {
+			ret.post = `; "${vstr}"`;
 		}
-		return ret;
-	}
-	// emulation of instructions at a high level
-	softstep() {
-		let op = this.fetch(this.reg_p);
-
 	}
 }
 
@@ -6297,8 +7234,8 @@ loadbin(diag4, diag.f4);
 const mmio_mux = new MMIOMux();
 const mem0 = new SysMem();
 const mem1 = new SysMem();
-bpl.configmemory(0x7fc00, loadbin(new ROM512(), bpl_rom, {invert:true, remap:[0,1,2,3,4,8,5,6,7]}), 512);
-bpl.configmemory(0x7f200, mmio_mux, 256);
+const bpl_rom_fc = new ROM512();
+loadbin(bpl_rom_fc, bpl_rom, {invert:true, remap:[0,1,2,3,4,8,5,6,7]});
 cx_crt0.mux = mmio_mux.muxports[0];
 mmio_mux.muxports[0].line = cx_crt0;
 const dsk2_0 = new DSK2();
@@ -6308,9 +7245,6 @@ bpl.configio(1, dsk2_0);
 const mmio_0 = new MMIOMulti();
 const mmio_1 = new MMIOMulti();
 const mmio_8 = new MMIOMulti();
-bpl.configmemory(0x7f000, mmio_0, 256);
-bpl.configmemory(0x7f100, mmio_1, 256);
-bpl.configmemory(0x7f800, mmio_8, 256);
 mmio_1.adddev(0, 0x11, cx_diag0);
 mmio_1.adddev(0x40, 0x10, dsk2_0);
 const mmio_t = new MMIOTrace();
@@ -6328,7 +7262,12 @@ mcsim.dma_register(main_ffc);
 mcsim.dma_register(test_cmd);
 function setupmemory() {
 	bpl.configmemory(0x0000, mem0, 0x20000);
-	bpl.configmemory(0x20000, mem1, 0x20000);
+	bpl.configmemory(0x20000, mem1, 0x1f000);
+	bpl.configmemory(0x3f000, mmio_0, 256);
+	bpl.configmemory(0x3f100, mmio_1, 256);
+	bpl.configmemory(0x3f200, mmio_mux, 256);
+	bpl.configmemory(0x3f800, mmio_8, 256);
+	bpl.configmemory(0x3fc00, bpl_rom_fc, 512);
 	if (in_diagins.checked) {
 		bpl.clearmemory(0x8000, 0x4000);
 		bpl.configmemory(0x8000, diag1, 2048);
@@ -6739,7 +7678,7 @@ function config_load() {
 		show_dis = CONFIG.disassm[0];
 		view_dis.checked = show_dis;
 		HEX_CONV = CONFIG.disassm[1];
-		NAME_CONV = CONFIG.disassm[2];
+		name_conv = CONFIG.disassm[2] as NAMECON;
 	}
 	{
 		// 0: bool in_diagins.checked // diag roms
@@ -6820,7 +7759,7 @@ function config_save() {
 		// 2: number NAME_CONV 1|2|3; -- (impl)
 		CONFIG.disassm[0] = show_dis;
 		CONFIG.disassm[1] = HEX_CONV;
-		CONFIG.disassm[2] = NAME_CONV;
+		CONFIG.disassm[2] = name_conv;
 	}
 	{
 		// 0: bool in_diagins.checked // diag roms
@@ -6900,9 +7839,11 @@ function config_initialize() {
 }
 config_initialize();
 
-if (NAME_CONV == 0) conv_ee.checked = true;
-if (NAME_CONV == 1) conv_mei.checked = true;
-if (NAME_CONV == 2) conv_uew.checked = true;
+//@ts-ignore
+if (name_conv == NAMECON.CENT) conv_ee.checked = true;
+if (name_conv == NAMECON.MEI) conv_mei.checked = true;
+//@ts-ignore
+if (name_conv == NAMECON.WIKI) conv_uew.checked = true;
 cx_crt0.show_ui = view_crt0.checked;
 
 let config_timeout = 0;
@@ -6947,27 +7888,71 @@ loadhex(mem0, program_rotr, 0x100);
 //mem.loadbin(wipl_dump);
 
 function show_disasm() {
-	let vpc = dis_vpc;
+	let vpc:number;
+	if(run_follow) {
+		vpc = last_pc;
+	} else {
+		vpc = dis_vpc;
+	}
+	const empty = '';
+	const ret:DisAsmResult = {
+		hb: empty,
+		asc: empty,
+		ins: empty,
+		par: empty,
+		l: 0,
+		ic: null,
+		pre: empty,
+		post: empty,
+		is_brk: false,
+	};
 	for (let i = 0; i < listmax; i++) {
+		const listitem = listing[i];
+		listitem.addr.innerText = `${hex(vpc, 5)}: `;
 		try {
-			let res = cpu.disassembly(vpc);
-			listing[i].innerHTML = `${res.pre ? res.pre : ''}<div class="line"><span>${hex(vpc, 5)}: ${res.t}</span><div>${res.post ? res.post : ''}</div></div>`;
-			vpc = (vpc + res.l) & 0x3ffff;
+			ret.hb = empty;
+			ret.asc = empty;
+			ret.ins = empty;
+			ret.par = empty;
+			ret.pre = empty;
+			ret.post = empty;
+			ret.is_brk = false;
+			cpu.disassembly(vpc, ret);
+			listitem.a_ref = vpc;
+			style_if(listitem.line, 'brk', ret.is_brk);
+			listitem.pre.innerText = ret.pre;
+			listitem.hex.innerText = ret.hb;
+			listitem.ascii.innerText = ret.asc;
+			listitem.inst.innerText = ret.ins;
+			listitem.param.innerText = ret.par;
+			listitem.comm.innerText = ret.post;
+			vpc = (vpc + ret.l) & 0x3ffff;
 		} catch(e) {
-			listing[i].innerHTML = `<div class="line"><span>${hex(vpc, 5)}: {{ERROR}}</span></div>`;
+			listitem.hex.innerText = '';
+			listitem.inst.innerText = '';
+			listitem.comm.innerText = '{{ERROR}}';
 			vpc += 1;
 		}
 	}
 	dis_vpc_end = vpc;
 }
-in_dbgcmd.addEventListener('input', function(ev) {
-	if (this.value.search(/^[0-9a-fA-F]{1,5}$/) > -1) {
-		dis_vpc = parseInt(this.value, 16) & 0x3ffff;
+const rex_hex5 = /^[0-9a-fA-F]{1,5}$/;
+function handle_dbg_input(cmd:HTMLInputElement) {
+	if (rex_hex5.test(cmd.value)) {
+		dis_vpc = parseInt(cmd.value, 16) & 0x3ffff;
+		run_follow = false;
 		show_disasm();
+	} else {
+		run_follow = true;
 	}
+}
+handle_dbg_input(in_dbgcmd);
+in_dbgcmd.addEventListener('input', function(ev) {
+	handle_dbg_input(this);
 });
 in_dbgcmd.addEventListener('keypress', function(ev) {
 	if (ev.code == 'Enter' || ev.code == 'NumpadEnter') {
+		handle_dbg_input(this);
 	}
 });
 in_diagins.addEventListener('change', function(ev) {
@@ -7074,6 +8059,11 @@ micro_button.addEventListener('click', function(ev) {
 		win_micro.style.display = 'none';
 	}
 });
+memory_button.addEventListener('click', function(ev) {
+	show_mem = !show_mem;
+	display_if(memory_view, show_mem);
+	if(show_mem) update_memview();
+});
 
 run_button.addEventListener('click', function(ev) {
 	run_control(run_ctl == 0);
@@ -7103,8 +8093,10 @@ step_button.addEventListener('click', function(ev) {
 	run_once = true;
 	run_step = true;
 	run_follow = true;
+	show_disasm();
 	run_stop = function() {
 		dis_vpc = mcsim.physaddr() & 0x3ffff;
+		handle_dbg_input(in_dbgcmd);
 		show_disasm();
 	}
 	run_control(true);
@@ -7115,9 +8107,8 @@ microstep_button.addEventListener('click', function(ev) {
 	mcsim.step(true);
 	mcsim.showstate(true);
 	main_ffc.step(true);
-	if (dis_after) {
-		show_disasm();
-	}
+	if (dis_after) show_disasm();
+	if (memv_after) update_memview();
 });
 btn_settings.addEventListener('click', function(ev) {
 	if (win_settings.style.display == 'none') {
@@ -7139,15 +8130,15 @@ btn_cm_clear.addEventListener('click', function(ev) {
 });
 
 conv_ee.addEventListener('change', function(ev) {
-	NAME_CONV = 0; config_updated();
+	name_conv = NAMECON.CENT; config_updated();
 	show_disasm();
 });
 conv_mei.addEventListener('change', function(ev) {
-	NAME_CONV = 1; config_updated();
+	name_conv = NAMECON.MEI; config_updated();
 	show_disasm();
 });
 conv_uew.addEventListener('change', function(ev) {
-	NAME_CONV = 2; config_updated();
+	name_conv = NAMECON.WIKI; config_updated();
 	show_disasm();
 });
 conv_hex.addEventListener('change', function(ev) {

@@ -5,7 +5,7 @@
 <title>Centurion</title>
 <link rel="stylesheet" href="main.css">
 <script>
-window.cen_version = 11;
+window.cen_version = 12;
 </script>
 <script src="js/cen.js"></script>
 <style>
@@ -54,6 +54,9 @@ window.cen_version = 11;
 	background: #ff3232;
 	color: #ffffff;
 }
+.mcc {
+	width: 92ch;
+}
 .ils {
 	border: solid 1px rgb(78, 37, 37);
 	background: #290707;
@@ -79,6 +82,7 @@ window.cen_version = 11;
 	top: 0;
 	left: 0;
 	width: 100%;
+	z-index: 5;
 }
 .sysmenu > div {
 	margin: 8px;
@@ -222,6 +226,14 @@ button.warn {
 			<div>Full Reload Required (Shift-F5)</div>
 		</div>
 	</div>
+	<div class="popwin" id="memview" style="top:100px;position:fixed;left:30%;display:none">
+		<div style="overflow-y:scroll;height:700px;width: 800px;margin:10px;border:solid 2px #000;position: relative;">
+			<div style="width:1px;height:360448px;position:absolute;left:0;top:0"></div>
+			<div class="fixed memv addr"></div>
+			<div class="fixed memv data"></div>
+			<div class="fixed memv text"></div>
+		</div>
+	</div>
 	<div class="sysmenu" id="button_row"><div>
 		<button id="b_reset">Reset</button>
 		<button id="b_step">Step</button>
@@ -236,6 +248,7 @@ button.warn {
 		<button id="b_r8" style="display:none">150k</button>
 		<button id="b_mstep">&#x03bc;Step</button>
 		<div style="flex-grow: 1"></div>
+		<button id="b_memory">Mem</button>
 		<button id="b_micro">&#x03bc;Code</button>
 		<button id="b_local">Local</button>
 		<button id="b_settings">Settings</button>
@@ -345,9 +358,9 @@ button.warn {
 	<div class="prow" id="cd_r4">
 		<div class="frontpanel" id="dcuop">
 			<div class="regs">
-				<div class="fpl fixed"><div>&#x03bc;Op:SEQ</div><span id="mcs_op"></span></div>
-				<div class="fpl fixed"><div>&#x03bc;Op:ALU</div><span id="mcs_op_alu"></span></div>
-				<div class="fpl fixed"><div>&#x03bc;Op:Bus</div><span id="mcs_op_bus"></span></div>
+				<div class="fpl fixed"><div>&#x03bc;Op:SEQ</div><span class="mcc" id="mcs_op"></span></div>
+				<div class="fpl fixed"><div>&#x03bc;Op:ALU</div><span class="mcc" id="mcs_op_alu"></span></div>
+				<div class="fpl fixed"><div>&#x03bc;Op:Bus</div><span class="mcc" id="mcs_op_bus"></span></div>
 			</div>
 		</div>
 		<div class="frontpanel" id="dchawk">
@@ -392,8 +405,9 @@ button.warn {
 		</div>
 	</div>
 	<div class="prow" id="cd_r6">
-		<div id="dclisting">
-			<div class="regs fixed" id="listing"></div>
+		<div id="dclisting" style="position:relative">
+			<div class="asm" id="listing"></div>
+			<div class="asmc" id="listingc"></div>
 		</div>
 		<div class="pcol" id="cd_r6c2">
 		<div id="dc_textio">

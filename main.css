@@ -7,21 +7,46 @@ body {
 textarea {
 	background: #202224;
 	color: #eeeeee;
-	font-family: monospace;
+	font-family: Consolas, "Envy Code R", monospace;
 	font-size: 18px;
 }
 .regs {
-	font-family: monospace;
+	font-family: Consolas, "Envy Code R", monospace;
 	font-size: 18px;
 }
 .regs span {
 	padding-right: 8px;
 }
+.memv {
+	user-select: none;
+}
+.memv.addr {
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+}
+.memv.data {
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+	left: 8ch;
+}
+.memv.text {
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+	left: 58ch;
+}
+.memv > div {
+	height: 22px;
+}
 .fixed {
 	white-space: pre-wrap;
+	font-family: Consolas, "Envy Code R", monospace;
+	font-size: 18px;
 }
 .vidtext {
-	font-family: monospace;
+	font-family: Consolas, "Envy Code R", monospace;
 	font-size: 12px;
 	color: #eeeeee;
 }
@@ -43,14 +68,51 @@ textarea {
 	border-left: 2px solid #77e;
 	border-top: 2px solid #77e;
 }
-.line {
-	display: flex;
+.mcrec {
+	background: repeating-linear-gradient(90deg,#2f3,#270 20px,transparent 30px,transparent);
 }
-.line > span {
-	min-width: max-content;
+.mcrec.stk {
+	background: repeating-linear-gradient(90deg,#f73,#a30 20px,transparent 30px,transparent);
+}
+.asmc {
+	white-space: pre-wrap;
+	font-family: Consolas, "Envy Code R", monospace;
+	font-size: 16px;
+	position: absolute;
+	top: 0;
+	left: 22ch;
+	width: 4ch;
+}
+.asmc div {
+	box-sizing: border-box;
+}
+.asmc > div {
+	height: 21px;
+}
+.asm {
+	white-space: pre-wrap;
+	font-family: Consolas, "Envy Code R", monospace;
+	font-size: 16px;
+}
+.asm div {
+	box-sizing: border-box;
+}
+.line {
+	height: 21px;
+	display: flex;
+	align-items: flex-end;
+}
+.line.brk {
+	border-style: solid;
+	border-width: 1px 0px 1px 0px;
+	border-color: #e72;
+	background-color: #743;
 }
 .line > div:nth-child(2) {
-	margin-left: 20px;
+	width: 20ch;
+}
+.line > div:nth-child(3) {
+	margin-left: 3ch;
 }
 .conv-sel {
 	border: 2px solid #77e;
@@ -99,6 +161,7 @@ button.active {
 	background: #404146;
 	box-shadow: 3px 3px 3px 3px #000;
 	margin: 10px 10px 10px 10px;
+	z-index: 1;
 }
 .filter {
 	filter: blur(1.7px);
