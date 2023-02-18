@@ -5,7 +5,8 @@
 		"outDir": "js",
 		"alwaysStrict": true,
 		"strict": true,
-		"newLine": "lf"
+		"newLine": "lf",
+		"sourceMap": true
 	},
 	"exclude": ["js"],
 	"include": ["src"]

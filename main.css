@@ -80,7 +80,7 @@ textarea {
 	font-size: 16px;
 	position: absolute;
 	top: 0;
-	left: 22ch;
+	left: 25ch;
 	width: 4ch;
 }
 .asmc div {
@@ -162,6 +162,23 @@ button.active {
 	box-shadow: 3px 3px 3px 3px #000;
 	margin: 10px 10px 10px 10px;
 	z-index: 1;
+}
+.winfrm {
+	width: 20px;
+	background: linear-gradient(#046e88, #023c4b);
+	border-right: #888 2px groove;
+	user-select: none;
+	cursor: all-scroll;
+}
+.winfrm > div:first-child {
+	color: #ddd;
+	font-weight: bold;
+	position: absolute;
+	left: 0;
+	top: 0;
+	writing-mode: sideways-rl;
+	/* transform: rotate(90deg); */
+	padding-top: 20px;
 }
 .filter {
 	filter: blur(1.7px);

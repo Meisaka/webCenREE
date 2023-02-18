@@ -5,7 +5,7 @@
 <title>Centurion</title>
 <link rel="stylesheet" href="main.css">
 <script>
-window.cen_version = 12;
+window.cen_version = 14;
 </script>
 <script src="js/cen.js"></script>
 <style>
@@ -173,7 +173,7 @@ button.warn {
 </style>
 </head>
 <body>
-	<div class="popwin" id="wset" style="display:none;top:40px;right:3%;float:right;">
+	<div class="popwin" id="wset" style="display:none;top:40px;right:3%;float:right;z-index:90;">
 		<div style="display:flex; flex-direction: column;">
 			<div>Show/Hide CPU6:</div>
 			<span class="conv-sel"><label><input type="checkbox" id="view_reg" checked>Registers</label></span>
@@ -192,11 +192,19 @@ button.warn {
 			<span class="conv-sel"><label><input type="checkbox" id="view_crt0" checked>Show</label></span>
 			<span class="conv-sel"><label><input type="radio" name="crt0l" id="crt0loc_t" value="top" checked>Top</label></span>
 			<span class="conv-sel"><label><input type="radio" name="crt0l" id="crt0loc_b" value="bot">Bottom</label></span>
-			<span class="conv-sel"><label><input type="checkbox" id="crtsize"/>Tall CRT</label></span>
-			<span class="conv-sel"><label><input type="checkbox" id="crtwide"/>Wide CRT</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crttall0"/>Tall CRT</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crtwide0"/>Wide CRT</label></span>
+			<div>CRT1 Terminal:</div>
+			<span class="conv-sel"><label><input type="checkbox" id="view_crt1" checked>Show</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crttall1"/>Tall CRT</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crtwide1"/>Wide CRT</label></span>
+			<div>CRT2 Terminal:</div>
+			<span class="conv-sel"><label><input type="checkbox" id="view_crt2" checked>Show</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crttall2"/>Tall CRT</label></span>
+			<span class="conv-sel"><label><input type="checkbox" id="crtwide2"/>Wide CRT</label></span>
 		</div>
 	</div>
-	<div class="popwin" id="wload" style="display:none;top:100px;right:45%;padding:10px 20px 20px 20px;float:right">
+	<div class="popwin" id="wload" style="display:none;top:100px;right:45%;padding:10px 20px 20px 20px;float:right;z-index:90;">
 		<div style="display:flex; flex-direction: column;">
 			<div>Loading File</div>
 			<div class="fpl"><div>File Name:</div><span id="wload_fn"></span></div>
@@ -215,23 +223,47 @@ button.warn {
 			</div>
 		</div>
 	</div>
-	<div class="popwin" id="mclisting" style="display:none;top:100px;right:0%;float:right">
+	<div class="popwin" id="mclisting" style="display:none;top:100px;left:30%">
+		<div class="winfrm"><div>CPU6 &#x03bc;Code</div></div>
 		<div style="overflow-y: scroll;height:700px;width:1200px;margin:10px;border:2px solid;">
 			<div class="regs fixed mcl" id="micro"></div>
 		</div>
 	</div>
-	<div class="popwin" id="vercheck" style="display:none;top:100px;left:30%;padding:4px;position:fixed">
+	<div class="popwin" id="vercheck" style="display:none;top:100px;left:30%;padding:4px;z-index:100;">
 		<div class="sysalert" style="width:400px;padding:20px;font-size:18px">
 			<div>Version Check Failure</div>
 			<div>Full Reload Required (Shift-F5)</div>
 		</div>
 	</div>
-	<div class="popwin" id="memview" style="top:100px;position:fixed;left:30%;display:none">
+	<div class="popwin" id="memview" style="top:100px;left:30%;display:none">
+		<div class="winfrm"><div>Memory</div></div>
 		<div style="overflow-y:scroll;height:700px;width: 800px;margin:10px;border:solid 2px #000;position: relative;">
 			<div style="width:1px;height:360448px;position:absolute;left:0;top:0"></div>
 			<div class="fixed memv addr"></div>
 			<div class="fixed memv data"></div>
 			<div class="fixed memv text"></div>
+		</div>
+	</div>
+	<div class="popwin" id="crtc1" style="position:absolute;top:100px;left:20px;display:flex;">
+		<div class="winfrm"><div>CRT1</div></div>
+		<div class="termcon">
+			<div>
+				<button>CTRL</button><span>BEL</span><label><input type="checkbox" checked/>Caps Lock</label>
+				<button>F1</button><button>F2</button><button>F3</button><button>F4</button>
+				<button>F5</button><button>F6</button><button>F7</button><button>F8</button>
+			</div>
+			<canvas id="term1" class="term" width="640" height="250" tabindex="0"></canvas>
+		</div>
+	</div>
+	<div class="popwin" id="crtc2" style="position:absolute;top:150px;left:70px;display:none;">
+		<div class="winfrm"><div>CRT2</div></div>
+		<div class="termcon">
+			<div>
+				<button>CTRL</button><span>BEL</span><label><input type="checkbox" checked/>Caps Lock</label>
+				<button>F1</button><button>F2</button><button>F3</button><button>F4</button>
+				<button>F5</button><button>F6</button><button>F7</button><button>F8</button>
+			</div>
+			<canvas id="term2" class="term" width="640" height="250" tabindex="0"></canvas>
 		</div>
 	</div>
 	<div class="sysmenu" id="button_row"><div>
@@ -299,9 +331,9 @@ button.warn {
 		<div class="pcol" id="cd_r1c2"></div>
 		<div class="termcon" id="dccrt0">
 			<div>
-				<button id="vctrl">CTRL</button><span id="vbel">BEL</span><label><input type="checkbox" id="softcaps" checked/>Caps Lock</label>
-				<button id="vcf1">F1</button><button id="vcf2">F2</button><button id="vcf3">F3</button><button id="vcf4">F4</button>
-				<button id="vcf5">F5</button><button id="vcf6">F6</button><button id="vcf7">F7</button><button id="vcf8">F8</button>
+				<button>CTRL</button><span>BEL</span><label><input type="checkbox" checked/>Caps Lock</label>
+				<button>F1</button><button>F2</button><button>F3</button><button>F4</button>
+				<button>F5</button><button>F6</button><button>F7</button><button>F8</button>
 			</div>
 			<canvas id="term0" class="term" width="640" height="250" tabindex="0"></canvas>
 		</div>
@@ -366,8 +398,8 @@ button.warn {
 		<div class="frontpanel" id="dchawk">
 			<div class="regs">
 				<div>DSK II / Hawk Emu (Drag Drop to Load: F, R...)</div>
-				<div class="fpl fixed"><div>Fixed</div><span id="dsk1_sta">-</span><label><input type="checkbox" id="dsk1wp"/>WP</label><button class="small" id="dsk1sel">Sel</button><button class="small" id="dsk1new">New</button></div>
-				<div class="fpl fixed"><div>Removable</div><span id="dsk0_sta">-</span><label><input type="checkbox" id="dsk0wp"/>WP</label><button class="small" id="dsk0sel">Sel</button><button class="small" id="dsk0new">New</button></div>
+				<div class="fpl fixed"><div>Fixed</div><label><input type="checkbox" id="dsk1wp"/>WP</label><button class="small" id="dsk1sel">Sel</button><button class="small" id="dsk1new">New</button><span id="dsk1_sta">-</span></div>
+				<div class="fpl fixed"><div>Removable</div><label><input type="checkbox" id="dsk0wp"/>WP</label><button class="small" id="dsk0sel">Sel</button><button class="small" id="dsk0new">New</button><span id="dsk0_sta">-</span></div>
 			</div>
 		</div>
 	</div>

@@ -1,6 +1,6 @@
 "use strict";
 //@ts-ignore
-window.cen_ts_version = 12;
+window.cen_ts_version = 14;
 window.addEventListener('load', async function(){
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
@@ -9,18 +9,34 @@ const view_int = document.getElementById('view_int') as HTMLInputElement;
 const view_uop = document.getElementById('view_uop') as HTMLInputElement;
 const view_dis = document.getElementById('view_dis') as HTMLInputElement;
 const view_ffc = document.getElementById('view_ffc') as HTMLInputElement;
-const view_crt0 = document.getElementById('view_crt0') as HTMLInputElement;
-const inp_crtsize = document.getElementById('crtsize') as HTMLInputElement;
-const inp_crtwide = document.getElementById('crtwide') as HTMLInputElement;
 const loc_crt0 = [
 	document.getElementById('crt0loc_t') as HTMLInputElement,
 	document.getElementById('crt0loc_b') as HTMLInputElement];
+const ui_crts = [
+	{
+		view: document.getElementById('view_crt0') as HTMLInputElement,
+		tall: document.getElementById('crttall0') as HTMLInputElement,
+		wide: document.getElementById('crtwide0') as HTMLInputElement
+	},
+	{
+		view: document.getElementById('view_crt1') as HTMLInputElement,
+		tall: document.getElementById('crttall1') as HTMLInputElement,
+		wide: document.getElementById('crtwide1') as HTMLInputElement
+	},
+	{
+		view: document.getElementById('view_crt2') as HTMLInputElement,
+		tall: document.getElementById('crttall2') as HTMLInputElement,
+		wide: document.getElementById('crtwide2') as HTMLInputElement
+	}
+];
 const conv_hex = document.getElementById('conv_hex') as HTMLInputElement;
 const conv_ee = document.getElementById('conv_ee') as HTMLInputElement;
 const conv_mei = document.getElementById('conv_mei') as HTMLInputElement;
 const conv_uew = document.getElementById('conv_uew') as HTMLInputElement;
 const dc_fpd = document.getElementById('dcfpd') as HTMLDivElement;
 const dc_crt0 = document.getElementById('dccrt0') as HTMLDivElement;
+const win_crt1 = document.getElementById('crtc1') as HTMLDivElement;
+const win_crt2 = document.getElementById('crtc2') as HTMLDivElement;
 const dc_int = document.getElementById('dcint') as HTMLDivElement;
 const dc_pages = document.getElementById('dcpages') as HTMLDivElement;
 const dc_uop = document.getElementById('dcuop') as HTMLDivElement;
@@ -143,7 +159,6 @@ const ffc_log = document.getElementById('ffc_log') as HTMLButtonElement;
 const d_listing = document.getElementById('listing') as HTMLDivElement;
 const d_listingc = document.getElementById('listingc') as HTMLDivElement;
 const d_micro = document.getElementById('micro') as HTMLDivElement;
-const in_softcaps = document.getElementById('softcaps') as HTMLInputElement;
 const in_diagins = document.getElementById('diagins') as HTMLInputElement;
 const in_dbgcmd = document.getElementById('dbgcmd') as HTMLInputElement;
 const btn_cm_import = document.getElementById('cm_imp') as HTMLButtonElement;
@@ -152,20 +167,8 @@ const btn_cm_clear = document.getElementById('cm_clear') as HTMLButtonElement;
 const txt_anno = document.getElementById('anno') as HTMLTextAreaElement;
 const cv_diag = document.getElementById('fp_diag') as HTMLCanvasElement;
 const cx_diag = cv_diag.getContext('2d') as CanvasRenderingContext2D;
-const btn_vctrl = document.getElementById('vctrl') as HTMLButtonElement;
-const span_vbel = document.getElementById('vbel') as HTMLSpanElement;
-const vt_fkeys = [
-	document.getElementById('vcf1') as HTMLButtonElement,
-	document.getElementById('vcf2') as HTMLButtonElement,
-	document.getElementById('vcf3') as HTMLButtonElement,
-	document.getElementById('vcf4') as HTMLButtonElement,
-	document.getElementById('vcf5') as HTMLButtonElement,
-	document.getElementById('vcf6') as HTMLButtonElement,
-	document.getElementById('vcf7') as HTMLButtonElement,
-	document.getElementById('vcf8') as HTMLButtonElement
-];
 interface DiskContainer {
-	set_disk(image:DiskImage):void;
+	set_disk(image:DiskImage|null):void;
 }
 const diskui:DiskImageUI[] = [];
 function style_if(elem:Element, domclass:string, cond: boolean) {
@@ -182,6 +185,140 @@ function display_if(elem:HTMLElement, cond: boolean) {
 		elem.style.display = 'none';
 	}
 }
+interface StdFrame {
+	base: HTMLDivElement;
+	show: boolean;
+	fixed: boolean;
+}
+class FrameManager {
+	frames: StdFrame[] = [];
+	drag_frame: StdFrame | undefined;
+	drag_origin_x = 0;
+	drag_origin_y = 0;
+	last_client_x = 0;
+	last_client_y = 0;
+	constructor() {
+		window.addEventListener('mousemove', (ev) => {
+			let nx = 0, ny = 0;
+			if(this.drag_frame) {
+				this.last_client_x = ev.clientX;
+				this.last_client_y = ev.clientY;
+				nx = this.drag_origin_x + ev.clientX;
+				ny = this.drag_origin_y + ev.clientY;
+				if(!this.drag_frame.fixed) {
+					nx += (window.scrollX | 0);
+					ny += (window.scrollY | 0);
+				}
+				if(nx < -10) nx = -10;
+				if(ny < -10) ny = -10;
+				this.drag_frame.base.style.left = `${nx}px`;
+				this.drag_frame.base.style.top = `${ny}px`;
+				ev.preventDefault();
+			}
+		});
+		window.addEventListener('mouseup', (ev) => {
+			delete this.drag_frame;
+		});
+		window.addEventListener('scroll', (ev) => {
+			if(this.drag_frame && !this.drag_frame.fixed) {
+				let nx = this.drag_origin_x + this.last_client_x + (window.scrollX | 0);
+				let ny = this.drag_origin_y + this.last_client_y + (window.scrollY | 0);
+				if(nx < -10) nx = -10;
+				if(ny < -10) ny = -10;
+				this.drag_frame.base.style.left = `${nx}px`;
+				this.drag_frame.base.style.top = `${ny}px`;
+			}
+		});
+	}
+	raise_frame(frame: StdFrame) {
+		let l = this.frames.indexOf(frame);
+		if(l == -1) {
+			this.frames.push(frame);
+		} else {
+			let i = l;
+			for(; i < this.frames.length - 1; i++) {
+				this.frames[i] = this.frames[i + 1];
+				this.frames[i].base.style.zIndex = `${i + 1}`;
+			}
+			this.frames[i] = frame;
+			frame.base.style.zIndex = `${i + 1}`;
+		}
+	}
+	toggle_show_raise(frame: StdFrame) {
+		let vis = !frame.show;
+		frame.show = vis;
+		if(vis) this.raise_frame(frame);
+	}
+	begin_drag(frame: StdFrame, event: MouseEvent) {
+		this.drag_frame = frame;
+		const szre = /^(-?[0-9]+)([a-z%]*)$/;
+		let reres = szre.exec(frame.base.style.left);
+		let f_x = 0;
+		let f_y = 0;
+		if(reres != null && reres[1] != '') {
+			f_x = parseInt(reres[1]);
+		}
+		reres = szre.exec(frame.base.style.top);
+		if(reres != null && reres[1] != '') {
+			f_y = parseInt(reres[1]);
+		}
+		let t_x = f_x - event.clientX;
+		let t_y = f_y - event.clientY;
+		if(!frame.fixed) {
+			t_x -= window.scrollX | 0;
+			t_y -= window.scrollY | 0;
+		}
+		this.last_client_x = event.clientX;
+		this.last_client_y = event.clientY;
+		this.drag_origin_x = t_x;
+		this.drag_origin_y = t_y;
+	}
+}
+const frame_manager = new FrameManager();
+class ModFrame {
+	base: HTMLDivElement;
+	header: HTMLDivElement;
+	title: HTMLDivElement;
+	content: HTMLDivElement;
+	private _show: boolean;
+	private _fixed: boolean;
+	constructor(basis: HTMLDivElement) {
+		this.base = basis;
+		this._show = this.base.style.display != 'none';
+		if(this._show) this.base.style.display = 'flex';
+		this._fixed = this.base.style.position == 'fixed' || this.base.style.position == '';
+		if(basis.children.length < 2) throw(new Error("bad content format"));
+		this.header = basis.children[0] as HTMLDivElement;
+		this.title = this.header.children[0] as HTMLDivElement;
+		this.content = basis.children[1] as HTMLDivElement;
+		if(this.header.tagName.toUpperCase() != "DIV")
+			throw(new Error("bad content format"));
+		if(this.content.tagName.toUpperCase() != "DIV")
+			throw(new Error("bad content format"));
+		frame_manager.frames.push(this);
+		this.base.addEventListener('mousedown', (ev) => {
+			frame_manager.raise_frame(this);
+		});
+		this.header.addEventListener('mousedown', (ev)=>{
+			ev.preventDefault();
+			frame_manager.begin_drag(this, ev);
+		});
+	}
+	get show():boolean {
+		return this._show;
+	}
+	set show(v:boolean) {
+		this._show = v;
+		this.base.style.display = this._show ? 'flex' : 'none';
+	}
+	get fixed():boolean {
+		return this._fixed;
+	}
+}
+const frame_crt1 = new ModFrame(win_crt1);
+const frame_crt2 = new ModFrame(win_crt2);
+const frame_memory = new ModFrame(memory_view);
+const frame_mclist = new ModFrame(win_micro);
 interface LoadResponse {
 	kind: string,
 	address: number,
@@ -246,6 +383,8 @@ const win_load = (function() {
 	return o;
 })();
 const cv_term0 = document.getElementById('term0') as HTMLCanvasElement;
+const cv_term1 = document.getElementById('term1') as HTMLCanvasElement;
+const cv_term2 = document.getElementById('term2') as HTMLCanvasElement;
 const cv_map = document.getElementById('fp_flagsc') as HTMLCanvasElement;
 const cx_map = cv_map.getContext('2d') as CanvasRenderingContext2D;
 const cv_addr = document.getElementById('fp_addrc') as HTMLCanvasElement;
@@ -277,14 +416,16 @@ let dis_after = false;
 let memv_after = false;
 let run_follow = false;
 let last_pc = 0;
+let last_map = 0;
 let dis_vpc = 0x100;
-let dis_vpc_end = 0x200;
+let dis_map = 0;
+let dis_ppc = 0x100; // computed from vpc
+let dis_ppc_end = 0x200; // computed from vpc
 let memv_begin = 0;
 let memv_end = 0;
 let run_accu = 0;
 let run_accutime = 0;
 let run_once = false;
-let rate_match_input = false;
 const run_hw:Run[] = [];
 const run_hshw:Run[] = [];
 let hs_wait = 0;
@@ -1165,22 +1306,40 @@ class VTerm implements CharDevice {
 	cursor_y = 0;
 	canv:HTMLCanvasElement;
 	ctx:CanvasRenderingContext2D;
+	vbell?:HTMLElement;
 	static columns = 80;
 	static rows = 24;
 	static char_base = 0;
+	static input_interval_rate = 20000;
+	input_interval = 0;
 	input_buf:number[] = [];
+	import_buf:number[] = [];
+	input_control = false;
 	mux:MUXPort | null = null;
 	esc_mode:VTEscapeModes = VTEscapeModes.NORMAL;
 	esc_extra = 0;
 	vbel_id = 0;
 	vcontrol = false;
-	constructor(c:HTMLCanvasElement,vctl?:HTMLButtonElement,fnkeys?:HTMLButtonElement[]) {
+	constructor(c:HTMLCanvasElement, div_crt:HTMLDivElement) {
+		const vctrl = div_crt.children[0] as HTMLButtonElement;
+		this.vbell = div_crt.children[1] as HTMLSpanElement;
+		const lok = (div_crt.children[2] as HTMLLabelElement).children[0] as HTMLInputElement;
+		let fnkeys = [
+		div_crt.children[3] as HTMLButtonElement,
+		div_crt.children[4] as HTMLButtonElement,
+		div_crt.children[5] as HTMLButtonElement,
+		div_crt.children[6] as HTMLButtonElement,
+		div_crt.children[7] as HTMLButtonElement,
+		div_crt.children[8] as HTMLButtonElement,
+		div_crt.children[9] as HTMLButtonElement,
+		div_crt.children[10] as HTMLButtonElement];
+
 		const canv = c;
-		const vctrl = vctl;
 		const self = this;
 		const ctx = c.getContext('2d') as CanvasRenderingContext2D;
 		this.canv = canv;
 		this.ctx = ctx;
+		
 		ctx.fillStyle = '#6ac';
 		ctx.strokeStyle = '#6ac';
 		let i = 20;
@@ -1216,15 +1375,17 @@ class VTerm implements CharDevice {
 		});
 		c.addEventListener('keydown', function(ev) {
 			//console.log(ev.key.toUpperCase().charCodeAt(0));
+			self.clear_buffer();
 			if (ev.ctrlKey || self.vcontrol) {
 				let vcc = vtctrlkeys[ev.code];
 				if (vcc !== undefined) {
 					self.receive(vcc);
+					self.input_control = true;
 				}
 				self.vcontrol = false;
 				if(vctrl) vctrl.classList.remove('active');
 			} else if (ev.key.length == 1) {
-				if (in_softcaps.checked) {
+				if (lok && lok.checked) {
 					self.receive(ev.key.toUpperCase().charCodeAt(0));
 				} else {
 					self.receive(ev.key.charCodeAt(0));
@@ -1259,12 +1420,10 @@ class VTerm implements CharDevice {
 		}
 		this.update_screen();
 	}
-	input_interval = 0;
 	run(increment:number):void {
-		if(rate_match_input && this.input_buf.length > 0) {
-			this.input_interval += increment;
-			if(this.input_interval >= 20000) {
-				this.input_interval = 0;
+		if(this.import_buf.length > 0) {
+			this.input_interval -= increment;
+			if(this.input_interval < 1) {
 				this.check_read();
 			}
 		}
@@ -1462,13 +1621,13 @@ class VTerm implements CharDevice {
 				this.advance_cursor();
 				return;
 			case 7: // BEL (TODO)
-				span_vbel.classList.add('a');
+				if(this.vbell) this.vbell.classList.add('a');
 				if (this.vbel_id > 0) {
 					clearTimeout(this.vbel_id);
 				}
 				this.vbel_id = setTimeout(()=>{
 					this.vbel_id = 0;
-					span_vbel.classList.remove('a');
+					if(this.vbell) this.vbell.classList.remove('a');
 				}, 1000);
 				this.buffer[vca] = 7;
 				break;
@@ -1528,15 +1687,22 @@ class VTerm implements CharDevice {
 	}
 	clear_buffer() {
 		this.input_buf.length = 0;
+		this.import_buf.length = 0;
 	}
 	check_read() {
 		if (this.mux == null) return;
-		if (this.mux.can_receive()) {
+		if (this.mux.can_receive() || this.input_control) {
 			if (this.input_buf.length > 0) {
+				this.input_interval = VTerm.input_interval_rate;
 				let sv = this.input_buf.shift() as number;
 				this.mux.receive(sv);
 			} else {
-				rate_match_input = false;
+				this.input_control = false;
+				if(this.import_buf.length > 0 && this.input_interval < 1) {
+					this.input_interval = VTerm.input_interval_rate;
+					let sv = this.import_buf.shift() as number;
+					this.mux.receive(sv);
+				}
 			}
 		}
 	}
@@ -1551,29 +1717,38 @@ class VTerm implements CharDevice {
 			let v = c.codePointAt(0) as number;
 			if(v == 10) {
 				if (last) {
-					this.input_buf.push(10); // backslash + newline (linefeed)
+					this.import_buf.push(10); // backslash + newline (linefeed)
 				} else {
-					this.input_buf.push(13); // typical Centurion newline
+					this.import_buf.push(13); // typical Centurion newline
 				}
 				last = false;
 			} else if (v == 92) { // backslash
 				last = true;
 			} else {
-				if (last) this.input_buf.push(92);
-				this.input_buf.push(v);
+				if (last) this.import_buf.push(92);
+				this.import_buf.push(v);
 				last = false;
 			}
 		}
 		this.check_read();
 	}
 }
-const cx_crt0 = new VTerm(cv_term0, btn_vctrl, vt_fkeys);
+const cx_crt0 = new VTerm(cv_term0, dc_crt0.children[0] as HTMLDivElement);
 run_hw.push(cx_crt0);
+
+let cx_crt1 = new VTerm(cv_term1, frame_crt1.content.children[0] as HTMLDivElement);
+run_hw.push(cx_crt1);
+let cx_crt2 = new VTerm(cv_term2, frame_crt2.content.children[0] as HTMLDivElement);
+run_hw.push(cx_crt2);
+
 function console_text_import(txt:string):void {
-	rate_match_input = true;
 	cx_crt0.text_import(txt);
 }
-setInterval(function(){ cx_crt0.update_blink(); }, 125);
+setInterval(function(){
+	cx_crt0.update_blink();
+	if(cx_crt1) cx_crt1.update_blink();
+	if(cx_crt2) cx_crt2.update_blink();
+}, 125);
 
 const init_program = '79 86 23 C8 E5 EC EC EF F2 EC E4 A1 8D 8A 00 71 80 01';
 const program_rotl = '60 AA AA 60 AA AA 55 40 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 71 01 03';
@@ -1605,7 +1780,7 @@ function dec(v:number, l:number = 2) {
 	if(v<0) '-'+(-v).toString(10).padStart(l,'0');
 	return v.toString(10).padStart(l,'0');
 }
-function hexstr(buf:Uint8Array, offset:number=0, length?:number):string {
+function buftohex(buf:Uint8Array, offset:number=0, length?:number):string {
 	let hs = '';
 	const limit = buf.byteLength;
 	if(length === undefined) {
@@ -1639,6 +1814,22 @@ function bit(v:number, b:number):number {
 	return (v >> b) & 1;
 }
 
+// @ts-ignore
+window.buftohex = buftohex;
+// @ts-ignore
+window.dec = dec;
+// @ts-ignore
+window.hex = hex;
+// @ts-ignore
+window.bin = bin;
+// @ts-ignore
+window.s_byte = sbyte;
+// @ts-ignore
+window.s_word = sword;
+// @ts-ignore
+window.nyb = nyb;
+// @ts-ignore
+window.bit = bit;
 const ALU_F:{on:number,sym:string,ivr:boolean,ivs:boolean}[] = [
 	{on:0,sym:'+',ivr:false,ivs:false},
 	{on:0,sym:'+',ivr:true,ivs:false},
@@ -2168,8 +2359,7 @@ class Backplane implements MemAccess {
 		let aindex = address >> 8;
 		let dev = this.decode_hi[aindex];
 		if(dev) {
-			let v = dev.dev.readmeta(address - dev.base);
-			return v;
+			return dev.dev.readmeta(address - dev.base);
 		}
 		return MEMSTAT.OPEN;
 	}
@@ -2178,7 +2368,7 @@ class Backplane implements MemAccess {
 		let dev = this.decode_hi[aindex];
 		if(dev) {
 			dev.dev.writemeta(address - dev.base, value);
-			if ((address >= dis_vpc) && (address < dis_vpc_end)) {
+			if ((address >= dis_ppc) && (address < dis_ppc_end)) {
 				dis_after = show_dis;
 			}
 			if ((address >= memv_begin) && (address < memv_end)) {
@@ -2249,7 +2439,7 @@ class Backplane implements MemAccess {
 		let dev = this.decode_hi[aindex];
 		if(dev) {
 			dev.dev.writebyte(address - dev.base, value);
-			if ((address >= dis_vpc) && (address < dis_vpc_end)) {
+			if ((address >= dis_ppc) && (address < dis_ppc_end)) {
 				dis_after = show_dis;
 			}
 			if ((address >= memv_begin) && (address < memv_end)) {
@@ -2341,25 +2531,128 @@ let pta = 0;
 let pta1a = 0;
 let pta2a = 0;
 let pta3a = 0;
+// memory access state:
+let pindex = 0;
+let pgram = 0;
+let pgaddr = 0;
+let is_mmio = 0;
+let is_regmmio = 0;
+let notpgbit = 0;
+let is_mem = 0;
 
-const mco = {
-	step,
-	hsstep,
-	hspre,
-	hsend,
-	loadcache,
-	showstate,
-	reset,
-	dma_register,
-	dma_request,
+const vmbreak = new Uint8Array(65536);
+type BreakFunction = (mode?:number, vaddress?:number, paddress?:number)=>boolean;
+const break_list:(null | BreakFunction)[] = [
+	null,
+	function() { return true; }
+];
+
+function LevelRegisters(level: number) {
+	const base = level * 16;
+	return Object.defineProperties({level}, {
+		a :{get () { return (regfile[base] << 8) | regfile[base+1]; }},
+		b :{get () { return (regfile[base+2] << 8) | regfile[base+3]; }},
+		x :{get () { return (regfile[base+4] << 8) | regfile[base+5]; }},
+		y :{get () { return (regfile[base+6] << 8) | regfile[base+7]; }},
+		z :{get () { return (regfile[base+8] << 8) | regfile[base+9]; }},
+		s :{get () { return (regfile[base+10] << 8) | regfile[base+11]; }},
+		c :{get () { return (regfile[base+12] << 8) | regfile[base+13]; }},
+		p :{get () { return (regfile[base+14] << 8) | regfile[base+15]; }},
+		al:{get () { return regfile[base+1]; }},
+		bl:{get () { return regfile[base+3]; }},
+		xl:{get () { return regfile[base+5]; }},
+		yl:{get () { return regfile[base+7]; }},
+		zl:{get () { return regfile[base+9]; }},
+		sl:{get () { return regfile[base+11]; }},
+		cl:{get () { return regfile[base+13]; }},
+		pl:{get () { return regfile[base+15]; }},
+		ah:{get () { return regfile[base]; }},
+		bh:{get () { return regfile[base+2]; }},
+		xh:{get () { return regfile[base+4]; }},
+		yh:{get () { return regfile[base+6]; }},
+		zh:{get () { return regfile[base+8]; }},
+		sh:{get () { return regfile[base+10]; }},
+		ch:{get () { return regfile[base+12]; }},
+		ph:{get () { return regfile[base+14]; }},
+	});
+}
+class MCCPU {
+	registers = [
+		LevelRegisters(0), LevelRegisters(1),
+		LevelRegisters(2), LevelRegisters(3),
+		LevelRegisters(4), LevelRegisters(5),
+		LevelRegisters(6), LevelRegisters(7),
+		LevelRegisters(8), LevelRegisters(9),
+		LevelRegisters(10), LevelRegisters(11),
+		LevelRegisters(12), LevelRegisters(13),
+		LevelRegisters(14), LevelRegisters(15),
+	];
+	get reg() { return this.registers[level]; }
+	get level() { return level; }
+	get map() { return pta; }
+	get pc() { return last_pc; }
+	get page_ram() { return pagetb; }
+	add_virtual_break(address:number, f:null | number | BreakFunction):number {
+		let i;
+		if(typeof address != 'number') throw new Error('Invalid address');
+		if(address < 0 || address > 65535) throw new Error('Invalid address');
+		if(vmbreak[address] != 0) throw new Error('Address already set');
+		if(typeof f == 'number') {
+			i = f | 0;
+			if(i < 0 || i > 255) throw new Error('Invalid break point');
+			f = break_list[i];
+			if(f == null) throw new Error('Invalid break point');
+		} else if (typeof f == 'function') {
+			i = break_list.indexOf(f);
+		} else {
+			throw new Error('Invalid break function or function ID');
+		}
+		if(i == -1) {
+			i = break_list.indexOf(null, 1);
+			if(i == -1) i = break_list.length;
+			if(i > 255) throw new Error('Too many break points');
+			f(-1, address, 0);
+			break_list[i] = f;
+		}
+		vmbreak[address] = i;
+		return i;
+	}
+	remove_break_at(address: number) {
+		vmbreak[address] = 0;
+	}
+	remove_break(f:null | number | BreakFunction) {
+		let i:number;
+		if(f == null) return;
+		if(typeof f == 'number') {
+			i = f | 0;
+			if(i < 2 || i > 255) throw new Error('Invalid break point');
+			if(break_list[i] == null) return;
+		} else if (typeof f == 'function') {
+			i = break_list.indexOf(f);
+		} else {
+			throw new Error('Invalid break function or function ID');
+		}
+		if(i > -1 && i != 1) break_list[i] = null;
+	}
+	step = step;
+	hsstep = hsstep;
+	hspre = hspre;
+	hsend = hsend;
+	loadcache = loadcache;
+	showstate = showstate;
+	reset = reset;
+	dma_register = dma_register;
+	dma_request = dma_request;
 	dma_int(en:boolean) {
 		dma_12 = en ? 1 : 0;
-	},
-	dma_end: false,
-	physaddr() { return physaddr; },
-	parity: 0,
-	memfault: 0,
-};
+	}
+	dma_end = false;
+	get physaddr() { return physaddr; }
+	get memaddr() { return memaddr; }
+	parity = 0
+	memfault = 0
+}
+const mco = new MCCPU();
 
 function reset() {
 	s0.reset();
@@ -2553,7 +2846,7 @@ function showstate(in_halt:boolean) {
 	drawaddr(addr2a, 162, '4');
 	drawaddr(addr1a, 174, '2');
 	drawaddr(addr0a, 186, '1');
-	drawfill(pta3a, 49, '3');
+	drawfill(pta3a, 49, '4');
 	drawfill(pta2a, 77, '2');
 	drawfill(pta1a, 105, '1');
 	drawfill(ccr_fa, 133, 'F');
@@ -2754,14 +3047,6 @@ function loadcache() {
 }
 loadcache();
 
-let pindex = 0;
-let pgram = 0;
-let pgaddr = 0;
-let is_mmio = 0;
-let is_regmmio = 0;
-let notpgbit = 0;
-let is_mem = 0;
-
 function mempt_set() {
 	pindex = ((memaddr >> 11) & 31) | (pta << 5);
 	pgram = pagetb[pindex];
@@ -2843,7 +3128,10 @@ function hsstep() {
 	const dmaint = intena && (level < 2) && (dma_12 != 0);
 	const count_up = (busctl & 8)!=0;
 
-	if(mcpc == 0x101) last_pc = physaddr;
+	if(mcpc == 0x101) {
+		last_pc = memaddr;
+		last_map = pta;
+	}
 	if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
 		if(handle_break()) return;
 	}
@@ -3477,7 +3765,10 @@ function step(debug_output:boolean = false) {
 	if (!debug_output) {
 		if (mcpc == 0x101) {
 			dis_after = show_dis;
-			last_pc = physaddr;
+			last_pc = memaddr;
+			last_map = pta;
+			let bfn = break_list[vmbreak[memaddr]];
+			if(bfn != null && bfn(0, memaddr, physaddr) && handle_break()) debug_output = true;
 		}
 		if ((run_step && (mcpc == 0x101)) || mclisting[mcpc].bp) {
 			if(handle_break()) debug_output = true;
@@ -3598,12 +3889,18 @@ function step(debug_output:boolean = false) {
 	}
 	switch(mci.x_h11) {
 	case 0: break; // nop
-	case 1: // RD_START /* TODO */
+	case 1: { // RD_START /* TODO */
+		let bfn = break_list[vmbreak[memaddr]];
+		bfn != null && bfn(1, memaddr, physaddr) && handle_break();
 		sys_read_in = true;
 		break;
-	case 2: // WT_START /* TODO */
+	}
+	case 2: { // WT_START /* TODO */
+		let bfn = break_list[vmbreak[memaddr]];
+		bfn != null && bfn(2, memaddr, physaddr) && handle_break();
 		bpl.writebyte(physaddr, memdata_out);
 		break;
+	}
 	case 3: // WorkAddr_LDH
 		if (mci.x_e6 == 5) {
 			workaddr = (workaddr & 0x00ff) | (memaddr & 0xff00);
@@ -3727,6 +4024,8 @@ function step(debug_output:boolean = false) {
 return mco;
 }
 const mcsim = mcsetup();
+//@ts-ignore
+this.window.cpu = mcsim;
 
 const FN_K9 = [
 	'0BusAct', // if RDIN or WTIN have been asserted by the CPU
@@ -4324,7 +4623,7 @@ interface FlowFrame {
 })();
 let last_memv_line = -1;
 function update_memview(is_scroll = false) {
-	const mem_con = memory_view.children[0] as HTMLDivElement;
+	const mem_con = frame_memory.content;
 	const col_a = mem_con.children[1] as HTMLDivElement;
 	const col_d = mem_con.children[2] as HTMLDivElement;
 	const col_t = mem_con.children[3] as HTMLDivElement;
@@ -4473,7 +4772,11 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	seeking = false;
 	seek_done = false;
 	sect_remain = 0;
+	stat_start_sector = 0;
+	stat_transfer_count = 0;
+	stat_log_transfers = false;
 	command = -1;
+	format_permit = false;
 	interrupt_en = false;
 	interrupt_pend = false;
 	dma_request = false;
@@ -4492,6 +4795,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	}
 	reset(): void {
 		this.command = -1;
+		this.format_permit = false;
 		this.seeking = false;
 		this.seek_done = false;
 		this.busy = false;
@@ -4510,8 +4814,13 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			case 1:
 			case 4:
 			case 5:
-			case 6:
+				if(this.stat_log_transfers)
+					console.log(`DSK C:${this.command} S:${hex(this.stat_start_sector, 4)} DMA:`, this.stat_transfer_count);
+				this.stat_transfer_count = 0;
 				if (this.interrupt_en) mcsim.dma_int(true);
+				break;
+			case 6:
+				//if (this.interrupt_en) mcsim.dma_int(true);
 				break;
 			case 2:
 				this.seeking = false;
@@ -4592,7 +4901,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		} else {
 			if (this.sect_remain <= 0) {
 				this.sect_remain = 400;
-				unit.sel_address++;
+				unit.sel_address = (unit.sel_address + 1) & 0xffff;
 			}
 			const fileaddr = unit.sel_address * unitdata.stride;
 			if(this.dma_op == 0) {
@@ -4610,6 +4919,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				unitdata.data[fileaddr + 400 - this.sect_remain] = b;
 			}
 			this.sect_remain--;
+			this.stat_transfer_count += 1;
 		}
 	}
 	do_dma_read() {
@@ -4651,16 +4961,21 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			this.seek_done = false;
 			this.busy = true;
 			this.command = value;
+			if(value != 5) {
+				this.format_permit = false;
+			}
 			switch (value) {
 			case 0:// 0=read
 				//console.log('DSK2:read:', hex(u.sel_address, 4));
 				this.busy_time = 0;
 				this.sect_remain = 400;
+				this.stat_start_sector = unit.sel_address;
 				this.do_dma_read();
 				break;
 			case 1: // 1=write
 				this.busy_time = 1;
 				this.sect_remain = 400;
+				this.stat_start_sector = unit.sel_address;
 				if (((this.wpmask & (1 << this.sel_unit)) != 0) && (unit.image?.protect === false)) {
 					this.busy_time = 0;
 					//console.log('DSK2:do_write:', hex(u.sel_address, 4));
@@ -4682,18 +4997,23 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			case 4: // verify (typically issued after cmd 1)
 				this.busy_time = 0;
 				this.sect_remain = 400;
+				this.stat_start_sector = unit.sel_address;
 				//console.log('DSK2:do_verify:', hex(u.sel_address, 4));
 				this.do_dma_verify();
 				break;
-			case 5: // format verify?
-				this.busy_time = 0;
-				this.sect_remain = 400;
-				this.do_dma_verify();
+			case 5: // format write
+				if(this.format_permit) {
+					this.busy_time = 0;
+					this.sect_remain = 400;
+					this.stat_start_sector = unit.sel_address;
+					this.do_dma_write();
+				} else {
+					this.busy_time = 10;
+				}
 				break;
-			case 6: // format write?
-				this.busy_time = 0;
-				this.sect_remain = 400;
-				this.do_dma_write();
+			case 6: // format write permit
+				this.busy = false;
+				this.format_permit = true;
 				break;
 			default:
 				console.log('DSK2:cmd:', hex(value), hex(unit.sel_address, 4));
@@ -5665,7 +5985,7 @@ class MUXPort {
 	get cts() { return this._cts; }
 	set cts(value:boolean) {
 		this._cts = value;
-		if(!rate_match_input && this.line != null) this.line.check_read();
+		if(this.line != null) this.line.check_read();
 	}
 	reset():void {
 		this.write_busy = false;
@@ -5682,7 +6002,7 @@ class MUXPort {
 		let vcc = this.read_buffer;
 		this.read_buffer = 0;
 		this.read_busy = false;
-		if(!rate_match_input && this.line != null) this.line.check_read();
+		if(this.line != null) this.line.check_read();
 		return vcc;
 	}
 	write_control(value:number):void {
@@ -5756,6 +6076,12 @@ class MMIOMux implements MemAccess, IOAccess {
 				this.mux_cause = false;
 				if (this.muxports[0].read_busy) {
 					v = 0; // (card_id << 4)
+				} else if (this.muxports[1].read_busy) {
+					v = 2; // (card_id << 4)
+				} else if (this.muxports[2].read_busy) {
+					v = 4; // (card_id << 4)
+				} else if (this.muxports[3].read_busy) {
+					v = 6; // (card_id << 4)
 				} else if (this.tx_int > 0) {
 					v = 0; // (card_id << 4)
 					for(let i = 0; i < 4; i++) {
@@ -5900,28 +6226,32 @@ class SysMem implements MemAccess {
 	}
 }
 class ROM512 implements MemAccess {
+	contents = new Uint16Array(512);
 	readmeta(address: number): number {
 		return this.contents[address];
 	}
 	writemeta(address: number, value: number): void {
-		this.contents[address] = value & 255;
+		this.contents[address] = value;
 	}
-	contents = new Uint8Array(512);
 	readbyte(address:number):number {
-		return this.contents[address];
+		let mval = this.contents[address];
+		if((mval & 28672) != 0) handle_break();
+		return mval & 255;
 	}
 	writebyte(address: number, value: number):void {}
 }
 class ROM2k implements MemAccess {
-	contents = new Uint8Array(2048);
+	contents = new Uint16Array(2048);
 	readmeta(address: number): number {
 		return this.contents[address];
 	}
 	writemeta(address: number, value: number): void {
-		this.contents[address] = value & 255;
+		this.contents[address] = value;
 	}
 	readbyte(address:number):number {
-		return this.contents[address];
+		let mval = this.contents[address];
+		if((mval & 28672) != 0) handle_break();
+		return mval & 255;
 	}
 	writebyte(address: number, value: number):void {}
 }
@@ -6437,7 +6767,7 @@ function annotation_import(src:string) {
 				} else if (defer.has(cmd)) {
 					cmd_state = cmd;
 				} else if (cmd == 'pstring16') {
-					parse.data = 'pstringhi';
+					parse.data = 'pstringhi ';
 				} else {
 					console.warn('unhandled:', cmd);
 				}
@@ -6485,6 +6815,8 @@ interface DisAsmResult {
 	ins:string,
 	par:string,
 	l:number,
+	pa:number,
+	pg:number,
 	ic:string|null,
 	pre:string,
 	post:string,
@@ -6495,12 +6827,21 @@ class CPU6 {
 
 	// TODO backplane
 	mem: Backplane;
-	constructor(m: Backplane) {
+	page_ram: Uint8Array;
+	_map: number = 0;
+	constructor(m: Backplane, page: Uint8Array) {
 		this.mem = m;
+		this.page_ram = page;
 	}
-
+	set map(v:number) {
+		this._map = (v << 5);
+	}
 	fetch(address:number):number {
 		return this.mem.readmeta(address) & 255;
+	}
+	phys(address:number) {
+		let page = this.page_ram[this._map | (address >> 11)] & 0x7f;
+		return (page << 11) | (address & 2047)
 	}
 	disassembly(address:number, ret:DisAsmResult):void {
 		const DREF_L = name_conv == NAMECON.MEI ? '[' : '(';
@@ -6508,7 +6849,11 @@ class CPU6 {
 		const DDREF_L = name_conv == NAMECON.MEI ? '[[' : '((';
 		const DDREF_R = name_conv == NAMECON.MEI ? ']]' : '))';
 		let vpc = address;
-		let meta = this.mem.readmeta(vpc++);
+		let page = address >> 11;
+		let ppc = this.phys(vpc++);
+		ret.pa = ppc;
+		ret.pg = page;
+		let meta = this.mem.readmeta(ppc);
 		if ((meta & MEMSTAT.IO) != 0) {
 			ret.hb = '??';
 			ret.asc = '';
@@ -6567,6 +6912,7 @@ class CPU6 {
 			}
 		}
 		function addrrefw(a:number):string {
+			a &= 0xffff;
 			if (mmwlist.has(a)) {
 				return `${hexlist(a, 4)} <${mmwlist.get(a)}>`;
 			} else {
@@ -6591,8 +6937,9 @@ class CPU6 {
 		}
 		let astr = ascenc(op);
 		let dfetch = ()=> {
-			check_anno(vpc);
-			let emeta = this.mem.readmeta(vpc++);
+			let ppc = this.phys(vpc++);
+			check_anno(ppc);
+			let emeta = this.mem.readmeta(ppc);
 			if((meta & MEMSTAT.ALL_BRK) != 0) is_brk = true;
 			let rv = emeta & 255;
 			datah.push(rv)
@@ -6632,13 +6979,13 @@ class CPU6 {
 			return;
 		}
 		let vstr = '';
-		if (op == 0 && this.fetch(vpc) > 3) { // TODO does not cover long strings!
+		if (op == 0 && this.fetch(this.phys(vpc)) > 3) { // TODO does not cover long strings!
 			let vstart = vpc + 1;
 			let vpcs = vstart;
-			let pre = this.fetch(vpc);
+			let pre = this.fetch(this.phys(vpc));
 			//check_anno(vpc);
 			//check_anno(vpcs);
-			let f = this.fetch(vpcs++);
+			let f = this.fetch(this.phys(vpcs++));
 			let slen = 0;
 			let nonspace = false;
 			while(is_hiascii(f)) {
@@ -6658,7 +7005,7 @@ class CPU6 {
 					// pascal string
 					ret.hb = '';
 					ret.asc = '';
-					ret.ins = '.npstringhi';
+					ret.ins = '.npstringhi ';
 					ret.ic = 'pstr';
 					ret.par = vstr;
 					ret.l = vpcs - address;
@@ -6671,7 +7018,7 @@ class CPU6 {
 					return;
 				}
 				//check_anno(vpcs);
-				f = this.fetch(vpcs++);
+				f = this.fetch(this.phys(vpcs++));
 			}
 			slen = (vpcs - vpc);
 			if (pre == slen && slen >= 2 && nonspace) {
@@ -6679,7 +7026,7 @@ class CPU6 {
 				vpcs--;
 				ret.hb = '';
 				ret.asc = '';
-				ret.ins = '.npstringhi';
+				ret.ins = '.npstringhi ';
 				ret.par = vstr;
 				ret.ic = "pstr";
 				ret.l = vpcs - address;
@@ -6696,8 +7043,8 @@ class CPU6 {
 			}
 		} else if (is_hiascii(op)) {
 			let vpcs = vpc - 1;
-			let pre = (this.fetch(vpc - 3) << 8) | this.fetch(vpc - 2);
-			let f = this.fetch(vpcs++);
+			let pre = (this.fetch(this.phys(vpc - 3)) << 8) | this.fetch(this.phys(vpc - 2));
+			let f = this.fetch(this.phys(vpcs++));
 			let slen = 0;
 			vstr = '';
 			let nonspace = false;
@@ -6717,7 +7064,7 @@ class CPU6 {
 				if (pre == slen && slen >= 2 && nonspace) {
 					// pascal string
 					ret.hb = ''; ret.asc = ''; ret.ic = "pstr";
-					ret.ins = '.pstringhi'; ret.par = vstr;
+					ret.ins = '.pstringhi '; ret.par = vstr;
 					ret.l = vpcs - address;
 					if (anpre.length > 0) {
 						ret.pre = anpre;
@@ -6728,14 +7075,14 @@ class CPU6 {
 					return;
 				}
 				//check_anno(vpcs);
-				f = this.fetch(vpcs++);
+				f = this.fetch(this.phys(vpcs++));
 			}
 			slen = (vpcs - vpc);
 			if (pre == slen && slen >= 2 && nonspace) {
 				// pascal string
 				vpcs--;
 				ret.hb = ''; ret.asc = ''; ret.ic = "pstr";
-				ret.ins = '.pstringhi'; ret.par = vstr;
+				ret.ins = '.pstringhi '; ret.par = vstr;
 				ret.l = vpcs - address;
 				if (anpre.length > 0) {
 					ret.pre = anpre;
@@ -6747,7 +7094,7 @@ class CPU6 {
 			} else if(f == 0 && slen > 3 && nonspace) {
 				// zstring/cstring
 				ret.hb = ''; ret.asc = ''; ret.ic = "zstr";
-				ret.ins = '.zstringhi'; ret.par = vstr;
+				ret.ins = '.zstringhi '; ret.par = vstr;
 				ret.l = vpcs - address;
 				if (anpre.length > 0) {
 					ret.pre = anpre;
@@ -7238,6 +7585,14 @@ const bpl_rom_fc = new ROM512();
 loadbin(bpl_rom_fc, bpl_rom, {invert:true, remap:[0,1,2,3,4,8,5,6,7]});
 cx_crt0.mux = mmio_mux.muxports[0];
 mmio_mux.muxports[0].line = cx_crt0;
+if(cx_crt1) {
+	cx_crt1.mux = mmio_mux.muxports[1];
+	mmio_mux.muxports[1].line = cx_crt1;
+}
+if(cx_crt2) {
+	cx_crt2.mux = mmio_mux.muxports[2];
+	mmio_mux.muxports[2].line = cx_crt2;
+}
 const dsk2_0 = new DSK2();
 run_hw.push(dsk2_0);
 bpl.configio(0, mmio_mux);
@@ -7611,7 +7966,9 @@ const CONFIG_LL:BRObject & ConfigSchema = {
 	4: [false,false,1],
 	5: [false,13],
 	16: [ // CRT[]
-		[[true,false,false,false]]
+		[/*0:viewopts*/[true,false,false,false]],
+		[/*0:viewopts*/[false,false,false,false]],
+		[/*0:viewopts*/[false,false,false,false]]
 	],
 	//17: [ // MUX[]
 	//[]
@@ -7696,10 +8053,12 @@ function config_load() {
 		for(let i = 0; i < crts.length; i++) {
 			const crt = crts[i];
 			const viewopts = crt[0];
+			if(ui_crts[i]) {
+				ui_crts[i].view.checked = viewopts[0];
+				ui_crts[i].tall.checked = viewopts[1];
+				ui_crts[i].wide.checked = viewopts[2];
+			}
 			if(i == 0) {
-				view_crt0.checked = viewopts[0];
-				inp_crtsize.checked = viewopts[1];
-				inp_crtwide.checked = viewopts[2];
 				if(viewopts[3]) { // f=top/t=bottom
 					loc_crt0[0].checked = false; //top
 					loc_crt0[1].checked = true; //bottom
@@ -7776,10 +8135,12 @@ function config_save() {
 		for(let i = 0; i < crts.length; i++) {
 			const crt = crts[i];
 			const viewopts = crt[0];
+			if(ui_crts[i]) {
+				viewopts[0] = ui_crts[i].view.checked;
+				viewopts[1] = ui_crts[i].tall.checked;
+				viewopts[2] = ui_crts[i].wide.checked;
+			}
 			if(i == 0) {
-				viewopts[0] = view_crt0.checked;
-				viewopts[1] = inp_crtsize.checked;
-				viewopts[2] = inp_crtwide.checked;
 				viewopts[3] = loc_crt0[1].checked;
 			}
 		}
@@ -7844,7 +8205,9 @@ if (name_conv == NAMECON.CENT) conv_ee.checked = true;
 if (name_conv == NAMECON.MEI) conv_mei.checked = true;
 //@ts-ignore
 if (name_conv == NAMECON.WIKI) conv_uew.checked = true;
-cx_crt0.show_ui = view_crt0.checked;
+cx_crt0.show_ui = ui_crts[0].view.checked;
+frame_crt1.show = ui_crts[1].view.checked;
+frame_crt2.show = ui_crts[2].view.checked;
 
 let config_timeout = 0;
 function config_handle() {
@@ -7882,7 +8245,7 @@ window.disk_images = disk_images;
 //@ts-ignore
 window.export_disk_image = export_disk;
 
-const cpu = new CPU6(bpl);
+const cpu = new CPU6(bpl, mcsim.page_ram);
 
 loadhex(mem0, program_rotr, 0x100);
 //mem.loadbin(wipl_dump);
@@ -7891,8 +8254,10 @@ function show_disasm() {
 	let vpc:number;
 	if(run_follow) {
 		vpc = last_pc;
+		cpu.map = last_map;
 	} else {
 		vpc = dis_vpc;
+		cpu.map = dis_map;
 	}
 	const empty = '';
 	const ret:DisAsmResult = {
@@ -7901,6 +8266,8 @@ function show_disasm() {
 		ins: empty,
 		par: empty,
 		l: 0,
+		pa: 0,
+		pg: 0,
 		ic: null,
 		pre: empty,
 		post: empty,
@@ -7908,7 +8275,6 @@ function show_disasm() {
 	};
 	for (let i = 0; i < listmax; i++) {
 		const listitem = listing[i];
-		listitem.addr.innerText = `${hex(vpc, 5)}: `;
 		try {
 			ret.hb = empty;
 			ret.asc = empty;
@@ -7918,7 +8284,8 @@ function show_disasm() {
 			ret.post = empty;
 			ret.is_brk = false;
 			cpu.disassembly(vpc, ret);
-			listitem.a_ref = vpc;
+			listitem.a_ref = ret.pa;
+			listitem.addr.innerText = `${hex(ret.pa >> 8, 3)}:${hex(vpc, 4)}: `;
 			style_if(listitem.line, 'brk', ret.is_brk);
 			listitem.pre.innerText = ret.pre;
 			listitem.hex.innerText = ret.hb;
@@ -7926,20 +8293,20 @@ function show_disasm() {
 			listitem.inst.innerText = ret.ins;
 			listitem.param.innerText = ret.par;
 			listitem.comm.innerText = ret.post;
-			vpc = (vpc + ret.l) & 0x3ffff;
+			vpc = (vpc + ret.l) & 0xffff;
 		} catch(e) {
 			listitem.hex.innerText = '';
 			listitem.inst.innerText = '';
 			listitem.comm.innerText = '{{ERROR}}';
-			vpc += 1;
+			vpc = (vpc + 1) & 0xffff;
 		}
 	}
-	dis_vpc_end = vpc;
+	dis_ppc_end = ret.pa + ret.l;
 }
 const rex_hex5 = /^[0-9a-fA-F]{1,5}$/;
 function handle_dbg_input(cmd:HTMLInputElement) {
 	if (rex_hex5.test(cmd.value)) {
-		dis_vpc = parseInt(cmd.value, 16) & 0x3ffff;
+		dis_vpc = parseInt(cmd.value, 16) & 0xffff;
 		run_follow = false;
 		show_disasm();
 	} else {
@@ -8053,16 +8420,15 @@ fp_select.addEventListener('click', function(ev) {
 	mcsim.reset();
 });
 micro_button.addEventListener('click', function(ev) {
-	if (win_micro.style.display == 'none') {
-		win_micro.style.display = '';
-	} else {
-		win_micro.style.display = 'none';
-	}
+	frame_manager.toggle_show_raise(frame_mclist);
 });
 memory_button.addEventListener('click', function(ev) {
 	show_mem = !show_mem;
-	display_if(memory_view, show_mem);
-	if(show_mem) update_memview();
+	frame_memory.show = show_mem;
+	if(show_mem) {
+		frame_manager.raise_frame(frame_memory);
+		update_memview();
+	}
 });
 
 run_button.addEventListener('click', function(ev) {
@@ -8095,7 +8461,7 @@ step_button.addEventListener('click', function(ev) {
 	run_follow = true;
 	show_disasm();
 	run_stop = function() {
-		dis_vpc = mcsim.physaddr() & 0x3ffff;
+		dis_vpc = mcsim.memaddr & 0xffff;
 		handle_dbg_input(in_dbgcmd);
 		show_disasm();
 	}
@@ -8176,15 +8542,21 @@ function update_layout() {
 	display_if(dc_listing, view_dis.checked);
 	display_if(dc_ffc, show_ffc);
 	display_if(dc_crt0, cx_crt0.show_ui);
-	style_if(cv_term0,'tall',inp_crtsize.checked);
-	style_if(cv_term0,'wide',inp_crtwide.checked);
+	style_if(cv_term0,'tall',ui_crts[0].tall.checked);
+	style_if(cv_term0,'wide',ui_crts[0].wide.checked);
+	frame_crt1.show = ui_crts[1].view.checked;
+	style_if(cv_term1,'tall',ui_crts[1].tall.checked);
+	style_if(cv_term1,'wide',ui_crts[1].wide.checked);
+	frame_crt2.show = ui_crts[2].view.checked;
+	style_if(cv_term2,'tall',ui_crts[2].tall.checked);
+	style_if(cv_term2,'wide',ui_crts[2].wide.checked);
 	dc_regs.parentElement?.removeChild(dc_regs);
 	dc_crt0.parentElement?.removeChild(dc_crt0);
 	con_rows[1].removeChild(con_row2col2);
-	let crt_wide_layout = inp_crtwide.checked && !loc_crt0[1].checked;
-	let crt_tall_layout = inp_crtsize.checked;
+	let crt_wide_layout = ui_crts[0].wide.checked && !loc_crt0[1].checked;
+	let crt_tall_layout = ui_crts[0].tall.checked;
 	const reg_fits_on_first_row = show_reg && window.innerWidth >= 1688;
-	const crt_fits_on_first_row = !inp_crtwide.checked && !loc_crt0[1].checked && cx_crt0.show_ui && window.innerWidth >= 1410;
+	const crt_fits_on_first_row = !ui_crts[0].wide.checked && !loc_crt0[1].checked && cx_crt0.show_ui && window.innerWidth >= 1410;
 	let show_reg_layout = show_reg;
 	let first_row_hp = !show_int || !show_uop || !reg_fits_on_first_row;
 	if(!crt_wide_layout && reg_fits_on_first_row) {
@@ -8235,36 +8607,45 @@ function update_layout() {
 	}
 }
 window.addEventListener('resize', update_layout);
-loc_crt0[0].addEventListener('change', function() { update_layout(); config_updated(); });
-loc_crt0[1].addEventListener('change', function() { update_layout(); config_updated(); });
-inp_crtsize.addEventListener('change', function() { update_layout(); config_updated(); });
-inp_crtwide.addEventListener('change', function() { update_layout(); config_updated(); });
-view_reg.addEventListener('click', function() {
+function layout_and_config() {
+	update_layout(); config_updated();
+}
+loc_crt0[0].addEventListener('change', layout_and_config);
+loc_crt0[1].addEventListener('change', layout_and_config);
+ui_crts[0].view.addEventListener('change', function() {
+	cx_crt0.show_ui = this.checked; config_updated();
+	update_layout();
+});
+ui_crts[0].tall.addEventListener('change', layout_and_config);
+ui_crts[0].wide.addEventListener('change', layout_and_config);
+ui_crts[1].view.addEventListener('change', layout_and_config);
+ui_crts[1].tall.addEventListener('change', layout_and_config);
+ui_crts[1].wide.addEventListener('change', layout_and_config);
+ui_crts[2].view.addEventListener('change', layout_and_config);
+ui_crts[2].tall.addEventListener('change', layout_and_config);
+ui_crts[2].wide.addEventListener('change', layout_and_config);
+view_reg.addEventListener('change', function() {
 	show_reg = this.checked; config_updated();
 	update_layout();
 });
-view_page.addEventListener('click', function() {
+view_page.addEventListener('change', function() {
 	show_page = this.checked; config_updated();
 	update_layout();
 });
-view_int.addEventListener('click', function() {
+view_int.addEventListener('change', function() {
 	show_int = this.checked; config_updated();
 	update_layout();
 });
-view_uop.addEventListener('click', function() {
+view_uop.addEventListener('change', function() {
 	show_uop = this.checked; config_updated();
 	update_layout();
 });
-view_dis.addEventListener('click', function() {
+view_dis.addEventListener('change', function() {
 	show_dis = this.checked; config_updated();
 	update_layout();
 });
-view_ffc.addEventListener('click', function() {
+view_ffc.addEventListener('change', function() {
 	show_ffc = this.checked; config_updated();
-	update_layout();
-});
-view_crt0.addEventListener('click', function() {
-	cx_crt0.show_ui = this.checked; config_updated();
 	update_layout();
 });
 update_layout();
@@ -8301,23 +8682,35 @@ class DiskImageUI {
 			}
 		});
 		this.selrem.addEventListener('click', (ev)=> {
+			if(this.image) {
+				this.setactive(null);
+			} else {
+				console.error('not implemented');
+			}
 		});
-		this.wp.addEventListener('click', function(ev) {
+		this.wp.addEventListener('change', function(ev) {
 			if(self.image != null) {
 				self.image.protect = this.checked;
 			}
 		})
 	}
-	setactive(image:DiskImage) {
-		disk_images[this.sta.id.substring(0,5) + image.filename] = image;
-		this.image = image;
-		image.protect = this.wp.checked;
+	setactive(image:DiskImage|null):void {
+		if(image != null) {
+			disk_images[this.sta.id.substring(0,5) + image.filename] = image;
+			this.image = image;
+			image.protect = this.wp.checked;
+			this.sta.innerText = image.filename;
+			this.selrem.innerText = 'Rem';
+			this.newdl.innerText = 'DL';
+		} else {
+			delete this.image;
+			this.sta.innerText = '';
+			this.selrem.innerText = 'Sel';
+			this.newdl.innerText = 'New';
+		}
 		if(this.drive != null) {
 			this.drive.set_disk(image);
 		}
-		this.sta.innerText = image.filename;
-		this.selrem.innerText = 'Rem';
-		this.newdl.innerText = 'DL';
 	}
 }
 diskui.push(new DiskImageUI('dsk0', dsk2_0.units[0]));
