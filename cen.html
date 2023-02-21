@@ -5,7 +5,7 @@
 <title>Centurion</title>
 <link rel="stylesheet" href="main.css">
 <script>
-window.cen_version = 14;
+window.cen_version = 15;
 </script>
 <script src="js/cen.js"></script>
 <style>
@@ -174,20 +174,28 @@ button.warn {
 </head>
 <body>
 	<div class="popwin" id="wset" style="display:none;top:40px;right:3%;float:right;z-index:90;">
-		<div style="display:flex; flex-direction: column;">
+		<div style="display:flex;">
+			<div style="display:flex; flex-direction: column;">
 			<div>Show/Hide CPU6:</div>
 			<span class="conv-sel"><label><input type="checkbox" id="view_reg" checked>Registers</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="view_page" checked>Page Map</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="view_int" checked>Internal</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="view_uop" checked>&#x03bc;Instruction</label></span>
 			<div>Show/Hide Other:</div>
-			<span class="conv-sel"><label><input type="checkbox" id="view_dis" checked>Disassembly</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="view_ffc">FFC</label></span>
-			<div>Disassembly</div>
+			<div>Disassembly:</div>
+			<span class="conv-sel"><label><input type="checkbox" id="view_dis" checked>Disassembly</label></span>
 			<span class="conv-sel"><input type="radio" name="conv" id="conv_ee" value="ee"/><label for="conv_ee">EE200ish Style</label></span>
 			<span class="conv-sel"><input type="radio" name="conv" id="conv_mei" value="mei" checked/><label for="conv_mei">Modern Parametric</label></span>
 			<span class="conv-sel" style="display: none"><input type="radio" name="conv" id="conv_uew" value="uew"/><label for="conv_uew">Centurion RE Wiki</label></span>
 			<span class="conv-sel"><input type="checkbox" name="conv_hex" id="conv_hex"/><label for="conv_hex">Hex Prefix in Listing</label></span>
+			<div>Timer Interrupt:</div>
+			<span class="conv-sel"><label><input type="radio" name="rtcs" id="rtc_0" value="0" checked/>Cycle Locked</label></span>
+			<span class="conv-sel"><label><input type="radio" name="rtcs" id="rtc_1" value="1"/>Free (50k+)</label></span>
+			<span class="conv-sel"><label><input type="radio" name="rtcs" id="rtc_2" value="2"/>Disable</label></span>
+			</div>
+			</div>
+			<div style="display:flex; flex-direction: column;">
 			<div>CRT0 Terminal:</div>
 			<span class="conv-sel"><label><input type="checkbox" id="view_crt0" checked>Show</label></span>
 			<span class="conv-sel"><label><input type="radio" name="crt0l" id="crt0loc_t" value="top" checked>Top</label></span>
@@ -202,6 +210,7 @@ button.warn {
 			<span class="conv-sel"><label><input type="checkbox" id="view_crt2" checked>Show</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="crttall2"/>Tall CRT</label></span>
 			<span class="conv-sel"><label><input type="checkbox" id="crtwide2"/>Wide CRT</label></span>
+			</div>
 		</div>
 	</div>
 	<div class="popwin" id="wload" style="display:none;top:100px;right:45%;padding:10px 20px 20px 20px;float:right;z-index:90;">
@@ -244,6 +253,19 @@ button.warn {
 			<div class="fixed memv text"></div>
 		</div>
 	</div>
+	<div class="popwin" id="diskview" style="top:100px;left:200px;display:none">
+		<div class="winfrm"><div>Disks</div></div>
+		<div style="overflow-y:scroll;height:700px;width: 600px;margin:10px;margin-right:0;border:solid 2px #000;position: relative;">
+			<div style="width:1px;height:4000px;position:absolute;left:0;top:0"></div>
+			<div class="fixed memv addr"></div>
+		</div>
+		<div style="overflow-y:scroll;height:700px;width: 800px;margin:10px;border:solid 2px #000;position: relative;">
+			<div style="width:1px;height:4000px;position:absolute;left:0;top:0"></div>
+			<div class="fixed memv addr"></div>
+			<div class="fixed memv data"></div>
+			<div class="fixed memv text"></div>
+		</div>
+	</div>
 	<div class="popwin" id="crtc1" style="position:absolute;top:100px;left:20px;display:flex;">
 		<div class="winfrm"><div>CRT1</div></div>
 		<div class="termcon">
@@ -280,6 +302,7 @@ button.warn {
 		<button id="b_r8" style="display:none">150k</button>
 		<button id="b_mstep">&#x03bc;Step</button>
 		<div style="flex-grow: 1"></div>
+		<button id="b_disks">Disks</button>
 		<button id="b_memory">Mem</button>
 		<button id="b_micro">&#x03bc;Code</button>
 		<button id="b_local">Local</button>

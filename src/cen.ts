@@ -1,6 +1,6 @@
 "use strict";
 //@ts-ignore
-window.cen_ts_version = 14;
+window.cen_ts_version = 15;
 window.addEventListener('load', async function(){
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
@@ -28,6 +28,11 @@ const ui_crts = [
 		tall: document.getElementById('crttall2') as HTMLInputElement,
 		wide: document.getElementById('crtwide2') as HTMLInputElement
 	}
+];
+const opt_rtc = [
+	document.getElementById('rtc_0') as HTMLInputElement,
+	document.getElementById('rtc_1') as HTMLInputElement,
+	document.getElementById('rtc_2') as HTMLInputElement
 ];
 const conv_hex = document.getElementById('conv_hex') as HTMLInputElement;
 const conv_ee = document.getElementById('conv_ee') as HTMLInputElement;
@@ -72,6 +77,8 @@ const run_rate8 = document.getElementById('b_r8') as HTMLButtonElement;
 const memory_view = document.getElementById('memview') as HTMLDivElement;
 const memory_button = document.getElementById('b_memory') as HTMLButtonElement;
 const memory_elem:{a:HTMLDivElement, d:HTMLDivElement, t:HTMLDivElement}[] = [];
+const win_disk = document.getElementById('diskview') as HTMLDivElement;
+const disk_button = document.getElementById('b_disks') as HTMLButtonElement;
 const micro_button = document.getElementById('b_micro') as HTMLButtonElement;
 const local_button = document.getElementById('b_local') as HTMLButtonElement;
 const win_micro = document.getElementById('mclisting') as HTMLDivElement;
@@ -167,6 +174,55 @@ const btn_cm_clear = document.getElementById('cm_clear') as HTMLButtonElement;
 const txt_anno = document.getElementById('anno') as HTMLTextAreaElement;
 const cv_diag = document.getElementById('fp_diag') as HTMLCanvasElement;
 const cx_diag = cv_diag.getContext('2d') as CanvasRenderingContext2D;
+
+const RUNRATES = [1,10,100,1000,10000,50000,100000,150000];
+interface ConfigSchema {
+	0:[],
+	1:[boolean[],number,number],
+	2:[number],
+	3:[boolean],
+	4:[boolean,boolean,number],
+	5:[boolean,number],
+	16: [boolean[]][],
+	17?: [][],
+	18?: [][],
+	19?: [][],
+	20?: [boolean,boolean][],
+}
+const CONFIG_LL:BRObject & ConfigSchema = {
+	0: [],
+	1: [[false,false,false,false],0,0],
+	2: [0],
+	3: [false],
+	4: [false,false,1],
+	5: [false,13],
+	16: [ // CRT[]
+		[/*0:viewopts*/[true,false,false,false]],
+		[/*0:viewopts*/[false,false,false,false]],
+		[/*0:viewopts*/[false,false,false,false]]
+	],
+	//17: [ // MUX[]
+	//[]
+	//],
+	//18: [ // DSK[]
+	//],
+	19: [ // Hawk[]
+	],
+	20: [ // FFC[]
+		[true, false]
+	]
+};
+const CONFIG = {
+	uicore: CONFIG_LL[0], // uicore
+	cpu: CONFIG_LL[1], // cpu
+	emu: CONFIG_LL[2],
+	net: CONFIG_LL[3], // TODO
+	disassm: CONFIG_LL[4],
+	diag: CONFIG_LL[5],// diag
+	crt: CONFIG_LL[16],// crt[]
+	ffc: CONFIG_LL[20],// ffc[]
+};
+
 interface DiskContainer {
 	set_disk(image:DiskImage|null):void;
 }
@@ -318,6 +374,7 @@ class ModFrame {
 const frame_crt1 = new ModFrame(win_crt1);
 const frame_crt2 = new ModFrame(win_crt2);
 const frame_memory = new ModFrame(memory_view);
+const frame_disks = new ModFrame(win_disk);
 const frame_mclist = new ModFrame(win_micro);
 interface LoadResponse {
 	kind: string,
@@ -2511,6 +2568,8 @@ let sys_write_latch = false;
 let sys_read_in = false;
 let cycles = 0;
 let rtc = false;
+let rtphase = 0;
+let rtlast = 0;
 let f12a = 0;
 let f12b = 0;
 let b15a = 1;
@@ -3371,10 +3430,28 @@ function hsstep() {
 
 	// timer
 	cycles++;
+	if(cycles >= 2000 && CONFIG.cpu[2] == 1 && (sysctl & 0x20) != 0) {
+		let n = Date.now();
+		cycles = 0;
+		if(n >= rtlast) {
+			rtphase++;
+			rtc = true;
+			if(rtphase == 15) {
+				rtphase = 0;
+				rtlast += 10;
+			} else {
+				rtlast += 16;
+			}
+			if(n > rtlast + 1000) {
+				rtlast = Date.now();
+			}
+		}
+	}
 	if (cycles >= 83333) {
 		cycles = 0;
-		if ((sysctl & 0x20) != 0) {
+		if (CONFIG.cpu[2] == 0 && (sysctl & 0x20) != 0) {
 			rtc = true;
+			rtlast = Date.now();
 		}
 	}
 	if ((sysctl & 0x20) == 0) {
@@ -3837,7 +3914,7 @@ function step(debug_output:boolean = false) {
 
 	// timer
 	cycles++;
-	if (cycles >= 83333) {
+	if (cycles >= 83333 && CONFIG.cpu[2] < 2) {
 		cycles = 0;
 		if ((sysctl & 0x20) != 0) {
 			rtc = true;
@@ -4686,6 +4763,207 @@ function update_microlist() {
 		m.bpc.checked = m.bp;
 	}
 }
+// -2208988800000 // +2
+// -2208816000000 // +4
+const disk_origin_date = -2209161600000;
+const disk_file_types = [
+	{t:'D',x:'RAW'},
+	{t:'B',x:'BIN'},
+	{t:'A',x:'TXT'},
+	{t:'C',x:'BIN'},
+	{t:'E',x:'BIN'},
+	{t:'L',x:'VOL'},
+	{t:'I',x:'RAW'},
+	{t:'S',x:'RAWS'},
+	{t:'Q',x:'RAWQ'},
+	{t:'X',x:'FILE9'},
+	{t:'X',x:'FILE10'},
+	{t:'X',x:'FILE11'},
+	{t:'X',x:'FILE12'},
+	{t:'X',x:'FILE13'},
+	{t:'X',x:'FILE14'},
+	{t:' ',x:'FILE15'},
+];
+
+class DiskViewer {
+	listing:{n:HTMLDivElement}[] = [];
+	listing_lproxy: HTMLDivElement;
+	listingc: HTMLDivElement;
+	listing_index = 0;
+	datae:{a:HTMLDivElement, d:HTMLDivElement, t:HTMLDivElement}[] = [];
+	datae_lproxy: HTMLDivElement;
+	datae_con_a: HTMLDivElement;
+	datae_con_d: HTMLDivElement;
+	datae_con_t: HTMLDivElement;
+	datae_index = 0;
+	constructor() {
+		const listscrollbox = frame_disks.base.children[1] as HTMLDivElement;
+		const datascrollbox = frame_disks.base.children[2] as HTMLDivElement;
+		this.listing_lproxy = listscrollbox.children[0] as HTMLDivElement;
+		this.listingc = listscrollbox.children[1] as HTMLDivElement;
+		this.datae_lproxy = datascrollbox.children[0] as HTMLDivElement;
+		this.datae_con_a = datascrollbox.children[1] as HTMLDivElement;
+		this.datae_con_d = datascrollbox.children[2] as HTMLDivElement;
+		this.datae_con_t = datascrollbox.children[3] as HTMLDivElement;
+	}
+	get_list_elem() {
+		let li = this.listing[this.listing_index];
+		if(li == null) {
+			li = {
+				n: document.createElement('div')
+			};
+			this.listingc.appendChild(li.n);
+			this.listing[this.listing_index] = li;
+		}
+		this.listing_index++;
+		return li;
+	}
+	get_datae_elem() {
+		let li = this.datae[this.datae_index];
+		if(li == null) {
+			li = {
+				a: document.createElement('div'),
+				d: document.createElement('div'),
+				t: document.createElement('div')
+			};
+			this.datae_con_a.appendChild(li.a);
+			this.datae_con_d.appendChild(li.d);
+			this.datae_con_t.appendChild(li.t);
+			this.datae[this.datae_index] = li;
+		}
+		this.datae_index++;
+		return li;
+	}
+	update() {
+		this.listing_index = 0;
+		this.datae_index = 0;
+		const self = this;
+		function list_disk_name(n:string) {
+			let li = self.get_list_elem();
+			li.n.innerText = n;
+		}
+		function list_vol_name(n:string) {
+			let li = self.get_list_elem();
+			li.n.innerText = n;
+		}
+		function list_file_name(n:string) {
+			let li = self.get_list_elem();
+			li.n.innerText = n;
+		}
+		function fixed_str(data:Uint8Array, ofs:number, count:number) {
+			let s = '';
+			for(let i = 0; i < count; i++) {
+				let c = data[ofs + i] & 127;
+				if(c == 0) return s;
+				if(c < 32) {
+					switch(c) {
+					case 10: s += '\\n'; break;
+					case 13: s += '\\r'; break;
+					default:
+						s += '^' + hex(data[ofs + i]);
+					}
+				} else s += String.fromCharCode(c);
+			}
+			return s;
+		}
+		function u24(data:Uint8Array, ofs:number) {
+			return (data[ofs] << 16) | (data[ofs + 1] << 8) | data[ofs + 2];
+		}
+		function disk_date(dts:number) {
+			let d = '';
+			if(dts != 0) {
+				let fe_dts = disk_origin_date + (86400000 * dts);
+				d = (new Date(fe_dts)).toISOString().substring(0,10);
+			}
+			return d;
+		}
+		function decode_image(im: DiskImage) {
+			const stride = im.stride;
+			const view = new DataView(im.backing_data);
+			const max_sector_ofs = im.backing_data.byteLength;
+			const max_sector = (max_sector_ofs / stride) | 0;
+			let sector = im.stride * 16;
+			let vol = fixed_str(im.data, sector, 10);
+			const vol_reorg_date = view.getUint16(sector + 10, false);
+			const vol_reorg_errs = view.getUint8(sector + 12);
+			const vol_dir_sect = u24(im.data, sector + 13);
+			if(vol_dir_sect == 0) {
+				vol = '<<< NUL >>>';
+			} else if(vol_dir_sect >= max_sector) {
+				if(im.data[sector] == 0x84) {
+					if(im.data[sector+1] == 0x0c) vol = '<<< INIT >>>';
+					else vol = `<<< ${hex(im.data[sector+1])} >>>`;
+				}
+			}
+			let volx:string;
+			if(vol_reorg_date == 0) {
+				volx = '<no reorg>';
+			} else {
+				volx = `${disk_date(vol_reorg_date)} ${vol_reorg_errs}`;
+			}
+			list_vol_name(vol + ` ${volx} [${hex(vol_dir_sect, 6)}]`);
+			let entry = 16;
+			secloop:do { do {
+				const esect = entry + sector;
+				if(im.data[esect] == 0x84 && im.data[esect+1] == 0x8d) {
+					list_file_name(`<<EOL>>`);
+					break secloop;
+				}
+				const name = fixed_str(im.data, esect, 10);
+				if(name.length == 0) { entry += 16; continue; }
+				const fe_map_idx = im.data[esect + 10] * 3;
+				const fe_map_sec = view.getUint16(esect + 11, false);
+				const fe_type = disk_file_types[im.data[esect + 13] & 0xf].t;
+				const fe_attr = im.data[esect + 13];
+				const fe_date = view.getUint16(esect + 14, false);
+				let fe_day = '';
+				if(fe_date != 0) {
+					let fe_dts = disk_origin_date + (86400000 * fe_date);
+					fe_day = (new Date(fe_dts)).toISOString().substring(0,10);
+				}
+				const fm_sect = vol_dir_sect + fe_map_sec;
+				const fm_base = fm_sect * stride + fe_map_idx;
+				if(fm_sect >= max_sector || fe_map_idx >= 400) {
+					list_file_name(`${name} ${fe_type} <BAD:${hex(fe_map_sec,4)}:${hex(fe_map_idx)}> ${fe_day}`);
+					entry += 16;
+					continue;
+				}
+				const fm_length = view.getUint16(fm_base, false) + 1;
+				const fm_begin_ptr = view.getUint16(fm_base + 2, false);
+				const fm_shift = im.data[fm_base + 4];
+				const fm_cls = im.data[fm_base + 5];
+				const fm_6 = u24(im.data, fm_base + 6);
+				if(fm_shift > 15) {
+					list_file_name(`${name} ${fe_type}:${hex(fe_attr)} <BAD:${hex(fe_map_sec,4)}:${hex(fe_map_idx)}> <${hex(fm_length,4)}:${hex(fm_begin_ptr,4)}:${hex(fm_shift)}:${hex(fm_cls)}:${hex(fm_6,6)}>`);
+				} else {
+					let fm_len_t = fm_length >> 4;
+					let fm_len_s = fm_length & 15;
+					let fm_len_tx = `${fm_len_t}T`.padStart(4);
+					let fm_len_sx = `${fm_len_s}S`.padStart(3);
+					let fm_fsi_t;
+					if(fm_shift > 3) {
+						fm_fsi_t = `${1<<(fm_shift - 4)}T`.padStart(4);
+					} else {
+						fm_fsi_t = `${1<<fm_shift}S`.padStart(4);
+					}
+					let fm_bbp_t = '';
+					if(fm_begin_ptr != 0x8000) fm_bbp_t = ' ' + hex(fm_begin_ptr);
+					list_file_name(`${name} ${fe_type} ${fm_len_tx}${fm_len_sx}${fm_fsi_t} ${hex(fm_cls)}${fm_bbp_t} <${hex(fe_map_sec,4)}:${hex(fe_map_idx)}> ${fe_day}`);
+				}
+				entry += 16;
+			} while(entry < 400);
+				entry = 0;
+				sector += stride;
+			} while(sector < max_sector_ofs);
+		}
+		for(let name in disk_images) {
+			list_disk_name(name);
+			decode_image(disk_images[name]);
+		}
+	}
+}
+const disk_view = new DiskViewer();
+
 const enum MEMSTAT {
 	IO = 0x200,
 	P_ODD = 0x100,
@@ -4718,7 +4996,8 @@ class DiagIO implements MemAccess {
 		case 15: this.points &= 0x7; break;
 		case 16: v = this.dip & 255;
 			return v;
-		default: return 0;
+		default: console.log('DIAG R/W',hex(f));
+			return 0;
 		}
 		cx_diag.clearRect(0, 0, 40, 30);
 		if (!this.blank) cx_diag.fillText('00', 10, 20);
@@ -5905,6 +6184,35 @@ class TestCMD implements MemAccess, Run, DMADevice {
 		} else if (this.cancel_request != null) {
 			this.cancel_request();
 			this.cancel_request = null;
+		}
+	}
+}
+class MockTape9Tk implements MemAccess {
+	readmeta(address: number):number { return MEMSTAT.IO; }
+	writemeta(address: number, value: number): void {}
+	data0 = 0;
+	data_ctl = 0;
+	reset() {
+		this.data_ctl = 0;
+		this.data0 = 0;
+	}
+	readbyte(address: number): number {
+		switch(address) {
+		case 0: return this.data0;
+		case 1: return 0x2d;
+		case 2: return 0xb3;
+		default: console.log('Tape ?R<', address, 0);
+		}
+		return 0;
+	}
+	writebyte(address: number, value: number): void {
+		switch(address) {
+		case 0: this.data0 = value; console.log('Tape D', hex(value)); return;
+		case 1: this.data_ctl = value; return;
+		case 2: console.log(`Tape ${hex(this.data0)} ctl:${hex(this.data_ctl)}.${hex(value)}`);
+		case 3: console.log('Tape ST', hex(value));
+			return;
+		default: console.log('Tape ?W>', address, hex(value));
 		}
 	}
 }
@@ -7599,10 +7907,14 @@ bpl.configio(0, mmio_mux);
 bpl.configio(1, dsk2_0);
 const mmio_0 = new MMIOMulti();
 const mmio_1 = new MMIOMulti();
+const mmio_7 = new MMIOMulti();
 const mmio_8 = new MMIOMulti();
-mmio_1.adddev(0, 0x11, cx_diag0);
+mmio_1.adddev(0, 0x20, cx_diag0);
 mmio_1.adddev(0x40, 0x10, dsk2_0);
 const mmio_t = new MMIOTrace();
+const test_tape = new MockTape9Tk();
+mmio_7.adddev(0, 16, test_tape);
+mmio_7.adddev(0x10, 240, mmio_t);
 const main_ffc = new FinchFloppyControl();
 bpl.configio(2, main_ffc);
 mmio_8.adddev(0, 2, main_ffc);
@@ -7621,6 +7933,7 @@ function setupmemory() {
 	bpl.configmemory(0x3f000, mmio_0, 256);
 	bpl.configmemory(0x3f100, mmio_1, 256);
 	bpl.configmemory(0x3f200, mmio_mux, 256);
+	bpl.configmemory(0x3f700, mmio_7, 256);
 	bpl.configmemory(0x3f800, mmio_8, 256);
 	bpl.configmemory(0x3fc00, bpl_rom_fc, 512);
 	if (in_diagins.checked) {
@@ -7944,54 +8257,6 @@ function from_csr(s:string):ArrayBuffer {
 	return buffer;
 }
 
-const RUNRATES = [1,10,100,1000,10000,50000,100000,150000];
-interface ConfigSchema {
-	0:[],
-	1:[boolean[],number],
-	2:[number],
-	3:[boolean],
-	4:[boolean,boolean,number],
-	5:[boolean,number],
-	16: [boolean[]][],
-	17?: [][],
-	18?: [][],
-	19?: [][],
-	20?: [boolean,boolean][],
-}
-const CONFIG_LL:BRObject & ConfigSchema = {
-	0: [],
-	1: [[false,false,false,false],0],
-	2: [0],
-	3: [false],
-	4: [false,false,1],
-	5: [false,13],
-	16: [ // CRT[]
-		[/*0:viewopts*/[true,false,false,false]],
-		[/*0:viewopts*/[false,false,false,false]],
-		[/*0:viewopts*/[false,false,false,false]]
-	],
-	//17: [ // MUX[]
-	//[]
-	//],
-	//18: [ // DSK[]
-	//],
-	19: [ // Hawk[]
-	],
-	20: [ // FFC[]
-		[true, false]
-	]
-};
-const CONFIG = {
-	uicore: CONFIG_LL[0], // uicore
-	cpu: CONFIG_LL[1], // cpu
-	emu: CONFIG_LL[2],
-	net: CONFIG_LL[3], // TODO
-	disassm: CONFIG_LL[4],
-	diag: CONFIG_LL[5],// diag
-	crt: CONFIG_LL[16],// crt[]
-	ffc: CONFIG_LL[20],// ffc[]
-};
-
 function config_load() {
 	// config_load must be called before:
 	// update_layout()
@@ -8020,6 +8285,10 @@ function config_load() {
 		const sense = CONFIG.cpu[1];
 		sense_switch = sense & 15;
 		dswitch = (sense >> 4) & 14;
+		const rtcsrc = CONFIG.cpu[2];
+		opt_rtc[0].checked = rtcsrc == 0;
+		opt_rtc[1].checked = rtcsrc == 1;
+		opt_rtc[2].checked = rtcsrc == 2;
 	}
 	{
 		// 0: number run_rate = RUNRATES[val];
@@ -8100,6 +8369,11 @@ function config_save() {
 		show[2] = show_reg;
 		show[3] = show_page;
 		CONFIG.cpu[1] = sense_switch | (dswitch << 4);
+		let rtcsrc = 0;
+		if(opt_rtc[2].checked) rtcsrc = 2;
+		if(opt_rtc[1].checked) rtcsrc = 1;
+		if(opt_rtc[0].checked) rtcsrc = 0;
+		CONFIG.cpu[2] = rtcsrc;
 	}
 	{
 		// 0: number run_rate = RUNRATES[val];
@@ -8430,6 +8704,10 @@ memory_button.addEventListener('click', function(ev) {
 		update_memview();
 	}
 });
+disk_button.addEventListener('click', function(ev) {
+	frame_manager.toggle_show_raise(frame_disks);
+	if(frame_disks.show) disk_view.update();
+});
 
 run_button.addEventListener('click', function(ev) {
 	run_control(run_ctl == 0);
@@ -8494,7 +8772,9 @@ btn_cm_tocrt.addEventListener('click', function(ev) {
 btn_cm_clear.addEventListener('click', function(ev) {
 	txt_anno.value = '';
 });
-
+opt_rtc[0].addEventListener('change', function(ev) { if(this.checked) CONFIG.cpu[2] = 0; });
+opt_rtc[1].addEventListener('change', function(ev) { if(this.checked) CONFIG.cpu[2] = 1; });
+opt_rtc[2].addEventListener('change', function(ev) { if(this.checked) CONFIG.cpu[2] = 2; });
 conv_ee.addEventListener('change', function(ev) {
 	name_conv = NAMECON.CENT; config_updated();
 	show_disasm();
