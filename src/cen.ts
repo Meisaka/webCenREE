@@ -3438,9 +3438,9 @@ function hsstep() {
 			rtc = true;
 			if(rtphase == 15) {
 				rtphase = 0;
-				rtlast += 10;
+				rtlast += 12;
 			} else {
-				rtlast += 16;
+				rtlast += 17;
 			}
 			if(n > rtlast + 1000) {
 				rtlast = Date.now();
