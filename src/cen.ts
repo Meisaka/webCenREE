@@ -1,7 +1,8 @@
 "use strict";
+import * as monaco from 'monaco-editor';
+
 //@ts-ignore
-window.cen_ts_version = 15;
-window.addEventListener('load', async function(){
+window.cen_ts_version = 17;
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
 const view_page = document.getElementById('view_page') as HTMLInputElement;
@@ -63,7 +64,6 @@ const con_row1col2 = document.getElementById('cd_r1c2') as HTMLDivElement;
 const con_row2col2 = document.getElementById('ccr2') as HTMLDivElement;
 const con_row6col2 = document.getElementById('cd_r6c2') as HTMLDivElement;
 const down_div = document.getElementById('dld') as HTMLDivElement;
-const reset_button = document.getElementById('b_reset') as HTMLButtonElement;
 const step_button = document.getElementById('b_step') as HTMLButtonElement;
 const run_button = document.getElementById('b_run') as HTMLButtonElement;
 const run_rate1 = document.getElementById('b_r1') as HTMLButtonElement;
@@ -74,10 +74,14 @@ const run_rate5 = document.getElementById('b_r5') as HTMLButtonElement;
 const run_rate6 = document.getElementById('b_r6') as HTMLButtonElement;
 const run_rate7 = document.getElementById('b_r7') as HTMLButtonElement;
 const run_rate8 = document.getElementById('b_r8') as HTMLButtonElement;
+const win_assm = document.getElementById('assmview') as HTMLDivElement;
+const con_assm_edit = document.getElementById('assmedit') as HTMLDivElement;
+const con_assm_out = document.getElementById('assmoutp') as HTMLDivElement;
 const memory_view = document.getElementById('memview') as HTMLDivElement;
 const memory_button = document.getElementById('b_memory') as HTMLButtonElement;
 const memory_elem:{a:HTMLDivElement, d:HTMLDivElement, t:HTMLDivElement}[] = [];
 const win_disk = document.getElementById('diskview') as HTMLDivElement;
+const assm_button = document.getElementById('b_asm') as HTMLButtonElement;
 const disk_button = document.getElementById('b_disks') as HTMLButtonElement;
 const micro_button = document.getElementById('b_micro') as HTMLButtonElement;
 const local_button = document.getElementById('b_local') as HTMLButtonElement;
@@ -133,15 +137,25 @@ const mcpage = [
 	document.getElementById('mcp_2') as HTMLSpanElement,
 	document.getElementById('mcp_3') as HTMLSpanElement,
 ];
-const mcr_file = [
-document.getElementById('mcr_file0') as HTMLSpanElement,
-document.getElementById('mcr_file2') as HTMLSpanElement,
-document.getElementById('mcr_file4') as HTMLSpanElement,
-document.getElementById('mcr_file6') as HTMLSpanElement,
-document.getElementById('mcr_file8') as HTMLSpanElement,
-document.getElementById('mcr_fileA') as HTMLSpanElement,
-document.getElementById('mcr_fileC') as HTMLSpanElement,
-document.getElementById('mcr_fileE') as HTMLSpanElement];
+const mcr_file:HTMLSpanElement[] = [];
+const mcr_file_v = new Uint16Array(128);
+(function(){
+	let row_index = 0;
+	while(row_index < 15) {
+		const row = document.getElementById(`mcr_file${hex(row_index,1)}`) as HTMLSpanElement;
+		for(let col_index = 0; col_index < 16; col_index++) {
+			const col = document.createElement('span');
+			col.innerText = '0000';
+			row.appendChild(col);
+			mcr_file.push(col);
+			if(col_index == 7) {
+				const txt = document.createTextNode(' ');
+				row.appendChild(txt);
+			}
+		}
+		row_index += 2;
+	}
+})();
 const mcr_level = document.getElementById('mcr_level') as HTMLSpanElement;
 const mcr_rfir = document.getElementById('mcr_rfir') as HTMLSpanElement;
 const mcr_rfdr = document.getElementById('mcr_rfdr') as HTMLSpanElement;
@@ -165,10 +179,18 @@ const ffc_alu3 = document.getElementById('ffc_alu3') as HTMLSpanElement;
 const ffc_log = document.getElementById('ffc_log') as HTMLButtonElement;
 const d_listing = document.getElementById('listing') as HTMLDivElement;
 const d_listingc = document.getElementById('listingc') as HTMLDivElement;
+const vc_reset = document.getElementById('vc_reset') as HTMLButtonElement;
+const vc_sync = document.getElementById('vc_sync') as HTMLButtonElement;
+const vc_step = document.getElementById('vc_step') as HTMLButtonElement;
+const vc_clear = document.getElementById('vc_clear') as HTMLButtonElement;
+const vc_snap = document.getElementById('vc_snap') as HTMLButtonElement;
+const vc_restore = document.getElementById('vc_restore') as HTMLButtonElement;
+const vc_run = document.getElementById('vc_run') as HTMLButtonElement;
+const vc_rerun = document.getElementById('vc_rerun') as HTMLButtonElement;
 const d_micro = document.getElementById('micro') as HTMLDivElement;
 const in_diagins = document.getElementById('diagins') as HTMLInputElement;
 const in_dbgcmd = document.getElementById('dbgcmd') as HTMLInputElement;
-const btn_cm_import = document.getElementById('cm_imp') as HTMLButtonElement;
+//const btn_cm_import = document.getElementById('cm_imp') as HTMLButtonElement;
 const btn_cm_tocrt = document.getElementById('cm_vki') as HTMLButtonElement;
 const btn_cm_clear = document.getElementById('cm_clear') as HTMLButtonElement;
 const txt_anno = document.getElementById('anno') as HTMLTextAreaElement;
@@ -373,6 +395,7 @@ class ModFrame {
 }
 const frame_crt1 = new ModFrame(win_crt1);
 const frame_crt2 = new ModFrame(win_crt2);
+const frame_assm = new ModFrame(win_assm);
 const frame_memory = new ModFrame(memory_view);
 const frame_disks = new ModFrame(win_disk);
 const frame_mclist = new ModFrame(win_micro);
@@ -570,12 +593,12 @@ function handle_break():boolean {
 	dis_after = show_dis;
 	return true;
 }
-this.setInterval(function() {
+setInterval(function() {
 	let runtime = run_accutime;
 	let runcount = run_accu;
 	run_accutime = 0;
 	run_accu = 0;
-	fp_perf.innerText = runcount.toString().padStart(6,'0') + ':' + (run_rate >= 10000 ? 'F' : 'R') + ':' + runtime.toString().padStart(4,'0');
+	fp_perf.innerText = runcount.toString().padStart(6,'0') + ':' + (run_rate > 10000 ? 'F' : 'R') + ':' + runtime.toString().padStart(4,'0');
 }, 1000);
 
 function bload(v:string):Uint8Array {
@@ -1093,11 +1116,25 @@ ChMThWbGMzME0YU9zYFYggADMScUkQHJXeH7H8V0WFQAxcG1EbhE1EbZqIGFGo7WYMVWBMkaYdQA
 tADU68EATlJDhT7FxADJejufCMzJTlHm98kyqJZ/gIh/TH6CRI61FS/wpgC9ARQACtkMgXcGCMHU
 MATFHoMQqIbZ1r3lAMJKEcUBLIIHAczNBZsF5dY5wQXwHsWOq7DrQgXkBTOF2IAsGsDGmcgA0QXM
 BfwbC3qFZgLOgtbZ1WZOEDOFZqSkJoUMLgBDhW4szMFDf4U+QMkzhTYzIzOFByPNS87Fu60=`),
-map:bload(`iwEZT4uLha97k4uOyn6Li/39/Pz7+/r6Vvn+7t7Ougfv7+/v7+/v7x0eIiMkIYuL+Pj4+Pj4+Pgu
-LyolTU4fH0VFRUVFRUugQUFBQEBAQECJiYmJiYl8fUNDQ0BAQEBAFGVlZWVlt7AxZGRkZGRQUwlU
-VFRUVIuJiWRkZGRkkJAbUVFRUVGLPTM1NTU1NTU1FVRUVFRUiwkzNTU1NTU1NStRUVFRUYsJMzU1
-NTU1NTU8VFRUVFSLCTM1NTU1NTU1LGBgYGBgiwk0NjY2NjY2Nj5iYmJiYmuLNDY2NjY2NjYmYGBg
-YGCLCTQ2NjY2NjY2MGJiYmJiixM0NjY2NjY2Ng==`)
+map:new Uint8Array([
+//.0   .1   .2   .3    .4   .5   .6   .7    .8   .9   .A   .B    .C   .D   .E   .F
+0x8B,0x01,0x19,0x4F, 0x8B,0x8B,0x85,0xAF, 0x7B,0x93,0x8B,0x8E, 0xCA,0x7E,0x8B,0x8B, // 0.
+0xFD,0xFD,0xFC,0xFC, 0xFB,0xFB,0xFA,0xFA, 0x56,0xF9,0xFE,0xEE, 0xDE,0xCE,0xBA,0x07, // 1.
+0xEF,0xEF,0xEF,0xEF, 0xEF,0xEF,0xEF,0xEF, 0x1D,0x1E,0x22,0x23, 0x24,0x21,0x8B,0x8B, // 2.
+0xF8,0xF8,0xF8,0xF8, 0xF8,0xF8,0xF8,0xF8, 0x2E,0x2F,0x2A,0x25, 0x4D,0x4E,0x1F,0x1F, // 3.
+0x45,0x45,0x45,0x45, 0x45,0x45,0x4B,0xA0, 0x41,0x41,0x41,0x40, 0x40,0x40,0x40,0x40, // 4.
+0x89,0x89,0x89,0x89, 0x89,0x89,0x7C,0x7D, 0x43,0x43,0x43,0x40, 0x40,0x40,0x40,0x40, // 5.
+0x14,0x65,0x65,0x65, 0x65,0x65,0xB7,0xB0, 0x31,0x64,0x64,0x64, 0x64,0x64,0x50,0x53, // 6.
+0x09,0x54,0x54,0x54, 0x54,0x54,0x8B,0x89, 0x89,0x64,0x64,0x64, 0x64,0x64,0x90,0x90, // 7.
+0x1B,0x51,0x51,0x51, 0x51,0x51,0x8B,0x3D, 0x33,0x35,0x35,0x35, 0x35,0x35,0x35,0x35, // 8.
+0x15,0x54,0x54,0x54, 0x54,0x54,0x8B,0x09, 0x33,0x35,0x35,0x35, 0x35,0x35,0x35,0x35, // 9.
+0x2B,0x51,0x51,0x51, 0x51,0x51,0x8B,0x09, 0x33,0x35,0x35,0x35, 0x35,0x35,0x35,0x35, // A.
+0x3C,0x54,0x54,0x54, 0x54,0x54,0x8B,0x09, 0x33,0x35,0x35,0x35, 0x35,0x35,0x35,0x35, // B.
+0x2C,0x60,0x60,0x60, 0x60,0x60,0x8B,0x09, 0x34,0x36,0x36,0x36, 0x36,0x36,0x36,0x36, // C.
+0x3E,0x62,0x62,0x62, 0x62,0x62,0x6B,0x8B, 0x34,0x36,0x36,0x36, 0x36,0x36,0x36,0x36, // D.
+0x26,0x60,0x60,0x60, 0x60,0x60,0x8B,0x09, 0x34,0x36,0x36,0x36, 0x36,0x36,0x36,0x36, // E.
+0x30,0x62,0x62,0x62, 0x62,0x62,0x8B,0x13, 0x34,0x36,0x36,0x36, 0x36,0x36,0x36,0x36  // F.
+])
 };
 
 const ffcmc = {
@@ -1323,11 +1360,16 @@ function update_font_data(main_color:number) {
 		}
 	}
 }
-update_font_data(0xf0aa66);
-//update_font_data(0xc0aaaa);
-//update_font_data(0x147ae0);
+const vt_font_bmp:(ImageBitmap|null)[] = [null, null, null];
+let font_load = (async function() {
+	update_font_data(0xf0aa66);
+	vt_font_bmp[0] = await createImageBitmap(vt_font_data);
+	update_font_data(0xc0aaaa);
+	vt_font_bmp[1] = await createImageBitmap(vt_font_data);
+	update_font_data(0x147ae0);
+	vt_font_bmp[2] = await createImageBitmap(vt_font_data);
+})();
 
-const vt_font_bmp:ImageBitmap = await createImageBitmap(vt_font_data);
 interface CharDevice {
 	write(c:number):void;
 	check_read():void;
@@ -1475,7 +1517,13 @@ class VTerm implements CharDevice {
 				if(vctrl) vctrl.classList.remove('active');
 			});
 		}
-		this.update_screen();
+		if(vt_font_bmp[0] == null) {
+			font_load.then(() => {
+				this.update_screen();
+			});
+		} else {
+			this.update_screen();
+		}
 	}
 	run(increment:number):void {
 		if(this.import_buf.length > 0) {
@@ -1493,8 +1541,8 @@ class VTerm implements CharDevice {
 		if(clear) this.ctx.clearRect(vcx, vcy, vt_width, vt_height);
 		const vtfx = (vcc & 15) * 8;
 		const vtfy = (vcc >> 4) * 10;
-		//this.ctx.strokeText(this.chardec(vcc), vcx, vcy + VTerm.char_base);
-		this.ctx.drawImage(vt_font_bmp, vtfx, vtfy, 8, 10, vcx, vcy, 8, 10);
+		if(vt_font_bmp[0] != null)
+			this.ctx.drawImage(vt_font_bmp[0], vtfx, vtfy, 8, 10, vcx, vcy, 8, 10);
 		if(this.blink && cellx == this.cursor_x && celly == this.cursor_y) {
 			this.ctx.fillRect(vcx, vcy + 8, vt_width, 2);
 		}
@@ -1810,6 +1858,196 @@ setInterval(function(){
 const init_program = '79 86 23 C8 E5 EC EC EF F2 EC E4 A1 8D 8A 00 71 80 01';
 const program_rotl = '60 AA AA 60 AA AA 55 40 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 71 01 03';
 const program_rotr = '60 AA AA 60 AA AA 55 40 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 36 00 71 01 03';
+const programx_xassm = bload(`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
+1YgYWPWIGNWIEFs6PxkIhWGlIUAQc/WLQAEU14AEc9NtopWIBjABXJX5AHgiW4gYtYgUUAZliBDa
+wIRBMhUD63Mx2iIgWJAABVj1iBiQAYpZFwZ7MBTQc5+VQV0iAPVhQDI4xUHlYUAyORf3wIAjICAg
++ypzgjq1iBiViBK1iAh5AIkCCXvvFRt5AEYClYgWtYgSOLWIFjlRIBAHVYJmGV0VAjoJgGoBAgFl
+CHQbAQICbQiFAYBI34AAAAAAAAAAAQIBTgiy9AAIItMCCW2ie8pzxmsBAgK8CwwoADYi29VBlSHz
+HkUQ1UGFIYUh8xZdtaJBARYCRTBFASIAswN5AAAAAAAAAABFMxUF1aFBIwmVoUUzCeoBAgKCCxZY
+AQICggsaVAAhIxF+YZVB1UFVJtVBOWeKYhQHFwp/YcABCX9hIjAJf2HA/wn6AQICawshZAF4CEMI
+RAhXCGIIZAhnCGkIbAhvCHEIeAh7CIAIiAjDCNQI3wjkCQcJKAk3CUAJRglLCU4JUglXCWoJbwl7
+CYwJjwmaCaMJqAmvCb8JxAnICc0J0AnVCd8J5AnmCegJ6gnsCe4J8AnyCfQJ9gn4CfoJ/An+CiIK
+JwowCj+oACUjMn5hVVcAADBBORcEMEFzE2eeoAY4WRkDWVUg1UE5FgNnSiZ/YQnxAB8jV5VBbaK1
+omUBGQ5QQNCgoMUCQSMVAz8Y95WhbQBloQm7AAMjdnEDJsqAiBY5USAQB1WCZhldFQI6CYBqAQIB
+ZQh0GwECAm0IhQGASN+AAAAAAAAAAAB4JpxVugAAZlwAAgwAAHkDyQRJZlwAARIDYGZcAAEVA0KD
+/CwQBcCA4QRALBEwkARhsQRPe3AESXtsBD+AAMAgShUFkP/1sxKQAALTDVEg0QRvUCCxAAB5AAAA
+AARxkP/g0QRV9QHRBFf1AcCg5QHRBFz1AdEEXvUBMAFYAHgnFLMFZgtmBQQAAJP80AAIUCDQoKD1
+AbMJg6nAIEoUGWYcAACT/MCg5QgIcxLaZhBmB9qJFvrVQQmQ//WxAACQAABc0AAAZlIBAAAAAFUi
+FBKQAACxAAZQdgGTkAABsQAKcwWQAACzD9AAAGZcAQEBBAzD/BQPkAGTsQUBeAhDCkQKSgpNClQK
+XApgCmMKZgprCm8KigqMCpIKlQqaCp4KowqsCswK4QrlCugLLgszC0kLVAtWC1wLYQuIC6kLwgvS
+C90L6AvrC+0L7wvxC/ML9Qv3C/kL+wv9C/8MAQwDDAUMBwwKDBUMGAwkDC0MVAxXDFoMZgxsU4AC
+AWUIdBsBAgJtCIUBgEjfgAAAAAAAAAAAWyeMAAZQdgGT0AAAZhjQAABmGGYFDAAAsQAA0AAAZhjQ
+AABmGNZnAABxAAAAgQABAFcEbwAAAIIAAgBQBFMAAAAMwdPTzaCtoLausLWNAAzFztTF0qDUydTM
+xY0AAFEBeAhDDHgMnAyfDKIMpwyqDLoMvwzQDNMM2gzfDOIM5QztDQkNGQ0hDSQNJw0sDS8NNg07
+DUINRw1KDXANlg2hDaQNuw3KDdYN2Q3eDegN+w4DDgoOEg4XDhoOMQ47DkIORw5NDlQOYg5nDm0O
+cA6DDpEOlA6eDqgOqw6xtwF4CEMOuQ7DDssO6A7uDwkPFA9aD2APbg9/D4cPmw+kD6wPsQ+3D8AP
+yw/QD9UP4w/tD/IP9w/+EAMQDxAUEBkQIBAxEDkQPBBBEEQQTxBaEF0QZBBpEG4QhxCKEJUQmBCi
+EK0QshDUENcQ5BDwEPQRABEKESURKBEyETm0AQIHhhZ05gECBzAWfDQBAgbDFql1AQIBzRaxaICA
+AgFlCHQbAQICbQiFAYBI34AAAAAAAAAAAXgIQxE9EUARRRFOEVMRWhFqEW0RfxGIEZYR0BHaEeAR
+8BH0EfcR/BIgEioSMBI4EjwSPxJRElcSbBJvEnQSdxJ5EnsSsRKzErUStxK5ErsSvRK/EsESwxLU
+EwATJBM1EzwTQxNLE1ETVBNZE14TahNuE3ETdxN6E30TkgQBAgJtGFgeAQICbRhcGgECAnwYdvEB
+AgG/GqV+AQIB9hwmxAF4CEMTqROwE7UTwBPHE9QT5hP3FBIUHhQhFDcUPRRJFE4UUxRYFF4UYxSe
+FKMU5BT1FQ4VFRWdFaIVrxW/FcIVzhXVFewV9hYAFgMWBhYXFiEWJhZEFk4WWBZcFmYWgxaGFpMW
+mBamFucW7xcLFxMXJRcrFzUXTRdYF2adgCAQMRA5EDwQQRBEEE8QWhBdEGQQaRBuEIcQihCVEJgQ
+ohCtELIQ1BDXEOQQ8BD0EQARChElESgRMhE5tAECB4YWdOYBAgcwFnw0AQIGwxapdQECAc0WsWiA
+gAIBZQh0GwECAm0IhQGASN+AAAAAAAAAAAF4CEMXghewGBsYOxhTGGEYaRh5GH0YgxiPGJ0Yohi6
+GMMYzBjQGNQY3hkDGQ4ZEBkSGRQZRhlRGWAZZxlrGW4Z6RnyGf0aEBoSGhUaoBq9GsMayBrXGtwa
+3hrkGu0a+Br6Gv0cDxwUHBkcHhwoHC4cPBw/HEUcSxxVHF5XASwIQxxnHHUcoRyjHKUcpxypHKsc
+rxyxHLMctxy5HLscvRy/HMMcxRzHHM8c0x8blwECIUQBVkEBAiFrAPJ/AQ4hayFsIW4hciGAIbwi
+riK3jwECItsH6BEBAiMRB60VAQIjESL7rAECIzIY9poBAiMyGbjXAQIjVwICfwECI3YFLzABAgDI
+Jp5xAQIITCal3gECArwm3TwBAgKCJuJxAQICgibuZQECIzIm8ZEBAgK8JvMmAQICvCb4IQECArwn
+TMwBAgsMJ09wAQIBBidWeQECAQYnZ2gBAgEGJ3FeAQIBJCd7NgECASQnjCUBAgEkJ5MeAQIAyieY
+dAECAMonn20BAhq3J6JjgEjfgAAAAAAAAAABAgDoJ6VJAQIBBieqJQECCEonsNQBAghDJ7PYAS4j
+diN3JqgmqiaxJrgmwibIJssmzybTJukm9Sb7JwAnCScOJ1InZCd2J4IniSe7J8X3AAAFLs2E1xrc
+Gt4a5BrtGvga+hr9HA8cFBwZHB4cKBwuHDwcPxxFHEscVRxeVwEsCEMcZxx1HKEcoxylHKccqRyr
+HK8csRyzHLccuRy7HL0cvxzDHMUcxxzPHNMfG5cBAiFEAVZBAQIhawDyfwEOIWshbCFuIXIhgCG8
+Iq4it48BAiLbB+gRAQIjEQetFQECIxEi+6wBAiMyGPaaAQIjMhm41wECI1cCAn8BAiN2BS8wAQIA
+yCaecQECCEwmpd4BAgK8Jt08AQICgibicQECAoIm7mUBAiMyJvGRAQICvCbzJgECArwm+CEBAgK8
+J0zMAQILDCdPcAECAQYnVnkBAgEGJ2doAQIBBidxXgECASQnezYBAgEkJ4wlAQIBJCeTHgECAMon
+mHQBAgDKJ59tAQIatyeiY4BI34AAAAAAAAAA`);
 let HEX_CONV = conv_hex.checked;
 const enum NAMECON {
 	CENT,
@@ -1818,16 +2056,21 @@ const enum NAMECON {
 let name_conv = NAMECON.MEI;
 const NB = String.fromCodePoint(0xa0);
 
+function hexcs(s:string):string {
+	if(!HEX_CONV) return s;
+	if(name_conv == NAMECON.CENT) {
+		return `X'${s}'`;
+	}
+	return '0x' + s;
+}
 function hexlist(v:number, l:number = 2) {
-	const pre = HEX_CONV ? '0x' : '';
-	if(v < 0) return '-'+ pre + ((-v).toString(16).toUpperCase().padStart(l,'0'));
-	return pre + v.toString(16).toUpperCase().padStart(l,'0');
+	if(v < 0) return '-'+ hexcs((-v).toString(16).toUpperCase().padStart(l,'0'));
+	return hexcs(v.toString(16).toUpperCase().padStart(l,'0'));
 }
 function hexlistp(v:number, l:number = 2) {
 	if(v == 0) return '';
-	const pre = HEX_CONV ? '0x' : '';
-	if(v < 0) return ' - '+ pre + ((-v).toString(16).toUpperCase().padStart(l,'0'));
-	return ' + '+pre + v.toString(16).toUpperCase().padStart(l,'0');
+	if(v < 0) return ' - '+ hexcs((-v).toString(16).toUpperCase().padStart(l,'0'));
+	return ' + '+hexcs(v.toString(16).toUpperCase().padStart(l,'0'));
 }
 function hex(v:number, l:number = 2) {
 	if(v < 0) return '-'+ ((-v).toString(16).toUpperCase().padStart(l,'0'));
@@ -1854,11 +2097,13 @@ function buftohex(buf:Uint8Array, offset:number=0, length?:number):string {
 function bin(v:number, l:number) {
 	return v.toString(2).padStart(l,'0');
 }
+/** treat 8 bit value as signed */
 function sbyte(v:number):number {
 	v = v & 0xff;
 	if (v > 127) v -= 256;
 	return v;
 }
+/** treat 16 bit value as signed */
 function sword(v:number):number {
 	v = v & 0xffff;
 	if (v > 32768) v -= 65536;
@@ -1914,7 +2159,6 @@ class ALU8 {
 	ram7:number = 0;
 	q0:number = 0;
 	q7:number = 0;
-	is_shift:boolean = false;
 	is_right:boolean = false;
 
 	// save results to register(s)
@@ -1994,9 +2238,8 @@ class ALU8 {
 		} else {
 			this.out_f = out;
 		}
-		this.is_shift = dsti > 3;
 		this.is_right = (dsti & 2) == 0;
-		if(this.is_shift) {
+		if(dsti > 3) {
 			if(this.is_right) {
 				this.q0 = this.regq & 1;
 				this.ram0 = out & 1;
@@ -2221,7 +2464,7 @@ class ALU {
 }
 
 const FN_SEQ_SN = ['P','R','S','D']; // 'uPC','AHR','STK','DIR'
-const FN_SEQ_FE = ['POP','---','PSH','---']; // FE:0 | (PUSH:1/POP:0) << 1
+const FN_SEQ_FE = ['POP','---','PSH','--^']; // FE:0 | (PUSH:1/POP:0) << 1
 
 class Sequencer {
 	p:number = 0;
@@ -2519,6 +2762,93 @@ interface DMADevice {
 let sense_switch = 0;
 let dswitch = 0; // inverted on bus - R H I 0
 
+interface ILevelRegisters {
+	level: number; base: number;
+	a: number, b: number,
+	x: number, y: number, z: number,
+	s: number, c: number, p: number,
+	al: number, bl: number,
+	xl: number, yl: number, zl: number,
+	sl: number, cl: number, pl: number,
+	au: number, bu: number,
+	xu: number, yu: number, zu: number,
+	su: number, cu: number, pu: number,
+}
+function LevelRegisters(level: number, rf: Uint8Array) {
+	const base = level * 16;
+	const regfile = rf;
+	return Object.defineProperties({level, base}, {
+		a :{get () { return (regfile[base] << 8) | regfile[base+1]; },
+			set(v: number) {regfile[base] = (v >> 8) & 255; regfile[base+1] = v & 255; }},
+		b :{get () { return (regfile[base+2] << 8) | regfile[base+3]; },
+			set(v: number) {regfile[base+2] = (v >> 8) & 255; regfile[base+3] = v & 255; }},
+		x :{get () { return (regfile[base+4] << 8) | regfile[base+5]; },
+			set(v: number) {regfile[base+4] = (v >> 8) & 255; regfile[base+5] = v & 255; }},
+		y :{get () { return (regfile[base+6] << 8) | regfile[base+7]; },
+			set(v: number) {regfile[base+6] = (v >> 8) & 255; regfile[base+7] = v & 255; }},
+		z :{get () { return (regfile[base+8] << 8) | regfile[base+9]; },
+			set(v: number) {regfile[base+8] = (v >> 8) & 255; regfile[base+9] = v & 255; }},
+		s :{get () { return (regfile[base+10] << 8) | regfile[base+11]; },
+			set(v: number) {regfile[base+10] = (v >> 8) & 255; regfile[base+11] = v & 255; }},
+		c :{get () { return (regfile[base+12] << 8) | regfile[base+13]; },
+			set(v: number) {regfile[base+12] = (v >> 8) & 255; regfile[base+13] = v & 255; }},
+		p :{get () { return (regfile[base+14] << 8) | regfile[base+15]; },
+			set(v: number) {regfile[base+14] = (v >> 8) & 255; regfile[base+15] = v & 255; }},
+		al:{get () { return regfile[base+1]; }, set(v: number) {regfile[base+1] = v; }},
+		bl:{get () { return regfile[base+3]; }, set(v: number) {regfile[base+3] = v; }},
+		xl:{get () { return regfile[base+5]; }, set(v: number) {regfile[base+5] = v; }},
+		yl:{get () { return regfile[base+7]; }, set(v: number) {regfile[base+7] = v; }},
+		zl:{get () { return regfile[base+9]; }, set(v: number) {regfile[base+9] = v; }},
+		sl:{get () { return regfile[base+11]; }, set(v: number) {regfile[base+11] = v; }},
+		cl:{get () { return regfile[base+13]; }, set(v: number) {regfile[base+13] = v; }},
+		pl:{get () { return regfile[base+15]; }, set(v: number) {regfile[base+15] = v; }},
+		ah:{get () { return regfile[base]; }, set(v: number) {regfile[base] = v; }},
+		bh:{get () { return regfile[base+2]; }, set(v: number) {regfile[base+2] = v; }},
+		xh:{get () { return regfile[base+4]; }, set(v: number) {regfile[base+4] = v; }},
+		yh:{get () { return regfile[base+6]; }, set(v: number) {regfile[base+6] = v; }},
+		zh:{get () { return regfile[base+8]; }, set(v: number) {regfile[base+8] = v; }},
+		sh:{get () { return regfile[base+10]; }, set(v: number) {regfile[base+10] = v; }},
+		ch:{get () { return regfile[base+12]; }, set(v: number) {regfile[base+12] = v; }},
+		ph:{get () { return regfile[base+14]; }, set(v: number) {regfile[base+14] = v; }},
+		au:{get () { return regfile[base]; }, set(v: number) {regfile[base] = v; }},
+		bu:{get () { return regfile[base+2]; }, set(v: number) {regfile[base+2] = v; }},
+		xu:{get () { return regfile[base+4]; }, set(v: number) {regfile[base+4] = v; }},
+		yu:{get () { return regfile[base+6]; }, set(v: number) {regfile[base+6] = v; }},
+		zu:{get () { return regfile[base+8]; }, set(v: number) {regfile[base+8] = v; }},
+		su:{get () { return regfile[base+10]; }, set(v: number) {regfile[base+10] = v; }},
+		cu:{get () { return regfile[base+12]; }, set(v: number) {regfile[base+12] = v; }},
+		pu:{get () { return regfile[base+14]; }, set(v: number) {regfile[base+14] = v; }},
+	}) as ILevelRegisters;
+}
+
+const CC_V = 128;
+const CC_NV = 127;
+const CC_M = 64;
+const CC_NM = 191;
+const CC_F = 32;
+const CC_NF = 223;
+const CC_L = 16;
+const CC_NL = 239;
+
+class Tracer {
+	list:LTrace[] = [];
+	count = 0;
+	add(op:string, wh:number):LTrace {
+		let c = this.count++;
+		if(this.list.length < this.count) {
+			const t = {op, wh};
+			this.list.push(t);
+			return t;
+		} else {
+			const t = this.list[c];
+			t.op = op; t.wh = wh;
+			delete t.tk;
+			delete t.param;
+			return t;
+		}
+	}
+}
+
 function mcsetup() {
 
 const s0 = new Sequencer();
@@ -2606,51 +2936,197 @@ const break_list:(null | BreakFunction)[] = [
 	function() { return true; }
 ];
 
-function LevelRegisters(level: number) {
-	const base = level * 16;
-	return Object.defineProperties({level}, {
-		a :{get () { return (regfile[base] << 8) | regfile[base+1]; }},
-		b :{get () { return (regfile[base+2] << 8) | regfile[base+3]; }},
-		x :{get () { return (regfile[base+4] << 8) | regfile[base+5]; }},
-		y :{get () { return (regfile[base+6] << 8) | regfile[base+7]; }},
-		z :{get () { return (regfile[base+8] << 8) | regfile[base+9]; }},
-		s :{get () { return (regfile[base+10] << 8) | regfile[base+11]; }},
-		c :{get () { return (regfile[base+12] << 8) | regfile[base+13]; }},
-		p :{get () { return (regfile[base+14] << 8) | regfile[base+15]; }},
-		al:{get () { return regfile[base+1]; }},
-		bl:{get () { return regfile[base+3]; }},
-		xl:{get () { return regfile[base+5]; }},
-		yl:{get () { return regfile[base+7]; }},
-		zl:{get () { return regfile[base+9]; }},
-		sl:{get () { return regfile[base+11]; }},
-		cl:{get () { return regfile[base+13]; }},
-		pl:{get () { return regfile[base+15]; }},
-		ah:{get () { return regfile[base]; }},
-		bh:{get () { return regfile[base+2]; }},
-		xh:{get () { return regfile[base+4]; }},
-		yh:{get () { return regfile[base+6]; }},
-		zh:{get () { return regfile[base+8]; }},
-		sh:{get () { return regfile[base+10]; }},
-		ch:{get () { return regfile[base+12]; }},
-		ph:{get () { return regfile[base+14]; }},
-	});
+const mpscache:{
+	dp_sel:number,
+	x_e6:number,
+	x_k11:number,
+	x_h11:number,
+	x_e7:number,
+	k9_en:boolean,
+	k9_sel:number,
+	mpconst_m6:number,
+	j12_sel:number,
+	j11_en:number,
+	j11_sel:number,
+	j13_sel:number,
+	j10_en:number,
+	j10_sel:number,
+	k13_sel:number,
+	seq_d0:number,
+	seq_d1:number,
+	seq_d2:number,
+	seq_fci:number,
+	seq0_si:number,
+	seq12_s0i:number,
+	seq2_si_k6b:number,
+	seq1_si_k6dc:number,
+	seq_branch:number,
+	rir0:number,
+	x_f6h6:number,
+	x_c14_sel:boolean,
+	aluc_s:number,
+	aluc_f:number,
+	aluc_d:number,
+	busctld:number,
+	busctla:number,
+	busctlset:number,
+	busctlmask:number,
+	aluc_b:number,
+	aluc_a:number,
+}[] = [];
+
+function loadcache() {
+	for(let ro = 0; ro < 0x800; ro++) {
+		const v6 = /*A*/uc.k[ro]; // MSB
+		const v5 = /*B*/uc.f[ro];
+		const v4 = /*C*/uc.h[ro];
+		const v3 = /*D*/uc.l[ro];
+		const v2 = /*E*/uc.m[ro];
+		const v1 = /*F*/uc.j[ro];
+		const v0 = /*H*/uc.e[ro]; // LSB
+		const c0 = (v3 << 24) | (v2 << 16) | (v1 << 8) | v0;
+		const c1 = (v6 << 16) | (v5 << 8) | v4;
+		uc.c0[ro] = c0;
+		uc.c1[ro] = c1;
+
+		const dp_sel = v0 & 15;
+		const x_e6 = (v0 >> 4) & 7;
+		const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
+		const x_h11 = (v1 >> 2) & 7;
+		const x_e7 = (v1 >> 5) & 3;
+		const k9_en = (v1>>7)&1;
+		const k9_sel = v2 & 7;
+		const mpconst_m6 = v2 ^ 0xff; // goes through a 74ls240
+		const j12_sel = v2 & 3;
+		const j11_en = (v2>>2)&1;
+		const j11_sel = (v2>>3) & 3;
+		const j13_sel = (v2>>4) & 3;
+		const j10_en = (v2>>5)&1;
+		const j10_sel = ((v2>>6) & 3) | ((v3&1) << 2);
+		const k13_sel = (v2>>6) & 3;
+		const seq_d0 = v2 & 15;
+		const seq_d1 = v2 >> 4;
+		const seq_d2 = v3 & 7;
+		const seq_fci = (v3 >> 3) & 3; // TODO verify FE/PUP
+		const seq0_si = (v3 >> 5) & 3;
+		const seq12_s0i = (v3>>7)&1; // TODO verify
+		const seq2_si_k6b = seq12_s0i | ((v4&1) << 1); // TODO verify
+		const seq1_si_k6dc = seq12_s0i | (2 ^ (2 & (v6>>5) & ((v4<<1) ^ 2)));
+		const seq_branch = (v4>>1)&1;
+		const rir0 = (v6>>5)&1;
+		const x_f6h6 = (v6 >> 3) & 3;
+		const x_c14_sel = (v6>>7)&1/* !=0 */;
+		const aluc_s = (v4>>2) & 7;
+		const aluc_f = (v4>>5) & 7;
+		const aluc_d = v5 & 7;
+		const busctld = (v5>>3)&1;
+		const busctla = (v5>>4) & 7;
+		const busctlset = busctld << busctla;
+		const busctlmask = (1 << busctla) ^ 255;
+		const aluc_b = (v5>>3) & 15;
+		const aluc_a = ((v6<<1)|(v5>>7)) & 15;
+
+		mpscache[ro] = {
+			dp_sel,
+			x_e6,
+			x_k11,
+			x_h11,
+			x_e7,
+			k9_en: k9_en == 0,
+			k9_sel,
+			mpconst_m6,
+			j12_sel,
+			j11_en,
+			j11_sel,
+			j13_sel,
+			j10_en,
+			j10_sel,
+			k13_sel,
+			seq_d0,
+			seq_d1,
+			seq_d2,
+			seq_fci,
+			seq0_si: 3^seq0_si,
+			seq12_s0i,
+			seq2_si_k6b: 3^seq2_si_k6b,
+			seq1_si_k6dc: 3^seq1_si_k6dc,
+			seq_branch,
+			rir0,
+			x_f6h6,
+			x_c14_sel: x_c14_sel!=0,
+			aluc_s,
+			aluc_f,
+			aluc_d,
+			busctld,
+			busctla,
+			busctlset,
+			busctlmask,
+			aluc_b,
+			aluc_a,
+		};
+	}
 }
+loadcache();
+
 class MCCPU {
+	trace = new Tracer();
+	trace_enable = false;
 	registers = [
-		LevelRegisters(0), LevelRegisters(1),
-		LevelRegisters(2), LevelRegisters(3),
-		LevelRegisters(4), LevelRegisters(5),
-		LevelRegisters(6), LevelRegisters(7),
-		LevelRegisters(8), LevelRegisters(9),
-		LevelRegisters(10), LevelRegisters(11),
-		LevelRegisters(12), LevelRegisters(13),
-		LevelRegisters(14), LevelRegisters(15),
+		LevelRegisters(0, regfile), LevelRegisters(1, regfile),
+		LevelRegisters(2, regfile), LevelRegisters(3, regfile),
+		LevelRegisters(4, regfile), LevelRegisters(5, regfile),
+		LevelRegisters(6, regfile), LevelRegisters(7, regfile),
+		LevelRegisters(8, regfile), LevelRegisters(9, regfile),
+		LevelRegisters(10, regfile), LevelRegisters(11, regfile),
+		LevelRegisters(12, regfile), LevelRegisters(13, regfile),
+		LevelRegisters(14, regfile), LevelRegisters(15, regfile),
 	];
+	get cc():number {
+		return (ccr_v?CC_V:0)|(ccr_m?CC_M:0)|(ccr_f?CC_F:0)|(ccr_l?CC_L:0);
+	}
+	set cc(value:number) {
+		ccr_v = (value & CC_V)!=0?1:0;
+		ccr_m = (value & CC_M)!=0?1:0;
+		ccr_f = (value & CC_F)!=0?1:0;
+		ccr_l = (value & CC_L)!=0?1:0;
+	}
 	get reg() { return this.registers[level]; }
 	get level() { return level; }
+	set level(value:number) { level = value & 15; }
 	get map() { return pta; }
-	get pc() { return last_pc; }
+	set map(value:number) { pta = value & 7; };
+	get pc() {
+		if(this.at_boundry) return memaddr;
+		return last_pc;
+	}
+	get at_boundry() { return mcpc == 0x101 || mcpc == 0x100; }
+	set_pc(va:number):void {
+		if(!this.at_boundry) {
+			throw new Error("unsupported state");
+		}
+		memaddr = va & 65535;
+		mempt_set();
+	}
 	get page_ram() { return pagetb; }
+	change_virtual_break(old_f:null | number | BreakFunction, new_f:BreakFunction) {
+		let o;
+		if(typeof new_f != 'function') {
+			throw new Error('new_f must be a function');
+		}
+		if(typeof old_f == 'number') {
+			o = old_f | 0;
+			if(o < 0 || o > 255) throw new Error('Invalid function ID');
+			old_f = break_list[o];
+			if(old_f == null) throw new Error('Invalid function ID');
+		} else if (typeof old_f == 'function') {
+			o = break_list.indexOf(old_f);
+			if(o < 1 || o > 255) throw new Error('Invalid function ID');
+		} else {
+			throw new Error('Invalid break function or function ID');
+		}
+		new_f(-1, 0, 0);
+		break_list[o] = new_f;
+	}
 	add_virtual_break(address:number, f:null | number | BreakFunction):number {
 		let i;
 		if(typeof address != 'number') throw new Error('Invalid address');
@@ -2697,7 +3173,6 @@ class MCCPU {
 	hsstep = hsstep;
 	hspre = hspre;
 	hsend = hsend;
-	loadcache = loadcache;
 	showstate = showstate;
 	reset = reset;
 	dma_register = dma_register;
@@ -2775,25 +3250,29 @@ function showstate(in_halt:boolean) {
 		mcr_pta.innerText = hex(pta, 1);
 		const bc = busctl;
 		const sc = sysctl;
-		mcr_bus.innerText = `${(bc&1)>0?'I':'-'} ${(bc&2)>0?'--':'AE'} ${(bc&4)>0?'--':'AC'} ${(bc&8)>0?'U':'D'}` +
-		` ${(bc&16)>0?'DA':'--'} ${(bc&32)>0?'PT':'--'} ${(bc&64)>0?'MFE':'---'}${(bc&128)>0?'DMA':'---'}`;
-		mcr_sys.innerText = `${(sc&1)>0?'DM4':'---'} ${(sc&2)>0?'DM3':'---'} ${(sc&4)>0?'TE':'--'} ${(sc&8)>0?'-':'M'}` +
-		` ${(sc&16)>0?'R':'H'} ${(sc&32)>0?'--':'TR'} ${(sc&64)>0?'A':'-'} ${(sc&128)>0?'IA':'--'}`;
-		const mpaddress = ((pgram & 127) << 11) | (memaddr & 0x7ff);
-		mcr_addr.innerText = hex(workaddr, 4) + ' ' + hex(memaddr, 4) + ' ' + ((pgram & 128) != 0 ? '*' : '.') + hex(mpaddress, 5) + ' ' + hex(physaddr, 5);
+		mcr_bus.innerText = `${(bc&1)!=0?'I':'-'} ${(bc&128)!=0?'DMA':'---'
+		} ${(bc&16)!=0?'DA':'--'} ${(bc&4)!=0?'--':'CE'
+		} ${(bc&8)!=0?'U':'D'} ${(bc&32)!=0?'PO':'PE'
+		} ${(bc&64)!=0?'PFE':'---'}${(bc&2)!=0?' !AdrH':''}`;
+		mcr_sys.innerText = `DV${sc&3} ${(sc&4)>0?'TE':'--'
+		}${(sc&8)!=0?' !Map':''} ${(sc&16)!=0?'R':'H'
+		} ${(sc&32)!=0?'--':'TR'} ${(sc&64)!=0?'A':'-'
+		} ${(sc&128)!=0?'IA':'--'}`;
+		mcr_addr.innerText = `${hex(workaddr, 4)} ${hex(memaddr, 4)
+		} ${((pgram & 128) != 0 ? '*' : '.')}${hex(physaddr, 5)}`;
 	}
 	
 	if(show_reg) {
+		let sindex = 0;
 		for(let rindex = 0;rindex < 256;rindex += 32) {
-			let rfilel = '';
-			let rfiler = '';
-			for(let i=0;i<16;i+=2) {
+			for(let i=0;i<32;i+=2) {
 				let reg = (regfile[rindex + i] << 8) | regfile[rindex + i+1];
-				let regr = (regfile[rindex+16 + i] << 8) | regfile[rindex+16 + i+1];
-				rfilel += hex(reg, 4) + ' ';
-				rfiler += ' ' + hex(regr,4);
+				if(reg != mcr_file_v[sindex]) {
+					mcr_file_v[sindex] = reg;
+					mcr_file[sindex].innerText = hex(reg, 4);
+				}
+				sindex++;
 			}
-			mcr_file[rindex >> 5].innerText = rfilel + rfiler;
 		}
 	}
 	fp_level.innerText = hex(level, 1);
@@ -2973,138 +3452,6 @@ function showstate(in_halt:boolean) {
 // uc.f[0x3ec] = 0x23;
 // uc.m[0x3ec] = 0x01;
 // uc.f[0x3ed] = 0x1b;
-
-const mpscache:{
-	dp_sel:number,
-	x_e6:number,
-	x_k11:number,
-	x_h11:number,
-	x_e7:number,
-	k9_en:boolean,
-	k9_sel:number,
-	mpconst_m6:number,
-	j12_sel:number,
-	j11_en:number,
-	j11_sel:number,
-	j13_sel:number,
-	j10_en:number,
-	j10_sel:number,
-	k13_sel:number,
-	seq_d0:number,
-	seq_d1:number,
-	seq_d2:number,
-	seq_fci:number,
-	seq0_si:number,
-	seq12_s0i:number,
-	seq2_si_k6b:number,
-	seq1_si_k6dc:number,
-	seq_branch:number,
-	rir0:number,
-	x_f6h6:number,
-	x_c14_sel:boolean,
-	aluc_s:number,
-	aluc_f:number,
-	aluc_d:number,
-	busctld:number,
-	busctla:number,
-	busctlset:number,
-	busctlmask:number,
-	aluc_b:number,
-	aluc_a:number,
-}[] = [];
-
-function loadcache() {
-	for(let ro = 0; ro < 0x800; ro++) {
-		const v6 = /*A*/uc.k[ro]; // MSB
-		const v5 = /*B*/uc.f[ro];
-		const v4 = /*C*/uc.h[ro];
-		const v3 = /*D*/uc.l[ro];
-		const v2 = /*E*/uc.m[ro];
-		const v1 = /*F*/uc.j[ro];
-		const v0 = /*H*/uc.e[ro]; // LSB
-		const c0 = (v3 << 24) | (v2 << 16) | (v1 << 8) | v0;
-		const c1 = (v6 << 16) | (v5 << 8) | v4;
-		uc.c0[ro] = c0;
-		uc.c1[ro] = c1;
-
-		const dp_sel = v0 & 15;
-		const x_e6 = (v0 >> 4) & 7;
-		const x_k11 = (v0 >> 7) | ((v1 & 3) << 1);
-		const x_h11 = (v1 >> 2) & 7;
-		const x_e7 = (v1 >> 5) & 3;
-		const k9_en = (v1>>7)&1;
-		const k9_sel = v2 & 7;
-		const mpconst_m6 = v2 ^ 0xff; // goes through a 74ls240
-		const j12_sel = v2 & 3;
-		const j11_en = (v2>>2)&1;
-		const j11_sel = (v2>>3) & 3;
-		const j13_sel = (v2>>4) & 3;
-		const j10_en = (v2>>5)&1;
-		const j10_sel = ((v2>>6) & 3) | ((v3&1) << 2);
-		const k13_sel = (v2>>6) & 3;
-		const seq_d0 = v2 & 15;
-		const seq_d1 = v2 >> 4;
-		const seq_d2 = v3 & 7;
-		const seq_fci = (v3 >> 3) & 3; // TODO verify FE/PUP
-		const seq0_si = (v3 >> 5) & 3;
-		const seq12_s0i = (v3>>7)&1; // TODO verify
-		const seq2_si_k6b = seq12_s0i | ((v4&1) << 1); // TODO verify
-		const seq1_si_k6dc = seq12_s0i | (2 ^ (2 & (v6>>5) & ((v4<<1) ^ 2)));
-		const seq_branch = (v4>>1)&1;
-		const rir0 = (v6>>5)&1;
-		const x_f6h6 = (v6 >> 3) & 3;
-		const x_c14_sel = (v6>>7)&1/* !=0 */;
-		const aluc_s = (v4>>2) & 7;
-		const aluc_f = (v4>>5) & 7;
-		const aluc_d = v5 & 7;
-		const busctld = (v5>>3)&1;
-		const busctla = (v5>>4) & 7;
-		const busctlset = busctld << busctla;
-		const busctlmask = (1 << busctla) ^ 255;
-		const aluc_b = (v5>>3) & 15;
-		const aluc_a = ((v6<<1)|(v5>>7)) & 15;
-
-		mpscache[ro] = {
-			dp_sel,
-			x_e6,
-			x_k11,
-			x_h11,
-			x_e7,
-			k9_en: k9_en == 0,
-			k9_sel,
-			mpconst_m6,
-			j12_sel,
-			j11_en,
-			j11_sel,
-			j13_sel,
-			j10_en,
-			j10_sel,
-			k13_sel,
-			seq_d0,
-			seq_d1,
-			seq_d2,
-			seq_fci,
-			seq0_si: 3^seq0_si,
-			seq12_s0i,
-			seq2_si_k6b: 3^seq2_si_k6b,
-			seq1_si_k6dc: 3^seq1_si_k6dc,
-			seq_branch,
-			rir0,
-			x_f6h6,
-			x_c14_sel: x_c14_sel!=0,
-			aluc_s,
-			aluc_f,
-			aluc_d,
-			busctld,
-			busctla,
-			busctlset,
-			busctlmask,
-			aluc_b,
-			aluc_a,
-		};
-	}
-}
-loadcache();
 
 function mempt_set() {
 	pindex = ((memaddr >> 11) & 31) | (pta << 5);
@@ -3866,12 +4213,13 @@ function step(debug_output:boolean = false) {
 	case 0: break; // nop
 	case 1: mco.dma_end = false; break; // L13A_SET
 	case 2: // ?K11_2
-		if ((mci.busctlset == 1) && ((sysctl & 1) == 0)) {
-			console.log('DMA1:ON');
-		}
-		if ((mci.busctlset == 2) && ((sysctl & 2) == 0)) {
-			console.log('DMA2:ON');
-		}
+		// DMA device select updates
+		// if ((mci.busctlset == 1) && ((sysctl & 1) == 0)) {
+		// 
+		// }
+		// if ((mci.busctlset == 2) && ((sysctl & 2) == 0)) {
+		// 
+		// }
 		if ((mci.busctlset == 128) && ((sysctl & 128) == 0)) {
 			reqlevel = bpl.ack_interrupt(level);
 			//console.log('IACK:', level,'->',reqlevel);
@@ -3940,6 +4288,9 @@ function step(debug_output:boolean = false) {
 		} else if(sys_read_in) {
 			mco.memfault = 0;
 			memdata_in = bpl.readbyte(physaddr);
+			if(mco.trace_enable) {
+				mco.trace.add('LD', memaddr);
+			}
 			if ((busctl & 0x40) != 0) {
 				b15a = mco.memfault ^ 1;
 			} else {
@@ -3976,6 +4327,9 @@ function step(debug_output:boolean = false) {
 		let bfn = break_list[vmbreak[memaddr]];
 		bfn != null && bfn(2, memaddr, physaddr) && handle_break();
 		bpl.writebyte(physaddr, memdata_out);
+		if(mco.trace_enable) {
+			mco.trace.add('WT', memaddr);
+		}
 		break;
 	}
 	case 3: // WorkAddr_LDH
@@ -4102,38 +4456,38 @@ return mco;
 }
 const mcsim = mcsetup();
 //@ts-ignore
-this.window.cpu = mcsim;
+window.cpu = mcsim;
 
 const FN_K9 = [
-	'0BusAct', // if RDIN or WTIN have been asserted by the CPU
-	'1RI.~0|4',
-	'2RI.0',
-	'3A=IOReg',
-	'4A=RegPGR', // need to recheck the logic on this one to give it a better name
-	'5DMA_REQ', // DMA port, request start
-	'6MemFault', // Memory parity error, must be enabled via BusCtl bit 6
-	'7IntCheck' // this one needs a better name (checks multiple interrupt lines)
+	' 0BusAct  ', // if RDIN or WTIN have been asserted by the CPU
+	' 1RI.~0|4 ',
+	' 2RI.0    ',
+	' 3AdIOReg ',
+	' 4AdRegPGR', // need to recheck the logic on this one to give it a better name
+	' 5DMAReq  ', // DMA port, request start
+	' 6MemFault', // Memory parity error, must be enabled via BusCtl bit 6
+	' 7IntCheck' // this one needs a better name (checks multiple interrupt lines)
 ];
-const FN_F6 = ['0','1','FL.C','0'];
-const FN_H6A = ['alu.s','AFL.C','q0','alu.c'];
-const FN_H6B = ['0','AFL.C','alu.s','1'];
-const FN_J12B = ['.','Z','R.V','LZ'];
-const FN_J12A = ['.','S','R.M','S'];
-const FN_J11 = ['R.F','1','.','alu.o','R.F','1','.','alu.o'];
-const FN_J10 = ['.','~','C','0','R.L','alu.7','alu.0/Q7','alu.Q0'];
+const FN_F6 = ['0','1','AF.C','0'];
+const FN_H6A = ['alu.s','AF.C','q0','alu.c'];
+const FN_H6B = ['0','AF.C','alu.s','1'];
+const FN_J12B = ['.','Z','RS.V','LZ'];
+const FN_J12A = ['.','S','RS.M','S'];
+const FN_J11 = ['RS.F','1','.','alu.o','RS.F','1','.','alu.o'];
+const FN_J10 = ['.','~','C','0','RS.L','alu.7','alu.0/Q7','alu.Q0'];
 const FV_E6 = [
-	'','Result','RI','Level',
-	'PTA','','SeqRH',''
+	'','RS','RI','Level',
+	'Map','','SeqRH',''
 ];
 const FN_H11 = [
-	'','RD_START','WT_START','WorkAddr_H=Result',
-	'WorkAddr_Count','MemAddr_Count','MapROM','NibSwap'];
-const FN_E7 = ['','BusReady','','BusEnd/DataRD'];
+	'','RDIN','WTIN','WH=RS',
+	'WCount','EACount','CROM','NibSwap'];
+const FN_E7 = ['','BusReady','','BusRead'];
 const FN_D45 = [
-	'SwapR','RDR','MemAddr_H','MemAddr_L','SwapR','RDR','MemAddr_H','MemAddr_L',
-	'PA','CCRSense','SysDatIn','LevelH14','IrqLDipT',''/*Const*/,'',''];
-const FN_M13 = ['P2.3','P2.4','RTC','MapDis','FP.Run','RTC.R','FP.ABT','INT_ACK'];
-const FN_F11 = ['IntEN','AddrToSys','DMACountDIS','AddrU/D','AddrCtlSel','ParityTest','ParityEN','DMA_EN'];
+	'SwapR','RDR','EAH','EAL','SwapR','RDR','EAH','EAL',
+	'PA','CCRSense','DatIn','LevelH14','IrqLDipT',''/*Const*/,'',''];
+const FN_M13 = ['P2.3','P2.4','RTC','CROMDis','FP.Run','RTC.R','FP.ABT','IntAck'];
+const FN_F11 = ['IntEN','AddrToSys','DMACountDIS','AddrU/D','AddrCtlSel','ParityTest','ParityEN','DMA.EN'];
 
 function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:number, flow?:FlowTrace) {
 
@@ -4218,12 +4572,12 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 		let d_branch3 = '';
 		switch(j13_sel) {
 		case 0:
-			if ((next | 1) != next) d_branch0 = 'ALUF.S';
-			if ((next | 2) != next) d_branch1 = 'ALUF.Z';
+			if ((next | 1) != next) d_branch0 = 'AF.S';
+			if ((next | 2) != next) d_branch1 = 'AF.Z';
 			break;
 		case 1:
-			if ((next | 1) != next) d_branch0 = 'ALUF.H';
-			if ((next | 2) != next) d_branch1 = 'ALUF.V';
+			if ((next | 1) != next) d_branch0 = 'AF.H';
+			if ((next | 2) != next) d_branch1 = 'AF.V';
 			break;
 		case 2:
 			if ((next | 1) != next) d_branch0 = '~pbit ';
@@ -4233,16 +4587,16 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 		}
 		switch(k13_sel) {
 		case 0:
-			if ((next | 4) != next) d_branch2 = 'INT_ENA';
+			if ((next | 4) != next) d_branch2 = 'IntEna ';
 			if ((next | 8) != next) d_branch3 = 'CCR.L  ';
 			break;
 		case 1:
-			if ((next | 4) != next) d_branch2 = 'DMA_INT';
-			if ((next | 8) != next) d_branch3 = 'INT_REQ';
+			if ((next | 4) != next) d_branch2 = 'DMAInt';
+			if ((next | 8) != next) d_branch3 = 'IntReq';
 			break;
 		case 2:
-			if ((next | 4) != next) d_branch2 = 'MEM_INT';
-			if ((next | 8) != next) d_branch3 = 'DMA_REQ';
+			if ((next | 4) != next) d_branch2 = 'MemInt ';
+			if ((next | 8) != next) d_branch3 = 'DMAReq ';
 			break;
 		case 3: break; // nop
 		}
@@ -4281,10 +4635,10 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 	case 1: mck11 = 'DMAEndReset'; break;
 	case 2: mck11 = `SysCtl.${FN_M13[busctla]}=${busctld}`; break;
 	case 3: mck11 = `BusCtl.${FN_F11[busctla]}=${busctld}`; break;
-	case 4: mck11 = `REG[${x_c14_sel?'Lv':''}RI${rir0!=0?'1':' '}]=Result`; break;
-	case 5: mck11 = 'Page=Result'; break;
-	case 6: mck11 = 'WorkAddr_L=Result'; break;
-	case 7: if(disp_f.length == 0) disp_f = 'SysDatOut'; else disp_f = 'SysDatOut= ' + disp_f;
+	case 4: mck11 = `REG[${x_c14_sel?'Lv':''}RI${rir0!=0?'1':' '}]=RS`; break;
+	case 5: mck11 = 'Page=RS'; break;
+	case 6: mck11 = 'WL=RS'; break;
+	case 7: if(disp_f.length == 0) disp_f = 'DatOut'; else disp_f = 'DatOut= ' + disp_f;
 		break;
 	}
 	let mch11 = FN_H11[x_h11];
@@ -4292,22 +4646,25 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 		mch11 = `${disp_f}=${mch11}[${mcd_d45}]`;
 		disp_f = '';
 	}
+	if(x_h11 == 7) { // NibSwap uses DP
+		mch11 = `${mch11}(${mcd_d45})`;
+	}
 	let mce6 = '';
 	// e6[0] nop, e6[1..4] load from F, e6[6] maybe load from F
 	if(x_e6 == 5) { // MemAddr=WorkAddr, WorkAddr loads use MemAddr instead
 		if(x_h11 == 3 && x_k11 == 6) { // IF Swap Enabled: WorkAddr=MemAddr
-			mce6 = 'MemAddr<=>WorkAddr';
+			mce6 = 'EA<=>W';
 			mch11 = '';
 			mck11 = '';
 		} else { // an 8 bit only swap!?
 			if(x_k11 == 6) {
-				mce6 = 'MemAddr_H=WorkAddr_H';
-				mck11 = 'WorkAddr_L<=>MemAddr_L';
+				mce6 = 'EAH=WH';
+				mck11 = 'WL<=>EAL';
 			} else if(x_h11 == 3) {
-				mce6 = 'MemAddr_L=WorkAddr_L';
-				mch11 = 'WorkAddr_H<=>MemAddr_H';
+				mce6 = 'EAL=WL';
+				mch11 = 'WH<=>EAH';
 			} else {
-				mce6 = 'MemAddr=WorkAddr';
+				mce6 = 'EA=W';
 			}
 		}
 	}
@@ -4324,8 +4681,8 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 		mcsh_r = 'Q.7';
 	}
 	let d_ccr = '';
-	if(x_e7==2) {
-		d_ccr = '  => ALUFlag_LD';
+	if(x_e7==2) { // ALUFlag_LD
+		d_ccr = ' => AF';
 		if(disp_f.length == 0) disp_f = '_';
 	}
 	const lh = ALU.trace_str(aluc_s, aluc_f, aluc_d, aluc_a, aluc_b,
@@ -4337,7 +4694,10 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 		} F=${j11_en ? '0' : FN_J11[j11_sel]} L=${j10_en ? '0' : FN_J10[j10_sel]}`;
 	}
 
-	const mce7 = FN_E7[x_e7];
+	let mce7 = FN_E7[x_e7];
+	if((rir0!=0) && (x_e7 != 0)) {
+		mce7 += '+E7S';
+	}
 	let mcbus = mck11;
 	if(mch11.length > 0) {
 		if(mcbus.length > 0) mcbus += ', ' + mch11;
@@ -4352,7 +4712,7 @@ function mc_listing(address:number, datapath?:number, data_f?:number, alu_y?:num
 		else mcbus = mce7;
 	}
 	return {
-		seq: `${((datapath != undefined) ? hex(address,3) : '')}:${hex(c1,6)}${hex(c0,8)
+		seq: `${hex(address,3)}:${hex(c1,6)}${hex(c0,8)
 	} ${FN_SEQ_SN[seq2_s]} ${FN_SEQ_SN[seq1_s]} ${FN_SEQ_SN[seq0_s]
 	} ${FN_SEQ_FE[seq_fc]} [${hex(seqjmp,3)}>${hex(next,3)}] ${k9_fn} ${d_branch}`,
 		alu: (alu_y != undefined) ? `${lh} (${hex(data_f as number,2)}:${hex(alu_y,2)})${d_ccr}` : `${lh}${d_ccr}`,
@@ -4412,6 +4772,217 @@ interface FlowFrame {
 	ret: number,
 	orig: number,
 	entry: number,
+}
+function markflow(target:FlowTrace, source:FlowTrace, marker?:string):boolean {
+	target.reached = true;
+	if(marker != undefined) {
+		marker = marker;
+	} else if(source.from_main.length > 0) {
+		marker = source.from_main[0];
+	}
+	if(marker != undefined && !target.from_main.includes(marker)) {
+		target.from_main.push(marker);
+	}
+	if(!target.from.find((v)=>v.from == source.id)) {
+		let f = undefined;
+		if(source.frame != undefined) {
+			f = source.frame.find((v)=>v.ret == target.id);
+		}
+		if(f) target.from.push({from:source.id, origin:f.orig});
+		else target.from.push({from:source.id});
+	}
+	return !target.processed;
+}
+function flow_frame(target:MicroListing, from:FlowTrace, is_stk:boolean, pushframe?:FlowFrame):boolean {
+	let proc_flag = false;
+	if(pushframe != undefined && target.flow.frame_ref !== undefined) { // pre-processed chain
+		const poplisting = mclisting[target.flow.frame_ref];
+		const popflow = poplisting.flow;
+		const popframe = popflow.frame; // the frame containing a POP
+		if(popframe) {
+			const is_refpop = popflow.stack_op && !popflow.stack_push;
+			if(is_refpop) {
+				// copy pasta? or common function?
+				let r = pushframe.ret;
+				popframe.push(pushframe);
+				r = (popflow.next & (popflow.stack_mask ^ 0xfff)) | (r & popflow.stack_mask);
+				// the return point flows from the end of the call
+				const retflow = mclisting[r].flow;
+				proc_flag = markflow(retflow, popflow);
+				//const frame = from.frame;
+				//if(frame) { // if the entry point is also a PUSH/CALL, move it's frames to the return point
+				//	delete from.frame;
+				//	retflow.frame = frame;
+				//	frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
+				//}
+			} else {
+				popframe.push(pushframe);
+			}
+		}
+	} else if(pushframe != undefined) { // push a new frame
+		target.left.classList.add('stk');
+		//console.log('NEW FRAME', hex(from.id,3), hex(target.flow.id,3), hex(pushframe.orig,3));
+		if(target.flow.frame == undefined) {
+			target.flow.frame = [pushframe];
+		} else {
+			target.flow.frame.push(pushframe);
+			console.log('FRAME OVERLAP', hex(from.id,3), hex(target.flow.id,3), hex(pushframe.orig,3))
+		}
+	} else if(from.frame != undefined && (!is_stk || pushframe)) { // move existing frame along a chain
+		if(target.flow.processed) {
+			const frame = from.frame;
+			delete from.frame;
+			if(target.flow.frame == undefined) {
+				console.log('MOVE FRAME (PROC!)', hex(from.id,3), hex(target.flow.id,3));
+				target.flow.frame = frame;
+			} else {
+				console.log('MERGE FRAME (PROC!)', hex(from.id,3), hex(target.flow.id,3));
+			}
+			frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = target.flow.id;});
+		} else if(target.flow.frame == undefined) {
+			//console.log('MOVE FRAME', hex(from.id,3), hex(target.flow.id,3));
+			const frame = from.frame;
+			delete from.frame;
+			target.flow.frame = frame;
+			frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = target.flow.id;});
+		} else {
+			const tframe = target.flow.frame;
+			// from.frame.forEach((v)=>{
+			// 	if(!tframe.ret.includes(v)) tframe.ret.push(v);
+			// });
+			// frame.entry.forEach((v)=>{
+			// 	mclisting[v].flow.frame_ref = target.flow.id;
+			// 	if(!tframe.entry.includes(v)) tframe.entry.push(v);
+			// });
+			console.warn('mc frame merge at', hex(target.flow.id,3));
+		}
+	}
+	return proc_flag;
+}
+function microcfa() {
+	let proc_flag = false;
+	mclisting[0].flow.reached = true;
+	mclisting[0].flow.from_main = ['Reset'];
+	mclisting[0x100].flow.from_main = ['PreFetch'];
+	mclisting[0x101].flow.from_main = ['Fetch'];
+	for(let kb = 0; kb < 256; kb++) {
+		let sfl = mclisting[0x100 | uc.map[kb]].flow;
+		sfl.reached = true;
+		sfl.from_main.push('Op'+hex(kb));
+	}
+	let decent = 4096;
+	
+	/////
+	while(proc_flag) {
+		proc_flag = false;
+		for (let i = 0; i < 2048; i++) {
+			const listobj = mclisting[i];
+			const flow = listobj.flow;
+			let pf = false;
+			if(flow.reached && !flow.processed) {
+				flow.processed = true;
+				listobj.left.classList.add('mcrec');
+				const frame:FlowFrame[]|undefined = flow.frame;
+				const is_push = flow.stack_op && flow.stack_push;
+				const is_pop = flow.stack_op && !flow.stack_push;
+				if(flow.next != i && flow.stack_mask == 0 && flow.reg_mask == 0) {
+					const tn = mclisting[flow.next];
+					const tf = tn.flow;
+					if(is_push) {
+						pf = flow_frame(tn, flow, true, { ret: (i + 1) & 0x7ff, orig:i, entry:tf.id });
+					} else {
+						pf = flow_frame(tn, flow, flow.stack_op);
+					}
+					if(pf) proc_flag = true;
+					if(markflow(tf, flow)) proc_flag = true;
+				} else if(is_pop && flow.stack_mask != 0) {
+					// return to stack
+					if(frame != undefined) {
+						console.log('RETURN', hex(i,3));
+						for(let k = 0; k < frame.length; k++) {
+							let r = frame[k].ret;
+							const retorigin = mclisting[frame[k].orig].flow
+							r = (flow.next & (flow.stack_mask ^ 0xfff)) | (r & flow.stack_mask);
+							const retflow = mclisting[r].flow;
+							// if the entry point is also a PUSH/CALL, move it's frames to the return point
+							//frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
+							const origframe = retorigin.frame;
+							// if the return origin was carrying a frame
+							if(origframe) {
+								delete retorigin.frame;
+								retflow.frame = origframe;
+								if(retflow.processed) console.warn('RETURN ORIGIN ALREADY PROCESSED');
+								origframe.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
+							}
+							if(markflow(retflow, flow)) proc_flag = true;
+						}
+					} else {
+						console.log('UNTRACED RETURN', hex(i,3));
+					}
+				} else if(flow.reg_mask != 0) {
+					const r_base = flow.next & (flow.reg_mask ^ 0xfff);
+					console.log('AHR JMP',hex(i,3),hex(r_base,3),hex(flow.reg_mask,3));
+					// TODO
+				}
+				let br = flow.branches;
+				let clearflow = false;
+				for(let b = 0; b < br.length; b++) {
+					const n = br[b];
+					const brlisting = mclisting[n.address];
+					const brflow = brlisting.flow;
+					if(n.is_push) {
+						if(flow_frame(brlisting, flow, true, { ret: (i + 1) & 0x7ff, orig:i, entry:brflow.id }))
+							proc_flag = true;
+					} else {
+						if(flow_frame(brlisting, flow, false))
+							proc_flag = true;
+						clearflow = true;
+						flow.frame = frame;
+					}
+					if(n.source != undefined) {
+						if(markflow(brflow, flow, n.source[0]))
+							proc_flag = true;
+					} else {
+						if(markflow(brflow, flow))
+							proc_flag = true;
+					}
+				}
+				if(clearflow) {
+					delete flow.frame;
+				}
+			}
+		}
+	}
+	for (let i = 0; i < 2048; i++) {
+		const listobj = mclisting[i];
+		const flow = listobj.flow;
+		if(!flow.reached) continue;
+		let br = '';
+		for(let i = 0; i < flow.branches.length; i++) {
+			let branch = flow.branches[i];
+			if(branch.source) br += `[${hex(branch.address,3)} ${branch.source.join(' & ')}]`;
+			else br += `[${hex(branch.address,3)}]`;
+		}
+		let f = [];
+		for(let i = 0; i < flow.from_main.length; i++) {
+			let v = flow.from_main[i];
+			f.push(v);
+		}
+		for(let i = 0; i < flow.from.length; i++) {
+			let v = flow.from[i];
+			if(v.origin != undefined) {
+				f.push(`${hex(v.origin, 3)}>${hex(v.from, 3)}`);
+			} else f.push(hex(v.from, 3));
+		}
+		let fr = '';
+		if(flow.frame_ref !== undefined) {
+			fr += ` retn:${hex(flow.frame_ref, 3)}`;
+		}
+		if(flow.frame) {
+			fr += flow.frame.map((v)=>`<ret:${hex(v.ret,3)} ent:${hex(v.entry,3)} o:${hex(v.orig,3)}>`).join(';');
+		}
+		listobj.mc3.innerText = `next:${hex(flow.next,3)}/${hex(flow.stack_mask,3)} from:${f.join(',')}${fr} ${br}`;
+	}
 }
 (function(){
 	for (let i = 0; i < listmax; i++) {
@@ -4502,201 +5073,7 @@ interface FlowFrame {
 		mclisting.push(listobj);
 		d_micro.appendChild(listnode);
 	}
-	let proc_flag = true;
-	mclisting[0].flow.reached = true;
-	mclisting[0].flow.from_main = ['Reset'];
-	mclisting[0x100].flow.from_main = ['PreFetch'];
-	mclisting[0x101].flow.from_main = ['Fetch'];
-	let decent = 4096;
-	function markflow(target:FlowTrace, source:FlowTrace, marker?:string) {
-		target.reached = true;
-		if(marker != undefined) {
-			marker = marker;
-		} else if(source.from_main.length > 0) {
-			marker = source.from_main[0];
-		}
-		if(marker != undefined && !target.from_main.includes(marker)) {
-			target.from_main.push(marker);
-		}
-		if(!target.processed) proc_flag = true;
-		if(!target.from.find((v)=>v.from == source.id)) {
-			let f = undefined;
-			if(source.frame != undefined) {
-				f = source.frame.find((v)=>v.ret == target.id);
-			}
-			if(f) target.from.push({from:source.id, origin:f.orig});
-			else target.from.push({from:source.id});
-		}
-	}
-	function flow_frame(target:MicroListing, from:FlowTrace, is_stk:boolean, pushframe?:FlowFrame) {
-		if(pushframe != undefined && target.flow.frame_ref !== undefined) { // pre-processed chain
-			const poplisting = mclisting[target.flow.frame_ref];
-			const popflow = poplisting.flow;
-			const popframe = popflow.frame; // the frame containing a POP
-			if(popframe) {
-				const is_refpop = popflow.stack_op && !popflow.stack_push;
-				if(is_refpop) {
-					// copy pasta? or common function?
-					let r = pushframe.ret;
-					popframe.push(pushframe);
-					r = (popflow.next & (popflow.stack_mask ^ 0xfff)) | (r & popflow.stack_mask);
-					// the return point flows from the end of the call
-					const retflow = mclisting[r].flow;
-					markflow(retflow, popflow);
-					//const frame = from.frame;
-					//if(frame) { // if the entry point is also a PUSH/CALL, move it's frames to the return point
-					//	delete from.frame;
-					//	retflow.frame = frame;
-					//	frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
-					//}
-				} else {
-					popframe.push(pushframe);
-				}
-			}
-		} else if(pushframe != undefined) { // push a new frame
-			target.left.classList.add('stk');
-			//console.log('NEW FRAME', hex(from.id,3), hex(target.flow.id,3), hex(pushframe.orig,3));
-			if(target.flow.frame == undefined) {
-				target.flow.frame = [pushframe];
-			} else {
-				target.flow.frame.push(pushframe);
-				console.log('FRAME OVERLAP', hex(from.id,3), hex(target.flow.id,3), hex(pushframe.orig,3))
-			}
-		} else if(from.frame != undefined && (!is_stk || pushframe)) { // move existing frame along a chain
-			if(target.flow.processed) {
-				const frame = from.frame;
-				delete from.frame;
-				if(target.flow.frame == undefined) {
-					console.log('MOVE FRAME (PROC!)', hex(from.id,3), hex(target.flow.id,3));
-					target.flow.frame = frame;
-				} else {
-					console.log('MERGE FRAME (PROC!)', hex(from.id,3), hex(target.flow.id,3));
-				}
-				frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = target.flow.id;});
-			} else if(target.flow.frame == undefined) {
-				//console.log('MOVE FRAME', hex(from.id,3), hex(target.flow.id,3));
-				const frame = from.frame;
-				delete from.frame;
-				target.flow.frame = frame;
-				frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = target.flow.id;});
-			} else {
-				const tframe = target.flow.frame;
-				// from.frame.forEach((v)=>{
-				// 	if(!tframe.ret.includes(v)) tframe.ret.push(v);
-				// });
-				// frame.entry.forEach((v)=>{
-				// 	mclisting[v].flow.frame_ref = target.flow.id;
-				// 	if(!tframe.entry.includes(v)) tframe.entry.push(v);
-				// });
-				console.warn('mc frame merge at', hex(target.flow.id,3));
-			}
-		}
-	}
-	/////
-	while(proc_flag) {
-		proc_flag = false;
-		for (let i = 0; i < 2048; i++) {
-			const listobj = mclisting[i];
-			const flow = listobj.flow;
-			if(flow.reached && !flow.processed) {
-				flow.processed = true;
-				listobj.left.classList.add('mcrec');
-				const frame:FlowFrame[]|undefined = flow.frame;
-				const is_push = flow.stack_op && flow.stack_push;
-				const is_pop = flow.stack_op && !flow.stack_push;
-				if(flow.next != i && flow.stack_mask == 0 && flow.reg_mask == 0) {
-					const tn = mclisting[flow.next];
-					const tf = tn.flow;
-					if(is_push) {
-						flow_frame(tn, flow, true, { ret: (i + 1) & 0x7ff, orig:i, entry:tf.id });
-					} else {
-						flow_frame(tn, flow, flow.stack_op);
-					}
-					markflow(tf, flow);
-				} else if(is_pop && flow.stack_mask != 0) {
-					// return to stack
-					if(frame != undefined) {
-						console.log('RETURN', hex(i,3));
-						for(let k = 0; k < frame.length; k++) {
-							let r = frame[k].ret;
-							const retorigin = mclisting[frame[k].orig].flow
-							r = (flow.next & (flow.stack_mask ^ 0xfff)) | (r & flow.stack_mask);
-							const retflow = mclisting[r].flow;
-							// if the entry point is also a PUSH/CALL, move it's frames to the return point
-							//frame.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
-							const origframe = retorigin.frame;
-							// if the return origin was carrying a frame
-							if(origframe) {
-								delete retorigin.frame;
-								retflow.frame = origframe;
-								if(retflow.processed) console.warn('RETURN ORIGIN ALREADY PROCESSED');
-								origframe.forEach((v)=>{mclisting[v.entry].flow.frame_ref = retflow.id;});
-							}
-							markflow(retflow, flow);
-						}
-					} else {
-						console.log('UNTRACED RETURN', hex(i,3));
-					}
-				} else if(flow.reg_mask != 0) {
-					const r_base = flow.next & (flow.reg_mask ^ 0xfff);
-					console.log('AHR JMP',hex(i,3),hex(r_base,3),hex(flow.reg_mask,3));
-					// TODO
-				}
-				let br = flow.branches;
-				let clearflow = false;
-				for(let b = 0; b < br.length; b++) {
-					const n = br[b];
-					const brlisting = mclisting[n.address];
-					const brflow = brlisting.flow;
-					if(n.is_push) {
-						flow_frame(brlisting, flow, true, { ret: (i + 1) & 0x7ff, orig:i, entry:brflow.id });
-					} else {
-						flow_frame(brlisting, flow, false);
-						clearflow = true;
-						flow.frame = frame;
-					}
-					if(n.source != undefined) {
-						markflow(brflow, flow, n.source[0]);
-					} else {
-						markflow(brflow, flow);
-					}
-				}
-				if(clearflow) {
-					delete flow.frame;
-				}
-			}
-		}
-	}
-	for (let i = 0; i < 2048; i++) {
-		const listobj = mclisting[i];
-		const flow = listobj.flow;
-		if(!flow.reached) continue;
-		let br = '';
-		for(let i = 0; i < flow.branches.length; i++) {
-			let branch = flow.branches[i];
-			if(branch.source) br += `[${hex(branch.address,3)} ${branch.source.join(' & ')}]`;
-			else br += `[${hex(branch.address,3)}]`;
-		}
-		let f = [];
-		for(let i = 0; i < flow.from_main.length; i++) {
-			let v = flow.from_main[i];
-			f.push(v);
-		}
-		for(let i = 0; i < flow.from.length; i++) {
-			let v = flow.from[i];
-			if(v.origin != undefined) {
-				f.push(`${hex(v.origin, 3)}>${hex(v.from, 3)}`);
-			} else f.push(hex(v.from, 3));
-		}
-		let fr = '';
-		if(flow.frame_ref !== undefined) {
-			fr += ` retn:${hex(flow.frame_ref, 3)}`;
-		}
-		if(flow.frame) {
-			fr += flow.frame.map((v)=>`<ret:${hex(v.ret,3)} ent:${hex(v.entry,3)} o:${hex(v.orig,3)}>`).join(';');
-		}
-		listobj.mc3.innerText = `next:${hex(flow.next,3)}/${hex(flow.stack_mask,3)} from:${f.join(',')}${fr} ${br}`;
-	}
+	
 })();
 let last_memv_line = -1;
 function update_memview(is_scroll = false) {
@@ -5044,6 +5421,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	readmeta(address: number):number { return MEMSTAT.IO; }
 	writemeta(address: number, value: number): void {}
 	sel_unit = 0;
+	sel_address = 0;
 	units = [new DSK2Unit(), new DSK2Unit()];
 	busy = false;
 	busy_time = 0;
@@ -5068,9 +5446,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		return 2; // not used, but seems like a good number :)
 	}
 	acknowledge():boolean {
-		let v = this.interrupt_pend;
-		this.interrupt_pend = false;
-		return v;
+		return false;
 	}
 	reset(): void {
 		this.command = -1;
@@ -5082,11 +5458,13 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		this.wpmask = 0;
 		this.sel_unit = 0;
 		this.interrupt_en = false;
+		this.interrupt_pend = false;
 		mcsim.dma_int(false);
 	}
 	tickbusy() {
 		this.busy_time--;
 		if (this.busy_time == 0) {
+			if(this.busy) this.interrupt_pend = true;
 			this.busy = false;
 			switch(this.command) {
 			case 0:
@@ -5096,7 +5474,6 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				if(this.stat_log_transfers)
 					console.log(`DSK C:${this.command} S:${hex(this.stat_start_sector, 4)} DMA:`, this.stat_transfer_count);
 				this.stat_transfer_count = 0;
-				if (this.interrupt_en) mcsim.dma_int(true);
 				break;
 			case 6:
 				//if (this.interrupt_en) mcsim.dma_int(true);
@@ -5104,18 +5481,19 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			case 2:
 				this.seeking = false;
 				this.seek_done = true;
-				if (this.interrupt_en) mcsim.dma_int(true);
+				this.interrupt_pend = true;
 				break;
 			case 3:
 				this.seeking = false;
 				this.seek_done = true;
-				if (this.interrupt_en) mcsim.dma_int(true);
+				this.interrupt_pend = true;
 				break;
 			default:
 				if (this.command != -1) {
 					console.log('unknown command');
 				}
 			}
+			if (this.interrupt_pend && this.interrupt_en) mcsim.dma_int(true);
 			this.command = -1;
 		}
 	}
@@ -5126,33 +5504,27 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	}
 	readbyte(address:number):number {
 		let v = 0;
-		let unit = this.units[this.sel_unit];
+		let unit = this.units[this.sel_unit & 7];
 		switch(address) {
 		case 0:
-			v = this.sel_unit;
+			v = this.sel_unit | 0xf0;
 			break;
 		case 1: // cylh
-			if (unit) {
-				v = unit.sel_address >> 8;
-			}
+			v = this.sel_address >> 8;
 			break;
 		case 2: // cyll:h:sec
-			if (unit) {
-				v = unit.sel_address & 0xff;
-			}
+			v = this.sel_address & 0xff;
 			break;
 		case 3: // wpmask?
 			v = this.wpmask;
 			break;
 		case 4: // stat hi / 0 tmo adrerr fmterr | 0 seekerr fault busy
-			if (unit) {
-				v = ((this.busy || this.seeking) ? 1 : 0);
-			}
+			v = this.busy ? 1 : 0;
 			break;
 		case 5: // stat lo / wtpr wten oncyl ready | seekcom3..0
 			if (unit) {
 				v = ((unit.image?.protect !== false) ? 0x80 : 0) /* wp */ |
-				((this.wpmask & (1 << this.sel_unit)) ? 0x40 : 0) |
+				((this.wpmask & (1 << (this.sel_unit & 7))) ? 0x40 : 0) |
 				(this.seeking ? 0 : 0x20) /* oncyl */ |
 				(unit.image != null ? 0x10 : 0) /* ready */ |
 				(this.seek_done ? 0x01 : 0);
@@ -5161,9 +5533,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			}
 			break;
 		case 8: // busy?
-			if (this.sel_unit == 1 || this.sel_unit == 0) {
-				v = ((this.busy || this.seeking) ? 1 : 0);
-			}
+			v = this.busy ? 1 : 0;
 			break;
 		default:
 			console.log('DSK2:R:', hex(address, 1), hex(v));
@@ -5171,7 +5541,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		return v;
 	}
 	dma_step(ctrl:DMAControl):void {
-		const unit = this.units[this.sel_unit];
+		const unit = this.units[this.sel_unit & 7];
 		const unitdata = unit.image;
 		if (unit == null || unitdata == null) return;
 		if (mcsim.dma_end) {
@@ -5217,20 +5587,16 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		mcsim.dma_request();
 	}
 	writebyte(address:number, value:number):void {
-		const unit = this.units[this.sel_unit];
+		const unit = this.units[this.sel_unit & 7];
 		switch(address) {
 		case 0:
-			this.sel_unit = value & 0x7;
+			this.sel_unit = value & 0xF;
 			break;
 		case 1: // cylh
-			if (unit) {
-				unit.sel_address = (unit.sel_address & 0xff) | (value << 8);
-			}
+			this.sel_address = (this.sel_address & 0xff) | (value << 8);
 			break;
 		case 2: // cyll:h:sec
-			if (unit) {
-				unit.sel_address = (unit.sel_address & 0xff00) | (value & 0xff);
-			}
+			this.sel_address = (this.sel_address & 0xff00) | (value & 0xff);
 			break;
 		case 3: // wpmask
 			this.wpmask = value & 0xff;
@@ -5238,7 +5604,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		case 8: // cmd
 			if (unit == null) break;
 			this.seek_done = false;
-			this.busy = true;
+			if((value & 2) == 0) this.busy = true;
 			this.command = value;
 			if(value != 5) {
 				this.format_permit = false;
@@ -5255,7 +5621,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				this.busy_time = 1;
 				this.sect_remain = 400;
 				this.stat_start_sector = unit.sel_address;
-				if (((this.wpmask & (1 << this.sel_unit)) != 0) && (unit.image?.protect === false)) {
+				if (((this.wpmask & (1 << (this.sel_unit & 7))) != 0) && (unit.image?.protect === false)) {
 					this.busy_time = 0;
 					//console.log('DSK2:do_write:', hex(u.sel_address, 4));
 					this.do_dma_write();
@@ -5267,9 +5633,11 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				//console.log('DSK2:seek:', hex(this.sel_address, 4));
 				this.busy_time = 40;
 				this.seeking = true;
+				unit.sel_address = this.sel_address;
 				break;
 			case 3: // 3=rtzcal
 				//console.log('DSK2:rtz');
+				unit.sel_address = this.sel_address = 0;
 				this.busy_time = 200;
 				this.seeking = true;
 				break;
@@ -5291,7 +5659,6 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				}
 				break;
 			case 6: // format write permit
-				this.busy = false;
 				this.format_permit = true;
 				break;
 			default:
@@ -5300,7 +5667,12 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				break;
 			}
 			break;
+		case 11:
+			this.reset();
+			this.sel_unit = value & 0xF;
+			break;
 		case 12:
+			this.interrupt_pend = true;
 			if (this.interrupt_en) {
 				mcsim.dma_int(true);
 				//console.log('DSK2:W:IFORCE');
@@ -5312,8 +5684,10 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			break;
 		case 14:
 			this.interrupt_en = true;
+			if(this.interrupt_pend) mcsim.dma_int(true);
 			break;
 		case 15:
+			this.interrupt_pend = false;
 			mcsim.dma_int(false);
 			break;
 		default:
@@ -5323,7 +5697,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	}
 }
 
-class MockPrinter implements MemAccess {
+class MockPrinter implements MemAccess, CharDevice {
 	readmeta(address: number):number { return MEMSTAT.IO; }
 	writemeta(address: number, value: number): void {}
 	readbyte(address: number): number {
@@ -5335,18 +5709,20 @@ class MockPrinter implements MemAccess {
 	}
 	writebyte(address: number, value: number): void {
 		if (address == 0) {
-			if(value > 127) {
-				let v = value & 127;
-				let c;
-				if (v == 12) {
-					c = "\u21ca\n";
-				} else {
-					c = String.fromCodePoint(value & 127);
-				}
-				txt_anno.value += c;
-			}
+			this.write(value & 127);
 		}
 	}
+	write(v: number): void {
+		let c;
+		if (v == 12) {
+			c = "\u21ca\n";
+		} else {
+			c = String.fromCodePoint(v);
+		}
+		txt_anno.value += c;
+	}
+	check_read(): void {}
+	clear_buffer(): void {}
 }
 
 const UNIT_SELECT = [-1,0,1,-1,2,-1,-1,-1,3,-1,-1,-1,-1,-1,-1,-1];
@@ -5494,10 +5870,12 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 		if(this.tsm_timeout >= 255) {
 			this.tsm_timeout = 0;
 			this.tsm = 0x7f;
-			txt_anno.value += `TSM Timeout ${this.track_base} ${hex(where,4)}.${phase}\n`;
+			//txt_anno.value += `TSM Timeout ${this.track_base} ${hex(where,4)}.${phase}\n`;
 		}
 		if((ltsm & 3) == 0 && (this.tsm & 3) != 0) {
-			this.step(false);
+			// precheck idle state to save on sim time
+			if(this.seq.p != 0x2B5 || this.flag_cputocard || run_rate <= 10000)
+				this.step(false);
 			this.tsm_timeout = 0;
 		}
 	}
@@ -6457,10 +6835,12 @@ class NullROM implements MemAccess {
 	}
 }
 
-function loadbin(mem:MemAccess, v:Uint8Array, addrfn?:AddressTransform):MemAccess {
+function loadbin(mem:MemAccess, v:Uint8Array, addrfn?:number|AddressTransform):MemAccess {
 	const l = v.length;
-	if (addrfn == null) {
-		for (let a = 0; a < l; a++) {
+	if (addrfn === undefined || typeof addrfn == 'number') {
+		let a = 0;
+		if(addrfn !== undefined) a = addrfn;
+		for (; a < l; a++) {
 			mem.writemeta(a, v[a]);
 		}
 	} else {
@@ -6602,7 +6982,7 @@ interface OPL_EXT_PAGE {
 }
 interface OPL_EXT_DMA {
 	x:OPL_EXT.DMA,
-	xd:[[],string[],string[]]
+	xd:[string[],string[],string[]]
 }
 interface OPL_EXT_BIG {
 	x:OPL_EXT.BIG,
@@ -6618,9 +6998,10 @@ interface OPL_EXT_RII {
 interface OPL_EXT_XIO {
 	x:OPL_EXT.XIO,
 }
+
 interface OPLBase {
-	n:string,
-	nm?:string,
+	n:string|(string[]),
+	nm?:string|(string[]),
 	l?:number,
 	i?:number,
 	ms?:OPM,
@@ -6628,22 +7009,60 @@ interface OPLBase {
 	w?:TXS,
 	sr?:REG,
 	dr?:REG,
+	fl:FLAGS,
+	aop?:0|1|2,
+	opf?:(this:SoftCPU, ctx:rrscdata)=>number,
+	opc?:(this:SoftCPU, ctx:rrscdata)=>void,
 }
 type OPLEntry = OPLBase & ( { x?:never } |
 	OPL_EXT_MEM | OPL_EXT_PAGE | OPL_EXT_DMA | OPL_EXT_BIG
 	| OPL_EXT_MPUSH | OPL_EXT_MPOP | OPL_EXT_RII | OPL_EXT_XIO
 );
+interface rrscdata {
+	reg:ILevelRegisters;
+	srcreg:number;
+	dstreg:number;
+	srcval:number;
+	cdval:number;
+	addr:number;
+}
+interface SoftCPU {
+	cc:number;
+	pc:number;
+	write(address:number, v8:number):void;
+	writew(address:number, v16:number):void;
+	stackb(v8:number):void;
+	stackw(v16:number):void;
+	popb():number;
+	popw():number;
+	fetch(address:number):number;
+	fetchw(address:number):number;
+	pcfetch():number;
+	pcfetchw():number;
+	f_jsr(ea:number):void;
+	f_branch(cm:number, cn:string, z:boolean):void;
+}
 
+const enum FLAGS {
+	None,
+	F, L,
+	MV, LMV, FLMV, ArithLMV, ArithFMV, ArithFLMV
+}
 const enum REG {
 	A, AL, B, BL, X, XL, Y, YL,
-	Z, ZL, S, SL, C, CL, PC, PCL
+	Z, ZL, S, SL, C, CL, P, PL, PC, PCL
 }
-const regname = [
-	'AH','AL','BH','BL','XH','XL','YH','YL',
-	'ZH','ZL','SH','SL','CH','CL','PH','PL',
-	'A','A!','B','B!','X','X!','Y','Y!',
-	'Z','Z!','S','S!','C','C!','P','P!',
-]
+const regname = [[
+	['AU','AL','BU','BL','XU','XL','YU','YL',
+	'ZU','ZL','SU','SL','CU','CL','PU','PL'],
+	['A','A','B','B','X','X','Y','Y',
+	'Z','Z','S','S','C','C','P','P','PC','PC'],
+],[
+	['AH','AL','BH','BL','XH','XL','YH','YL',
+	'ZH','ZL','SH','SL','CH','CL','PH','PL'],
+	['A','A!','B','B!','X','X!','Y','Y!',
+	'Z','Z!','S','S!','C','C!','P','P!','PC','PC!'],
+]];
 const mmwlist = new Map<number, string>([]);
 
 const mmiolist = new Map([
@@ -6681,304 +7100,320 @@ const mmiolist = new Map([
 if(true) {
 	for(let i = 0; i < 256; i++) {
 		if ((i & 1) == 0) {
-			mmwlist.set(i, `cpu_reg_${regname[16+(i & 15)].toLowerCase()}${i >> 4}`);
+			mmwlist.set(i, `cpu_reg_${regname[0][1][i & 15].toLowerCase()}${i >> 4}`);
 		}
-		mmiolist.set(i, `cpu_reg_${regname[(i & 15)].toLowerCase()}${i >> 4}`);
+		mmiolist.set(i, `cpu_reg_${regname[0][0][i & 15].toLowerCase()}${i >> 4}`);
 	}
 }
 
 const oplist:OPLEntry[] = [
 	// 0x0H
-	{n:'HALT',md:OPM.IMPL},
-	{n:'NOP',md:OPM.IMPL},
-	{n:'SF',md:OPM.IMPL},
-	{n:'RF',md:OPM.IMPL},
-	{n:'EI',md:OPM.IMPL},
-	{n:'DI',md:OPM.IMPL},
-	{n:'SL',md:OPM.IMPL},
-	{n:'RL',md:OPM.IMPL},
-	{n:'CL',nm:'COML',md:OPM.IMPL},
-	{n:'RSR',nm:'RET',md:OPM.IMPL},
-	{n:'RI',nm:'RETI',md:OPM.IMPL},
-	{n:'!ill0B',md:OPM.IMPL},
-	{n:'SYN',md:OPM.IMPL}, // dis-ok TODO: micro trace?
-	{n:'PCX',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.PC,dr:REG.X},
-	{n:'DLY',nm:'DELAY',md:OPM.IMPL},
-	{n:'RSV',nm:'SVRET',md:OPM.IMPL},
+	{n:['HLT','HALT'],md:OPM.IMPL,fl:FLAGS.None,opc:function(){throw 0;}},
+	{n:'NOP',md:OPM.IMPL,opc:function(){},fl:FLAGS.None},
+	{n:'SF',md:OPM.IMPL,fl:FLAGS.F,
+		opc:function(){ this.cc |= CC_F; }},
+	{n:'RF',md:OPM.IMPL,fl:FLAGS.F,
+		opc:function(){ this.cc &= CC_NF; }},
+	{n:'EI',md:OPM.IMPL,fl:FLAGS.None},
+	{n:'DI',md:OPM.IMPL,fl:FLAGS.None},
+	{n:'SL',md:OPM.IMPL,fl:FLAGS.L,
+		opc:function(){ this.cc |= CC_L; }},
+	{n:'RL',md:OPM.IMPL,fl:FLAGS.L,
+		opc:function(){ this.cc &= CC_NL; }},
+	{n:['CL','COML'],md:OPM.IMPL,fl:FLAGS.L,
+		opc:function(){ this.cc ^= CC_L; }}, // 8
+	{n:['RSR','RET'],md:OPM.IMPL,fl:FLAGS.None,
+		opc:function(ctx) {
+			this.pc = ctx.reg.x;
+			ctx.reg.x = this.popw();
+		}},
+	{n:['RI','RETI'],md:OPM.IMPL,fl:FLAGS.FLMV},
+	{n:'!ill0B',md:OPM.IMPL,fl:FLAGS.None},
+	{n:'SYN',md:OPM.IMPL,fl:FLAGS.None, // dis-ok TODO: micro trace?
+		opc:function() {console.log('SYN');}},
+	{n:['PCX','MOV'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.PC,dr:REG.X,fl:FLAGS.None},
+	{n:['DLY','DELAY'],md:OPM.IMPL,fl:FLAGS.None,opc:function(){}},
+	{n:['RSV','SVRET'],md:OPM.IMPL,fl:FLAGS.None},
 	// 0x1H
-	{n:'BL',md:OPM.PCO,w:TXS.F},
-	{n:'BNL',md:OPM.PCO,w:TXS.F},
-	{n:'BF',md:OPM.PCO,w:TXS.F},
-	{n:'BNF',md:OPM.PCO,w:TXS.F},
-	{n:'BZ',md:OPM.PCO,w:TXS.F},
-	{n:'BNZ',md:OPM.PCO,w:TXS.F},
-	{n:'BM',md:OPM.PCO,w:TXS.F},
-	{n:'BP',md:OPM.PCO,w:TXS.F},
-	{n:'BGE',md:OPM.PCO,w:TXS.F},
-	{n:'BLE',md:OPM.PCO,w:TXS.F},
-	{n:'BS1',md:OPM.PCO,w:TXS.F},
-	{n:'BS2',md:OPM.PCO,w:TXS.F},
-	{n:'BS3',md:OPM.PCO,w:TXS.F},
-	{n:'BS4',md:OPM.PCO,w:TXS.F},
-	{n:'BI',md:OPM.PCO,w:TXS.F},
-	{n:'BCK',md:OPM.PCO,w:TXS.F},
+	{n:'BL',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_L,'BL ',false);}},
+	{n:'BNL',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_L,'BNL',true);}},
+	{n:'BF',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_F,'BF ',false);}},
+	{n:'BNF',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_F,'BNF',true);}},
+	{n:'BZ',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_V,'BZ ',false);}},
+	{n:'BNZ',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_V,'BNZ',true);}},
+	{n:'BM',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_M,'BM ',false);}},
+	{n:'BP',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_M,'BP ',true);}},
+	{n:'BGZ',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_M|CC_V,'BGZ',true);}},
+	{n:'BLE',md:OPM.PCO,w:TXS.F,fl:FLAGS.None,opc:function(){this.f_branch(CC_M|CC_V,'BLE',false);}},
+	{n:'BS1',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
+	{n:'BS2',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
+	{n:'BS3',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
+	{n:'BS4',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
+	{n:'BI',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
+	{n:'BCK',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
 	// 0x2H
-	{n:'INRB',nm:'INC',md:OPM.RC,w:TXS.B,i:1},
-	{n:'DCRB',nm:'DEC',md:OPM.RC,w:TXS.B,i:1},
-	{n:'CLRB',md:OPM.RC,w:TXS.B},
-	{n:'IVR',nm:'NOT',md:OPM.RC,w:TXS.B},
-	{n:'SRRB',nm:'SRA',md:OPM.RC,w:TXS.B,i:1},
-	{n:'SLRB',nm:'SLL',md:OPM.RC,w:TXS.B,i:1},
-	{n:'RRRB',nm:'RORC',md:OPM.RC,w:TXS.B,i:1},
-	{n:'RLRB',nm:'ROLC',md:OPM.RC,w:TXS.B,i:1},
-	{n:'INAB',nm:'INC',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'DCAB',nm:'DEC',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'CLAB',nm:'CLR',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'IVAB',nm:'NOT',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'SRAB',nm:'SRA',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'SLAB',nm:'SLL',md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'page',md:OPM.IMPL,x:OPL_EXT.PAGE,xd:[ // 2E
+	{n:['INRB','INC'],md:OPM.RC,w:TXS.B,i:1,aop:0,fl:FLAGS.ArithFMV},
+	{n:['DCRB','DEC'],md:OPM.RC,w:TXS.B,i:1,aop:1,fl:FLAGS.ArithFMV},
+	{n:'CLRB',md:OPM.RC,w:TXS.B,aop:0,fl:FLAGS.ArithFLMV,
+		opf:function(rc){ rc.srcval = 0; return rc.cdval; }},
+	{n:['IVRB','NOT'],md:OPM.RC,w:TXS.B,fl:FLAGS.ArithFLMV},
+	{n:['SRRB','SHR'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
+	{n:['SLRB','SHL'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
+	{n:['RRRB','RORC'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
+	{n:['RLRB','ROLC'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
+	{n:['INAB','INC'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.ArithFMV},
+	{n:['DCAB','DEC'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.ArithFMV},
+	{n:['CLAB','CLR'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,fl:FLAGS.ArithFLMV},
+	{n:['IVAB','NOT'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,fl:FLAGS.MV},
+	{n:['SRAB','SHR'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.FLMV},
+	{n:['SLAB','SHL'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.FLMV},
+	{n:['','page.'],md:OPM.IMPL,fl:FLAGS.None,x:OPL_EXT.PAGE,xd:[ // 2E
 		['c','c','i','i','i','i'],
-		["WPF","RPF","WPF1","RPF1","WPFH","RPFH"],
-		["LDM","STM","LSM","SSM","FLM","FFM"]
+		["LDM","STM","LSM","SSM","FLM","MFM"],
+		["WrPM","RdPM","Wr1PM","Rd1PM","FillPM","FFromPM"]
 	]},
-	{n:'dma.',md:OPM.IMPL,x:OPL_EXT.DMA,xd:[ // 2F
-		[],
+	{n:['DMA ','dma.',''],md:OPM.IMPL,fl:FLAGS.None,x:OPL_EXT.DMA,xd:[ // 2F
+		['SAD','RAD','SCT','RCT','SDV','RDV','EAB','DAB','SMN','RMN'],
+		['LD.A','ST.A','LD.C','ST.C','LD.M','LD.M','EN'  ,'DIS' ,'LD.S','ST.S'],
 		['LDDMAA','STDMAA','LDDMAC','STDMAC','SETDMAM','SETDMAMR','EDMA','DDMA','LDISR','STISR'],
-		['LD.A','ST.A','LD.C','ST.C','LD.M','LD.M','EN'  ,'DIS' ,'LD.S','ST.S']
 	]},
 	// 0x3H
-	{n:'INR',nm:'INC',md:OPM.RC,w:TXS.W,i:1},
-	{n:'DCR',nm:'DEC',md:OPM.RC,w:TXS.W,i:1},
-	{n:'CLR',md:OPM.RC,w:TXS.W},
-	{n:'IVR',nm:'NOT',md:OPM.RC,w:TXS.W},
-	{n:'SRR',nm:'SRA',md:OPM.RC,w:TXS.W,i:1},
-	{n:'SLR',nm:'SLL',md:OPM.RC,w:TXS.W,i:1},
-	{n:'RRR',nm:'RORC',md:OPM.RC,w:TXS.W,i:1},
-	{n:'RLR',nm:'ROLC',md:OPM.RC,w:TXS.W,i:1},
-	{n:'INA',nm:'INC',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'DCA',nm:'DEC',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'CLA',nm:'CLR',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'IVA',nm:'NOT',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'SRA',nm:'SRA',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'SLA',nm:'SLL',md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'INX',nm:'INC',md:OPM.IMPL_R,w:TXS.W,dr:REG.X},
-	{n:'DCX',nm:'DEC',md:OPM.IMPL_R,w:TXS.W,dr:REG.X},
+	{n:['INR','INC'],md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.ArithFMV},
+	{n:['DCR','DEC'],md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.ArithFMV},
+	{n:'CLR',nm:'CAD',md:OPM.RC,w:TXS.W,fl:FLAGS.ArithFLMV},
+	{n:['IVR','NOT'],nm:['IAD','NOT'],md:OPM.RC,w:TXS.W,fl:FLAGS.ArithFLMV},
+	{n:['SRR','SHR'],nm:'SHR',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
+	{n:['SLR','SHL'],nm:'SHL',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
+	{n:['RRR','RORC'],nm:['RTR','RORC'],md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
+	{n:['RLR','ROLC'],nm:['RTL','ROLC'],md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
+	{n:['INA','INC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.ArithFMV},
+	{n:['DCA','DEC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.ArithFMV},
+	{n:['CLA','CLR'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,fl:FLAGS.ArithFLMV},
+	{n:['IVA','NOT'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,fl:FLAGS.MV},
+	{n:['SRA','SHR'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.FLMV},
+	{n:['SLA','SHL'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.FLMV},
+	{n:['INX','INC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.X,i:1,fl:FLAGS.ArithFMV},
+	{n:['DCX','DEC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.X,i:1,fl:FLAGS.ArithFMV},
 	// 0x4H
-	{n:'ADDB',md:OPM.RR,w:TXS.B},
-	{n:'SUBB',md:OPM.RR,w:TXS.B},
-	{n:'ANDB',md:OPM.RR,w:TXS.B},
-	{n:'ORIB',nm:'OR',md:OPM.RR,w:TXS.B},
-	{n:'OREB',nm:'XOR',md:OPM.RR,w:TXS.B},
-	{n:'XFRB',nm:'MOV',md:OPM.RR,w:TXS.B},
-	{n:'BIG',md:OPM.IMPL,x:OPL_EXT.BIG,xd:[ // 46
-		['ADD','SUB','CMP','MOV','NEG','SMUL','DIV','DIVMOD','TOBIN','FMBIN'],
+	{n:'ADDB',md:OPM.RR,w:TXS.B,fl:FLAGS.ArithFLMV},
+	{n:'SUBB',md:OPM.RR,w:TXS.B,fl:FLAGS.ArithFLMV},
+	{n:'ANDB',md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
+	{n:['ORIB','OR'],md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
+	{n:['OREB','XOR'],md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
+	{n:['XFRB','XFR'],md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
+	{n:['','BIG.'],md:OPM.IMPL,fl:FLAGS.FLMV,x:OPL_EXT.BIG,xd:[ // 46
 		['A','S','C','ZAD','ZSU','M','D','DRM','CTB','CFB'],
+		['ADD','SUB','CMP','MOV','NEG','SMUL','DIV','DIVMOD','TOBIN','FMBIN'],
 	]},
-	{n:'MEM',md:OPM.IMPL,x:OPL_EXT.MEM,xd:[ // 47
-		[0,1,3,2,2,2,2,2,2,6],
-		['CVXR','CPVR','MVVR','SCNR','MVFR','ANCR','ORCR','XRCR','CPFR','FILR'],//1
+	{n:['','MEM.'],md:OPM.IMPL,fl:FLAGS.FLMV,x:OPL_EXT.MEM,xd:[ // 47
+		[0,1,3,2,6,6,6,6,6,6],
+		['CVX','CPV','MVV','SCN','MVF','ANC','ORC','XRC','CPF','FIL'],//1
 		['XREC','CMPC','MOVEC','SCANC','MOVEF','ANDC','ORC','XORC','CMPF','FILL'],//2
 	]},
-	{n:'AABB',nm:'ADD',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
-	{n:'SABB',nm:'SUB',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
-	{n:'NABB',nm:'AND',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
-	{n:'XAXB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.XL},
-	{n:'XAYB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.YL},
-	{n:'XABB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL},
-	{n:'XAZB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.ZL},
-	{n:'XASB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.SL},
+	{n:['AABB','ADD'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,fl:FLAGS.ArithFLMV},
+	{n:['SABB','SUB'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,fl:FLAGS.ArithFLMV},
+	{n:['NABB','AND'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,fl:FLAGS.MV},
+	{n:['XAXB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.XL,aop:2,fl:FLAGS.MV},
+	{n:['XAYB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.YL,aop:2,fl:FLAGS.MV},
+	{n:['XABB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,aop:2,fl:FLAGS.MV},
+	{n:['XAZB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.ZL,aop:2,fl:FLAGS.MV},
+	{n:['XASB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.SL,aop:2,fl:FLAGS.MV},
 	// 0x5H
-	{n:'ADD',md:OPM.RR,w:TXS.W},
-	{n:'SUB',md:OPM.RR,w:TXS.W},
-	{n:'AND',md:OPM.RR,w:TXS.W},
-	{n:'ORI',nm:'OR',md:OPM.RR,w:TXS.W},
-	{n:'ORE',nm:'XOR',md:OPM.RR,w:TXS.W},
-	{n:'XFR',nm:'MOV',md:OPM.RRS,w:TXS.W},
-	{n:'EAO',md:OPM.IMPL}, // 56
-	{n:'DAO',md:OPM.IMPL}, // 57
-	{n:'AAB',nm:'ADD',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
-	{n:'SAB',nm:'SUB',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
-	{n:'NAB',nm:'AND',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
-	{n:'XAX',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.X},
-	{n:'XAY',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Y},
-	{n:'XAB',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
-	{n:'XAZ',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Z},
-	{n:'XAS',nm:'MOV',ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.S},
+	{n:'ADD',md:OPM.RR,w:TXS.W,fl:FLAGS.ArithFLMV},
+	{n:'SUB',md:OPM.RR,w:TXS.W,fl:FLAGS.ArithFLMV},
+	{n:'AND',md:OPM.RR,w:TXS.W,fl:FLAGS.MV},
+	{n:['ORI','OR'],md:OPM.RR,w:TXS.W,fl:FLAGS.MV},
+	{n:['ORE','XOR'],md:OPM.RR,w:TXS.W,fl:FLAGS.MV},
+	{n:'XFR',md:OPM.RRS,w:TXS.W,fl:FLAGS.MV,aop:2}, // 55
+	{n:'EAO',md:OPM.IMPL,fl:FLAGS.None}, // 56
+	{n:'DAO',md:OPM.IMPL,fl:FLAGS.None}, // 57
+	{n:['AAB','ADD'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,fl:FLAGS.ArithFLMV},
+	{n:['SAB','SUB'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,fl:FLAGS.ArithFLMV},
+	{n:['NAB','AND'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,fl:FLAGS.MV},
+	{n:['XAX','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.X,aop:2,fl:FLAGS.MV},
+	{n:['XAY','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Y,aop:2,fl:FLAGS.MV},
+	{n:['XAB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:2,fl:FLAGS.MV},
+	{n:['XAZ','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Z,aop:2,fl:FLAGS.MV},
+	{n:['XAS','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.S,aop:2,fl:FLAGS.MV},
 	// 0x6H
-	{n:'LDX',nm:'LD',ms:OPM.IMM,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'LDX',nm:'LD',ms:OPM.DIR,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'LDX',nm:'LD',ms:OPM.IND,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'LDX',nm:'LD',ms:OPM.PCO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'LDX',nm:'LD',ms:OPM.IPO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'LDX',nm:'LD',ms:OPM.MOD,w:TXS.W,md:OPM.IMPL_R,dr:REG.X},
-	{n:'SVC',nm:'SVCALL',ms:OPM.IMM,w:TXS.B,md:OPM.IMPL},
-	{n:'MEM',md:OPM.IMPL,x:OPL_EXT.MEM,sr:REG.A,xd:[ // 67
-		[0,1,3,2,2,2,2,2,2,6],
+	{n:['LDX','LD'],ms:OPM.IMM,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDX','LD'],ms:OPM.DIR,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDX','LD'],ms:OPM.IND,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDX','LD'],ms:OPM.PCO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDX','LD'],ms:OPM.IPO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDX','LD'],ms:OPM.MOD,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['SVC','SVCALL'],ms:OPM.IMM,w:TXS.B,fl:FLAGS.None,md:OPM.IMPL},
+	{n:['','MEM.'],md:OPM.IMPL,fl:FLAGS.FLMV,x:OPL_EXT.MEM,sr:REG.A,xd:[ // 67
+		[0,1,3,2,6,6,6,6,6,6],
 		['CVXR','CPVR','MVVR','SCNR','MVFR','ANCR','ORCR','XRCR','CPFR','FILR'],//1
 		['XREC','CMPC','MOVEC','SCANC','MOVEF','ANDC','ORC','XORC','CMPF','FILL'],//2
 	]},
-	{n:'STX',nm:'ST',md:OPM.IMM,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'STX',nm:'ST',md:OPM.DIR,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'STX',nm:'ST',md:OPM.IND,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'STX',nm:'ST',md:OPM.PCO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'STX',nm:'ST',md:OPM.IPO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'STX',nm:'ST',md:OPM.MOD,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X},
-	{n:'LST',nm:'LDST',md:OPM.DIR,w:TXS.B}, // 6E
-	{n:'SST',nm:'STST',md:OPM.IMPL,ms:OPM.DIR,w:TXS.B}, // 6F
+	{n:['STX','ST'],md:OPM.IMM,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STX','ST'],md:OPM.DIR,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STX','ST'],md:OPM.IND,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STX','ST'],md:OPM.PCO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STX','ST'],md:OPM.IPO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STX','ST'],md:OPM.MOD,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LST','LDST'],md:OPM.DIR,w:TXS.B,fl:FLAGS.ArithFLMV}, // 6E
+	{n:['SST','STST'],md:OPM.IMPL,ms:OPM.DIR,w:TXS.B,fl:FLAGS.ArithFLMV}, // 6F
 	// 0x7H
-	{n:'!ill',md:OPM.IMM,w:TXS.F},//0
-	{n:'JMP',md:OPM.DIR,w:TXS.F},//1
-	{n:'JMP',md:OPM.IND,w:TXS.F},//2
-	{n:'JMP',md:OPM.PCO,w:TXS.F},//3
-	{n:'JMP',md:OPM.IPO,w:TXS.F},//4
-	{n:'JMP',md:OPM.MOD,w:TXS.F},//5
-	{n:'EPE',nm:'EN.PEF',md:OPM.IMPL}, //6
-	{n:'MUL',md:OPM.RRX,w:TXS.W}, //7
-	{n:'DIV',md:OPM.RRX,w:TXS.W}, //8
-	{n:'JSR',nm:'CALL',md:OPM.DIR,w:TXS.F},
-	{n:'JSR',nm:'CALL',md:OPM.IND,w:TXS.F},
-	{n:'JSR',nm:'CALL',md:OPM.PCO,w:TXS.F},
-	{n:'JSR',nm:'CALL',md:OPM.IPO,w:TXS.F},
-	{n:'JSR',nm:'CALL',md:OPM.MOD,w:TXS.F},
-	{n:'STK',md:OPM.IMPL,x:OPL_EXT.MPUSH},
-	{n:'POP',md:OPM.IMPL,x:OPL_EXT.MPOP},
+	{n:'!ill70',md:OPM.IMM,w:TXS.F,fl:FLAGS.None},//0
+	{n:'JMP',md:OPM.DIR,w:TXS.F,fl:FLAGS.None, //1
+		opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.IND,w:TXS.F,fl:FLAGS.None, //2
+		opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.PCO,w:TXS.F,fl:FLAGS.None, //3
+		opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.IPO,w:TXS.F,fl:FLAGS.None, //4
+		opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.MOD,w:TXS.F,fl:FLAGS.None, //5
+		opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:['EPE','EN.PEF'],md:OPM.IMPL,fl:FLAGS.None}, //6
+	{n:'MUL',md:OPM.RRX,w:TXS.W,fl:FLAGS.ArithFLMV}, //7
+	{n:'DIV',md:OPM.RRX,w:TXS.W,fl:FLAGS.ArithFLMV}, //8
+	{n:['JSR','CALL'],md:OPM.DIR,w:TXS.F,fl:FLAGS.None},
+	{n:['JSR','CALL'],md:OPM.IND,w:TXS.F,fl:FLAGS.None},
+	{n:['JSR','CALL'],md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
+	{n:['JSR','CALL'],md:OPM.IPO,w:TXS.F,fl:FLAGS.None},
+	{n:['JSR','CALL'],md:OPM.MOD,w:TXS.F,fl:FLAGS.None},
+	{n:['STK','MPUSH'],md:OPM.IMPL,x:OPL_EXT.MPUSH,fl:FLAGS.None},
+	{n:['POP','MPOP'],md:OPM.IMPL,x:OPL_EXT.MPOP,fl:FLAGS.None},
 	// 0x8H
-	{n:'LDAB',nm:'LD',ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'LDAB',nm:'LD',ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'LDAB',nm:'LD',ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'LDAB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'LDAB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'LDAB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL},
-	{n:'DPE',nm:'DIS.PEF',md:OPM.IMPL}, // 86
-	{n:'!ill87',md:OPM.IMPL},
-	{n:'LAAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.AL},
-	{n:'LABB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.AL},
-	{n:'LAXB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.AL},
-	{n:'LAYB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.AL},
-	{n:'LAZB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.AL},
-	{n:'LASB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.AL},
-	{n:'LACB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.AL},
-	{n:'LAPB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.PC,dr:REG.AL},
+	{n:['LDAB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['DPE','DIS.PEF'],md:OPM.IMPL,fl:FLAGS.None}, // 86
+	{n:'!ill87',md:OPM.IMPL,fl:FLAGS.None},
+	{n:['LDAB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.P,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
 	// 0x9H
-	{n:'LDA',nm:'LD',ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'LDA',nm:'LD',ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'LDA',nm:'LD',ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'LDA',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'LDA',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'LDA',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.A},
-	{n:'SOP',nm:'SET.PO',md:OPM.IMPL},
-	{n:'!ill97',md:OPM.IMPL},
-	{n:'LAA',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.A},
-	{n:'LAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.A},
-	{n:'LAX',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.A},
-	{n:'LAY',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.A},
-	{n:'LAZ',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.A},
-	{n:'LAS',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.A},
-	{n:'LAC',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.A},
-	{n:'LAP',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.PC,dr:REG.A},
+	{n:['LDA','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['SOP','SET.PO'],md:OPM.IMPL,fl:FLAGS.None},
+	{n:'!ill97',md:OPM.IMPL,fl:FLAGS.None},
+	{n:['LDA+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.P,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
 	// 0xAH
-	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.AL},
-	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.AL},
-	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.AL},
-	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.AL},
-	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.AL},
-	{n:'STAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.AL},
-	{n:'SEP',nm:'SET.PE',md:OPM.IMPL}, // A6
-	{n:'!illA7',md:OPM.IMPL},
-	{n:'SAAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.A},
-	{n:'SABB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.B},
-	{n:'SAXB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.X},
-	{n:'SAYB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Y},
-	{n:'SAZB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Z},
-	{n:'SASB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.S},
-	{n:'SACB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.C},
-	{n:'SAPB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.PC},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['SEP','SET.PE'],md:OPM.IMPL,fl:FLAGS.None}, // A6
+	{n:'!illA7',md:OPM.IMPL,fl:FLAGS.None},
+	{n:['STAB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
 	// 0xBH
-	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.A},
-	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.A},
-	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.A},
-	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.A},
-	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.A},
-	{n:'STA',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.A},
-	{n:'ECK',nm:'EN.CK',md:OPM.IMPL}, // B6
-	{n:'!illB7',md:OPM.IMPL},
-	{n:'SAA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.A},
-	{n:'SAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.B},
-	{n:'SAX',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.X},
-	{n:'SAY',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Y},
-	{n:'SAZ',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Z},
-	{n:'SAS',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.S},
-	{n:'SAC',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.C},
-	{n:'SAP',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.PC},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['ECK','EN.CLK'],md:OPM.IMPL,fl:FLAGS.None}, // B6
+	{n:'!illB7',md:OPM.IMPL,fl:FLAGS.None},
+	{n:['STA+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
 	// 0xCH
-	{n:'LDBB',nm:'LD',ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'LDBB',nm:'LD',ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'LDBB',nm:'LD',ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'LDBB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'LDBB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'LDBB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL},
-	{n:'DCK',nm:'DIS.CK',md:OPM.IMPL}, // C6
-	{n:'!illC7',md:OPM.IMPL},
-	{n:'LBAB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.BL},
-	{n:'LBBB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.BL},
-	{n:'LBXB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.BL},
-	{n:'LBYB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.BL},
-	{n:'LBZB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.BL},
-	{n:'LBSB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.BL},
-	{n:'LBCB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.BL},
-	{n:'LBPB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.PC,dr:REG.BL},
+	{n:['LDBB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['DCK','DIS.CLK'],md:OPM.IMPL,fl:FLAGS.None}, // C6
+	{n:'!illC7',md:OPM.IMPL,fl:FLAGS.None},
+	{n:['LDBB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.P,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
 	// 0xDH
-	{n:'LDB',nm:'LD',ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'LDB',nm:'LD',ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'LDB',nm:'LD',ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'LDB',nm:'LD',ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'LDB',nm:'LD',ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'LDB',nm:'LD',ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.B},
-	{n:'STR',nm:'STR',w:TXS.W,md:OPM.RRSR}, // D6
-	{n:'SAR',nm:'SAR',ms:OPM.IMPL_R,sr:REG.A,w:TXS.W,md:OPM.IMPL,x:OPL_EXT.RII}, // D7
-	{n:'LBA',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B},
-	{n:'LBB',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.B},
-	{n:'LBX',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.B},
-	{n:'LBY',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.B},
-	{n:'LBZ',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.B},
-	{n:'LBS',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.B},
-	{n:'LBC',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.B},
-	{n:'LBP',nm:'LD',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.PC,dr:REG.B},
+	{n:['LDB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:'STR',w:TXS.W,md:OPM.RRSR,fl:FLAGS.ArithFLMV}, // D6
+	{n:'SAR',ms:OPM.IMPL_R,sr:REG.A,w:TXS.W,md:OPM.IMPL,x:OPL_EXT.RII,fl:FLAGS.ArithFLMV}, // D7
+	{n:['LDB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.P,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
 	// 0xEH
-	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.BL},
-	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.BL},
-	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.BL},
-	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.BL},
-	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.BL},
-	{n:'STBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.BL},
-	{n:'LAR',nm:'LAR',w:TXS.W,md:OPM.IMPL_R,dr:REG.A,ms:OPM.IMPL,x:OPL_EXT.RII}, // E6
-	{n:'!illE7',md:OPM.IMPL},
-	{n:'SBAB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.A},
-	{n:'SBBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.B},
-	{n:'SBXB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.X},
-	{n:'SBYB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Y},
-	{n:'SBZB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Z},
-	{n:'SBSB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.S},
-	{n:'SBCB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.C},
-	{n:'SBPB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.PC},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:'LAR',w:TXS.W,md:OPM.IMPL_R,dr:REG.A,i:1,x:OPL_EXT.RII,fl:FLAGS.ArithFLMV}, // E6
+	{n:'!illE7',md:OPM.IMPL,fl:FLAGS.None},
+	{n:['STBB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
 	// 0xFH
-	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.B},
-	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.B},
-	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.B},
-	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.B},
-	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.B},
-	{n:'STB',nm:'ST',ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.B},
-	{n:'LIO',md:OPM.IMPL,x:OPL_EXT.XIO}, // F6 LIO/SIO
-	{n:'MVL',nm:'MOVLGA',ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y}, // F7
-	{n:'SBA',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.A},
-	{n:'SBB',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.B},
-	{n:'SBX',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.X},
-	{n:'SBY',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y},
-	{n:'SBZ',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Z},
-	{n:'SBS',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.S},
-	{n:'SBC',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.C},
-	{n:'SBP',nm:'ST',ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.PC},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:'LIO',md:OPM.IMPL,x:OPL_EXT.XIO,fl:FLAGS.None}, // F6 LIO/SIO
+	{n:['MVL','MOVML'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y,fl:FLAGS.None}, // F7
+	{n:['STB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
 ];
 
 interface AnnotationLine {
@@ -7131,13 +7566,1804 @@ interface DisAsmResult {
 	is_brk:boolean,
 }
 
+const LIT_PFX = [
+	{ir:'=',iw:'=',sr:'',sw:''},
+	{ir:'#',iw:'>#',sr:'#',sw:'>#'},
+	{ir:'=',iw:'=',sr:'',sw:''}
+];
+enum OPS_UNIT_NAMES {
+	SYSRDR = 0x80,
+	SYSIPT = 0x81,
+	SYSLOG = 0x82,
+	SYSLST = 0x83,
+}
+
+interface LTrace {
+	op: string;
+	wh:number;
+	param?: string;
+	aref?:number;
+	tk?:boolean;
+}
+type LNTrace = LTrace | number;
+interface RCB {
+	rcb:number,
+	unit:string,
+	f:string, rbbln:number, rbbuf:number,
+}
+interface RCBExt extends RCB {
+	lsr:number, dev_class:number, file_type:number,
+	max_rec_size: number,
+	rec_address: number,
+	rec_size: number,
+}
+type RCBT = (RCB & {ext:false}) | (RCBExt & {ext:true});
+
+function ccr_str(cc:number):string {
+	return `${(cc & CC_V)!=0?'V':'-'
+		}${(cc & CC_M)!=0?'M':'-'}${(cc & CC_F)!=0?'F':'-'
+		}${(cc & CC_L)!=0?'L':'-'}`;
+}
+const enum ARITH_OP {
+	SET = 0,
+	ADD = 1,
+	SUB = 2,
+}
+const editors:{
+	editor1?:monaco.editor.IStandaloneCodeEditor,
+	output1?:monaco.editor.IStandaloneCodeEditor,
+	out_m?:monaco.editor.ITextModel,
+	edit1?:monaco.editor.ITextModel,
+} = {};
+function softlog(text:string) {
+	const model = editors.out_m;
+	if(!model) return;
+	let line = model.getLineCount();
+	let col = model.getLineLength(line)+1;
+	model.applyEdits([
+		{
+			range: {
+				startLineNumber: line,
+				startColumn: col,
+				endLineNumber: line,
+				endColumn: col,
+			},
+			text: text.replace('\r','\\r')+'\n'
+		}
+	]);
+}
+
+let um_enable_sync = false;
+class UMCPU6 implements SoftCPU {
+	mem: SysMem;
+	reg: Uint8Array;
+	reg_snap: Uint8Array;
+	page: Uint8Array;
+	regview: DataView;
+	tib: Uint8Array;
+	tibview: DataView;
+	registers;
+	_pc = 0;
+	cc = 0;
+	reason_v = '';
+	reason_m = '';
+	level = 0;
+	_snap = {pc:0,cc:0,level:0};
+	rref:rrscdata;
+	trace = new Tracer();
+	src_buffer:string[] = [];
+	src_pointer = 0;
+	constructor() {
+		this.mem = new SysMem();
+		this.reg = new Uint8Array(256);
+		this.reg_snap = new Uint8Array(256);
+		this.page = new Uint8Array(256);
+		this.tib = new Uint8Array([
+1, //00 task running flag (1=true)
+1, //01 task identifier
+0, //02 task priority counter
+0, //03 task priority value
+0,0, //04w addr of lub table for this task
+0, //06 1st programmer logical unit number
+0, //07 max logical unit number for this task
+0,0, //08w addr of console pub for this task
+0x80,0x00, //0Aw low memory address
+0x30,0x00, //0Cw high memory address
+0,0, //0Ew last prog segment high address
+0,0, //10w 's' reg save area
+0, //12 job control flag
+0, //13 abort flag
+0, //14 completion code
+0, //15 utility program switches
+0, //16 max ncmber of job parameters
+0,0, //17w address of job parameters
+0,0, //19w utility word 0 (first word of cpl program)
+0, //1b run disc number
+0,0, //1Cw run lib (dir) disc addr
+0,0,0,0,0,0,0,0,0,0, //1E(10-char) run file name
+0, //28 console unit number
+0,0,0,0,0,0,0,0, //29(8) storage for sub-totals in cpl math statements
+0, //31 default disk 'd'
+255,255, //32w time lock (-1=disabled)
+0,0, //34w job time for lock (0=tib time lock)
+//36(33) tib memory map
+0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,
+0,0, //57w default form
+0, //59 time of last wait
+0,0, //5Aw save seg 1 x reg
+0,0, //5Cw save prgm x reg
+0, //5E default disk 't' temporary
+0, //5F default disk 'l' library
+0, //60 default disk 'w' work
+		]);
+		this.tibview = new DataView(this.tib.buffer);
+		this.regview = new DataView(this.reg.buffer);
+		this.registers = [
+			LevelRegisters(0, this.reg), LevelRegisters(1, this.reg),
+			LevelRegisters(2, this.reg), LevelRegisters(3, this.reg),
+			LevelRegisters(4, this.reg), LevelRegisters(5, this.reg),
+			LevelRegisters(6, this.reg), LevelRegisters(7, this.reg),
+			LevelRegisters(8, this.reg), LevelRegisters(9, this.reg),
+			LevelRegisters(10, this.reg), LevelRegisters(11, this.reg),
+			LevelRegisters(12, this.reg), LevelRegisters(13, this.reg),
+			LevelRegisters(14, this.reg), LevelRegisters(15, this.reg),
+		];
+		this.rref = {
+			reg: this.registers[0],
+			srcreg:0, dstreg:0, cdval:0, srcval:0, addr:0
+		};
+		this.reset();
+	}
+	reset() {
+		for(let r = 0; r < 32; r++) {
+			this.page[r] = r;
+		}
+	}
+	loadxrec(xrec:Uint8Array, base:number) {
+		let ofs = 0;
+		let sofs = 0;
+		let load_seg = base & 0xf800;
+		this.tibview.setUint16(10, load_seg);
+		load_seg |= 0x7ff;
+		this.tibview.setUint16(12, load_seg);
+		while(sofs < xrec.length) {
+			ofs = sofs;
+			while((ofs - sofs) < 400) {
+				let rec_type = xrec[ofs];
+				if(rec_type == 0x80) {
+					break;
+				}
+				let rec_length = xrec[ofs + 1];
+				let rec_baseh = xrec[ofs + 2];
+				let rec_base = xrec[ofs + 3];
+				let rec_sum = rec_base + rec_baseh + rec_length + rec_type;
+				rec_base |= rec_baseh << 8;
+				ofs += 4;
+				//let cs = '';
+				let load_base = (rec_base + base) & 65535;
+				if(rec_type == 1) {
+					if((rec_length & 1) != 0) throw new Error('bad fixup');
+					for(let r = 0; r < rec_length; r+=2) {
+						let ch = xrec[ofs];
+						let cl = xrec[ofs+1];
+						rec_sum += ch + cl;
+						cl |= ch << 8;
+						cl = (cl + base) & 65535;
+						//cs += hex(cl) + ' ';
+						
+						let fu = this.fetchw(cl);
+						fu = (fu + load_base) & 65535;
+						this.m_writew(cl, fu);
+						ofs += 2;
+					}
+				} else if(rec_type == 0 && rec_length == 0) {
+					//console.log('ENTRY:', hex(load_base));
+					this.pc = load_base;
+					this.snap();
+					return load_base;
+				} else {
+					while(load_base + rec_length > load_seg) {
+						load_seg += 0x800;
+						this.tibview.setUint16(12, load_seg);
+					}
+					for(let r = 0; r < rec_length; r++) {
+						let cc = xrec[ofs];
+						rec_sum += cc;
+						this.m_write(load_base, cc);
+						load_base += 1;
+						ofs += 1;
+					}
+				}
+				rec_sum += xrec[ofs];
+				ofs += 1;
+				//console.log(`${rec_type} ${hex(rec_sum & 255)} ${hex(rec_base + base,4)} len:${hex(rec_length)} ${cs}`);
+			}
+			sofs += 400;
+		}
+		return base;
+	}
+	showreg() {
+		const levelreg = this.registers[this.level];
+		const cc = this.cc;
+		return `A:${hex(levelreg.a,4)} B:${hex(levelreg.b,4)
+		} X:${hex(levelreg.x,4)} Y:${hex(levelreg.y,4)
+		} Z:${hex(levelreg.z,4)} S:${hex(levelreg.s,4)
+		} C:${hex(levelreg.c,4)} P:${hex(levelreg.p,4)
+		} PC:${hex(this.pc,4)} CC:${(cc & CC_V)!=0?'V':'-'
+		}${(cc & CC_M)!=0?'M':'-'}${(cc & CC_F)!=0?'F':'-'
+		}${(cc & CC_L)!=0?'L':'-'}`;
+	}
+	get levelreg() {
+		return this.registers[this.level];
+	}
+	get pc() { return this._pc; }
+	set pc(v:number) { this._pc = v & 65535; }
+	get_rw(n:number):number {
+		return this.regview.getUint16((n & 14) | this.registers[this.level].base);
+	}
+	set_rw(n:number, v16:number):void {
+		this.regview.setUint16((n & 14) | this.registers[this.level].base, v16);
+	}
+	get_rb(n:number):number {
+		return this.regview.getUint8((n & 15) | this.registers[this.level].base);
+	}
+	set_rb(n:number, v8:number):void {
+		this.regview.setUint8((n & 15) | this.registers[this.level].base, v8);
+	}
+	mk_reasonb(lh:number, rh:number, opr:ARITH_OP) {
+		let ls:string;
+		let rs:string;
+		if(lh >= 0xa0 && lh < 0xff) {
+			ls = `[${String.fromCharCode(lh & 127)}]`;
+		} else ls = hex(lh,1);
+		if(rh >= 0xa0 && rh < 0xff) {
+			rs = `[${String.fromCharCode(rh & 127)}]`;
+		} else rs = hex(rh,1);
+		if(opr == ARITH_OP.SUB) {
+			this.reason_v = `${ls}=${rs}`;
+			this.reason_m = `${ls}<${rs}`;
+		} else if(opr == ARITH_OP.ADD) {
+			this.reason_v = `${ls}+${rs}=0`;
+			this.reason_m = `${ls}+${rs}<0`;
+		} else if(rh == 0) {
+			this.reason_v = `${ls}=0`;
+			this.reason_m = `${ls}<0`;
+		} else {
+			this.reason_v = `${ls},${rs}=0`;
+			this.reason_m = `${ls},${rs}<0`;
+		}
+	}
+	mk_reasonw(lh:number, rh:number, opr:ARITH_OP) {
+		let ls:string; let rs:string;
+		let c1 = lh & 0xff00;
+		let c2 = lh & 255;
+		if(c1 >= 0xa000 && c1 < 0xff00 && c2 >= 0xa0 && c2 < 0xff) {
+			ls = `'${String.fromCharCode((lh >> 8) & 127)}${String.fromCharCode(lh & 127)}'`;
+		} else ls = hex(lh,4);
+		c1 = rh & 0xff00;
+		c2 = rh & 255;
+		if(c1 >= 0xa000 && c1 < 0xff00 && c2 >= 0xa0 && c2 < 0xff) {
+			rs = `'${String.fromCharCode((rh >> 8) & 127)}${String.fromCharCode(rh & 127)}'`;
+		} else rs = hex(rh,4);
+		if(opr == ARITH_OP.SUB) {
+			this.reason_v = `${ls}=${rs}`;
+		} else if(opr == ARITH_OP.ADD) {
+			this.reason_v = `${ls}+${rs}=0`;
+		} else if(rh == 0) {
+			this.reason_v = `${ls}=0`;
+		} else {
+			this.reason_v = `${ls},${rs}=0`;
+		}
+	}
+	flags_8vm(v:number):number {
+		v &= 255;
+		this.mk_reasonb(v, 0, ARITH_OP.SET);
+		this.cc = (this.cc & 0x3F) | (v == 0 ? CC_V : 0) |
+		(v > 127 ? CC_M : 0);
+		return v;
+	}
+	flags_8vml(v:number, link:number):number {
+		v &= 255;
+		this.mk_reasonb(v, 0, ARITH_OP.SET);
+		this.cc = (this.cc & 0x2F) | (v == 0 ? CC_V : 0) |
+			(v > 127 ? CC_M : 0) | (link << 4);
+		return v;
+	}
+	flags_a8vml(lh:number, rh:number, cin=0):number {
+		lh &= 255; rh &= 255;
+		if(cin != 0) {
+			rh = rh ^ 255;
+			this.mk_reasonb(lh, rh, ARITH_OP.SUB);
+		} else {
+			this.mk_reasonb(lh, rh, ARITH_OP.ADD);
+		}
+		let v = lh + rh + cin;
+		let c = (v > 255) ? CC_L : 0;
+		v &= 255;
+		if(v == 0) c |= CC_V;
+		if(v > 127) c |= CC_M;
+		this.cc = (this.cc & 0x2F) | c;
+		return v;
+	}
+	flags_a8vmfl(lh:number, rh:number, cin:number):number {
+		lh &= 255; rh = (cin!=0?rh^255:rh) & 255;
+		let v = lh + rh + cin;
+		let c = (v > 255) ? (CC_F | CC_L) : 0;
+		v &= 255;
+		if(cin != 0) {
+			this.mk_reasonb(lh, rh ^ 255, ARITH_OP.SUB);
+		} else {
+			this.mk_reasonb(lh, rh, ARITH_OP.ADD);
+		}
+		lh &= 127; rh &= 127;
+		if((lh + rh + cin) > 127) c ^= CC_F;
+		if(v == 0) c |= CC_V;
+		if(v > 127) c |= CC_M;
+		this.cc = (this.cc & 0x0F) | c;
+		return v;
+	}
+	flags_a8vmf(lh:number, rh:number, cin=0):number {
+		lh &= 255; rh = (cin!=0?rh^255:rh) & 255;
+		let v = lh + rh + cin;
+		let c = (v > 255) ? CC_F : 0;
+		v &= 255;
+		this.mk_reasonb(lh, rh, ARITH_OP.ADD);
+		lh &= 127; rh &= 127;
+		if((lh + rh + cin) > 127) c ^= CC_F;
+		if(v == 0) c |= CC_V;
+		if(v > 127) c |= CC_M;
+		this.cc = (this.cc & 0x1F) | c;
+		return v;
+	}
+	flags_a16vmfl(lh:number, rh:number, cin=0):number {
+		lh &= 65535; rh &= 65535;
+		if(cin != 0) {
+			rh = rh ^ 65535;
+			this.mk_reasonw(lh, rh, ARITH_OP.SUB);
+		} else {
+			this.mk_reasonw(lh, rh, ARITH_OP.ADD);
+		}
+		let v = lh + rh + cin;
+		let c = (v > 65535) ? (CC_F | CC_L) : 0;
+		v &= 65535;
+		lh &= 32767; rh &= 32767;
+		if((lh + rh + cin) > 32767) c ^= CC_F;
+		if(v == 0) c |= CC_V;
+		if(v > 32767) c |= CC_M;
+		this.cc = (this.cc & 0x0F) | c;
+		return v;
+	}
+	flags_a16vmf(lh:number, rh:number, cin:number):number {
+		lh &= 65535; rh &= 65535;
+		if(cin != 0) {
+			rh = rh ^ 65535;
+			this.mk_reasonw(lh, rh, ARITH_OP.SUB);
+		} else {
+			this.mk_reasonw(lh, rh, ARITH_OP.ADD);
+		}
+		let v = lh + rh + cin;
+		let c = (v > 65535) ? CC_F : 0;
+		v &= 65535;
+		lh &= 32767; rh &= 32767;
+		if((lh + rh + cin) > 32767) c ^= CC_F;
+		if(v == 0) c |= CC_V;
+		if(v > 32767) c |= CC_M;
+		this.cc = (this.cc & 0x1F) | c;
+		return v;
+	}
+	flags_16vm(v:number):number {
+		v &= 65535;
+		this.mk_reasonw(v, 0, ARITH_OP.SET);
+		this.cc = (this.cc & 0x3F) | (v == 0 ? 0x80 : 0) |
+		(v > 32767 ? 0x40 : 0);
+		return v;
+	}
+	flags_16vml(v:number, link:number):number {
+		v &= 65535;
+		this.mk_reasonw(v, 0, ARITH_OP.SET);
+		this.cc = (this.cc & 0x2F) | (v == 0 ? 0x80 : 0) |
+			(v > 32767 ? 0x40 : 0) | (link << 4);
+		return v;
+	}
+	restore() {
+		this.cc = this._snap.cc;
+		this.level = this._snap.level;
+		this.pc = this._snap.pc;
+		for(let i = 0; i < 256; i++) {
+			this.reg[i] = this.reg_snap[i];
+		}
+		this.src_pointer = 0;
+		if(um_enable_sync) {
+			mcsim.cc = this._snap.cc;
+			mcsim.set_pc(this._pc);
+			mcsim.reg.a = this.levelreg.a;
+			mcsim.reg.b = this.levelreg.b;
+			mcsim.reg.x = this.levelreg.x;
+			mcsim.reg.y = this.levelreg.y;
+			mcsim.reg.z = this.levelreg.z;
+			mcsim.reg.s = this.levelreg.s;
+			mcsim.reg.c = this.levelreg.c;
+			for(let address = 0x100; address < 0x10000; address++) {
+				this.mem.writemeta(address | 0x10000, 0);
+				bpl.writemeta(address, this.mem.readmeta(address) & 255);
+			}
+		} else {
+			for(let address = 0x100; address < 0x10000; address++) {
+				this.mem.writemeta(address | 0x10000, 0);
+			}
+		}
+	}
+	snap() {
+		this._snap.cc = this.cc;
+		this._snap.level = this.level;
+		this._snap.pc = this._pc;
+		for(let i = 0; i < 256; i++) {
+			this.reg_snap[i] = this.reg[i];
+		}
+		for(let address = 0; address < 0x10000; address++) {
+			let i = this.mem.readmeta(address | 0x10000);
+			if((i&0x400)!=0) {
+				this.mem.writemeta(address, i & 255);
+				this.mem.writemeta(address | 0x10000, 0);
+			}
+		}
+	}
+	m_write(address:number, v8:number):void {
+		address &= 65535;
+		if(um_enable_sync) bpl.writemeta(address, v8 & 255);
+		this.write(address, v8);
+	}
+	m_writew(address:number, v16:number):void {
+		this.m_write(address, v16 >> 8);
+		this.m_write(address+1, v16);
+	}
+	write(address:number, v8:number):void {
+		address &= 65535;
+		let add_tr = true;
+		for(let i = 0; i < this.trace.list.length; i++) {
+			const t = this.trace.list[i];
+			if(t.op == 'ST' && t.wh == address) {
+				add_tr = false;
+				break;
+			}
+		}
+		if(add_tr) {
+			let t = this.trace.add('ST', address);
+		}
+		if(address < 0x100) {
+			this.reg[address] = v8 & 255;
+		} else {
+			this.mem.writemeta(address | 0x10000, (v8 & 255) | 0x400);
+		}
+	}
+	writew(address:number, v16:number):void {
+		this.write(address, v16 >> 8);
+		this.write(address + 1, v16);
+	}
+	stackb(v8:number):void {
+		let stk = this.registers[this.level].s;
+		this.write(--stk, v8);
+		this.registers[this.level].s = stk;
+	}
+	stackw(v16:number):void {
+		let stk = this.registers[this.level].s;
+		this.write(--stk, v16);
+		this.write(--stk, v16 >> 8);
+		this.registers[this.level].s = stk;
+	}
+	popb():number {
+		let stk = this.registers[this.level].s;
+		let v = this.fetch(stk++);
+		this.registers[this.level].s = stk;
+		return v;
+	}
+	popw():number {
+		let stk = this.registers[this.level].s;
+		let v = this.fetch(stk++) << 8;
+		v |= this.fetch(stk++);
+		this.registers[this.level].s = stk;
+		return v;
+	}
+	fetch_hex(where:number, count:number):string {
+		let str = '';
+		where += 2;
+		for(let r = 0; r < count; r++) {
+			let c = this.fetch(where+r);
+			str += hex(c);
+		}
+		return str;
+	}
+	fetch_str(where:number, limit:number=120):string {
+		let len = this.fetchw(where);
+		let str = '';
+		where += 2;
+		for(let r = 0; (r < len) && (r < limit); r++) {
+			let c = this.fetch(where+r);
+			if(c==0) { continue; }
+			c = c & 127;
+			if(c==10) {str += '\\n'; continue; }
+			if(c==13) {str += '\\r'; continue; }
+			str += String.fromCharCode(c);
+		}
+		return str;
+	}
+	fetch(address:number):number {
+		address &= 65535;
+		if(address < 0x100) {
+			return this.reg[address];
+		} else {
+			let i = this.mem.readmeta(address | 0x10000);
+			if((i & 0x400) != 0) return i & 255;
+			return this.mem.readmeta(address) & 255;
+		}
+	}
+	fetchw(address:number):number {
+		const vh = this.fetch(address);
+		const vl = this.fetch(address + 1);
+		return (vh << 8) | vl;
+	}
+	pcfetch():number {
+		const v = this.fetch(this._pc);
+		this.pc = this._pc + 1;
+		return v;
+	}
+	pcfetchw():number {
+		const vh = this.fetch(this._pc);
+		const vl = this.fetch(this._pc + 1);
+		this.pc = this._pc + 2;
+		return (vh << 8) | vl;
+	}
+	ex_decode(initb:number, llen = 1) {
+		const m = initb;
+		const ex = this.rref;
+		ex.cdval = m >> 4; // selector
+		//ex.reg
+		// ex.sv -> src address
+		let rby = -1;
+		switch((m >> 2) & 3) {
+		case 0: ex.srcval = this.pcfetchw(); break;
+		case 1: {
+			let rpair = this.pcfetch();
+			ex.srcval = this.get_rw(rpair >> 4);
+			if((rpair & 15) != 0) {
+				ex.srcval += this.get_rw(rpair & 15);
+			}
+			if((rpair & 16) != 0) {
+				ex.srcval += this.pcfetchw();
+			} else {
+				ex.srcval += sbyte(this.pcfetch());
+			}
+			ex.srcval &= 65535;
+			break;
+		}
+		case 2: rby = this.pcfetch();
+			ex.srcval = this.get_rw(rby >> 4);
+			break;
+		case 3: ex.srcval = this.pc; this.pc = this._pc + llen; break;
+		}
+		// ex.ea -> dest address
+		switch(m & 3) {
+		case 0: ex.addr = this.pcfetchw(); break;
+		case 1: {
+			let rpair = this.pcfetch();
+			ex.addr = this.get_rw(rpair >> 4);
+			if((rpair & 15) != 0) {
+				ex.addr += this.get_rw(rpair & 15);
+			}
+			if((rpair & 16) != 0) {
+				ex.addr += this.pcfetchw();
+			} else {
+				ex.addr += sbyte(this.pcfetch());
+			}
+			ex.addr &= 65535;
+			break;
+		}
+		case 2: if(rby == -1) rby = this.pcfetch();
+			ex.addr = this.get_rw(rby & 15);
+			break;
+		case 3:throw {ex:3};
+		}
+		return ex;
+	}
+	rrsfetchw():rrscdata {
+		let rvc = this.pcfetch();
+		const rref = this.rref;
+		rref.srcreg = (rvc >> 4);
+		rref.dstreg = (rvc & 15);
+		const rrmode = rvc & 17;
+		rref.srcval = this.get_rw(rref.dstreg);
+		rref.cdval = 0;
+		if (rrmode == 0) {
+			rref.cdval = this.get_rw(rref.srcreg);
+		} else {
+			this.lea_immw();
+			//if (rrmode == 16) //MSN odd: r(dst) -> #adr
+			if ((rrmode & 1) != 0) {
+				//MSN even: r(dst) -> w[ adr ]
+				rref.addr = this.fetchw(rref.addr);
+			}
+			if (rrmode == 17) {
+				//both: r(dst) -> [ r(src) + adr ]
+				rref.addr = (rref.addr + this.get_rw(rref.srcreg)) & 65535;
+			}
+		}
+		return rref;
+	}
+	rrfetchb():rrscdata {
+		let rvc = this.pcfetch();
+		const rref = this.rref;
+		rref.srcreg = rvc >> 4;
+		rref.dstreg = rvc & 15;
+		rref.srcval = this.get_rb(rref.srcreg);
+		rref.cdval = this.get_rb(rref.dstreg);
+		return rref;
+	}
+	rrfetchw():rrscdata {
+		let rvc = this.pcfetch();
+		const rrmode = rvc & 17;
+		const rref = this.rref;
+		rref.srcreg = rvc >> 4;
+		rref.dstreg = rvc & 15;
+		if (rrmode == 0) {
+			rref.srcval = this.get_rw(rref.srcreg);
+			rref.cdval = this.get_rw(rref.dstreg);
+		} else {
+			this.lea_immw();
+			// rrmode == 16 // 2
+			// MSN odd
+			//#adr, r(src) -> r(dst)
+			if ((rrmode & 1) != 0) { // 1,3
+				// MSN even
+				//w[ adr ], r(src) -> r(dst)
+				rref.addr = this.fetchw(rref.addr);
+			}
+			if (rrmode == 17) { // 3
+				// [ r(src) + adr ] , r(dst) -> r(dst)
+				rref.addr += this.get_rw(rref.srcreg);
+				rref.srcreg = rref.dstreg;
+			}
+			rref.srcval = this.fetchw(rref.addr);
+			rref.cdval = this.get_rw(rref.srcreg);
+		}
+		return rref;
+	}
+	rcfetchb():rrscdata {
+		let rvc = this.pcfetch();
+		const rref = this.rref;
+		rref.dstreg = rref.srcreg = rvc >> 4;
+		rref.cdval = rvc & 15;
+		rref.srcval = this.get_rb(rref.srcreg);
+		return rref;
+	}
+	rcfetchw():rrscdata {
+		let rvc = this.pcfetch();
+		const rcref = this.rref;
+		rcref.dstreg = rcref.srcreg = rvc >> 4;
+		rcref.cdval = rvc & 15;
+		if((rcref.srcreg & 1) != 0) {
+			throw {rc:rcref.srcreg};
+		} else {
+			rcref.srcval = this.get_rw(rcref.srcreg);
+		}
+		return rcref;
+	}
+	lea_immw():void {
+		this.rref.addr = this._pc;
+		this.pc = this._pc + 2;
+	}
+	lea_immb():void {
+		this.rref.addr = this._pc;
+		this.pc = this._pc + 1;
+	}
+	lea_dir():void {
+		this.rref.addr = this.pcfetchw();
+	}
+	lea_ind():void {
+		this.rref.addr = this.fetchw(this.pcfetchw());
+	}
+	lea_pco():void {
+		const ofs = sbyte(this.pcfetch());
+		this.rref.addr = (this.pc + ofs) & 65535;
+	}
+	lea_ipo():void {
+		const ofs = sbyte(this.pcfetch());
+		const ea = (this.pc + ofs) & 65535;
+		this.rref.addr = this.fetchw(ea);
+	}
+	lea_mod(sz:number = 1):void {
+		const modv:number = this.pcfetch();
+		if((modv & 16) != 0) {
+			throw {mod:modv};
+		}
+		let reg = this.get_rw(modv >> 4);
+		if ((modv & 4) != 0) sz = 2;
+		if ((modv & 3) == 2) {
+			// reg predec
+			reg = (reg - sz) & 65535;
+		}
+		let res = reg;
+		if ((modv & 3) == 1) {
+			// reg postinc
+			reg = (reg + sz) & 65535;
+		}
+		this.set_rw(modv >> 4, reg);
+		if ((modv & 8) != 0) {
+			let disp = sbyte(this.pcfetch());
+			res = (res + disp) & 65535;
+		}
+		if ((modv & 4) != 0) {
+			this.rref.addr = this.fetchw(res);
+		} else {
+			this.rref.addr = res;
+		}
+	}
+	rcb_io(rcb:number, ext=false):RCBT {
+		let unit = this.fetch(rcb+1);
+		let unitname;
+		if(OPS_UNIT_NAMES[unit] != undefined) {
+			unitname = OPS_UNIT_NAMES[unit];
+		} else {
+			unitname = 'U'+hex(unit);
+		}
+		let iofn = this.fetch(rcb+3);
+		let rbbln = this.fetchw(rcb+4); //max buffer length
+		let rbbuf = this.fetchw(rcb+6); //buffer address
+		let sfn = [undefined,
+		'read','write','rewrite','rewind',
+		'note','point','hold','free',
+		'open','close','truncate buffer',
+		'new key','get key','delete key','next key'][iofn];
+		if(sfn == undefined) throw new Error('RCB');
+		if(ext) {
+			let lsr = this.fetchw(rcb+10);
+			let devc = this.fetch(rcb+12);
+			let filet = this.fetch(rcb+13);
+			let max_rec = this.fetchw(rcb+14);
+			let rec_adr = this.fetchw(rcb+16);
+			let ra_rec_size = this.fetchw(rcb+28);
+			return {
+				rcb:unit, unit:unitname, f:sfn, rbbln, rbbuf,
+				lsr, dev_class:devc, file_type:filet,
+				max_rec_size: max_rec,
+				rec_address: rec_adr,
+				rec_size: ra_rec_size,
+				ext:true
+			};
+		} else {
+			return {rcb:unit, unit:unitname, f:sfn, rbbln, rbbuf, ext:false};
+		}
+	}
+	handle_svc(svc:number) {
+		switch(svc) {
+		//case 0: //00 @pioc   physical i/o control
+		case 1: //01 @trtn   transient return
+			throw {svcret: 1};
+		//case 2: //02 @lodnm  load file name specified
+		//case 3: //03 @lodf   load fcb specified
+		case 4: {//04 @lodjx  load jx module specified
+			// inline args: word, byte
+			break;
+		}
+		case 5: { //05 @ts     load transient module
+			let ts_id = this.pcfetch();
+			let dst = this.pcfetchw();
+			console.log('Transient', ts_id, hex(dst, 4));
+			if(ts_id == 4) { // char date
+				let cv = `11/22/22`;
+				for(let i = 0; i < cv.length; i++) {
+					this.m_write(dst, (cv.charCodeAt(i) & 127) | 128);
+					dst++;
+				}
+				return;
+			}
+			if(ts_id == 12) return; // with RCB ptr, gets file date into A
+			if(ts_id == 13) return; // with RCB ptr, sets file date from A
+			throw {ts:ts_id};
+		}
+		//case 6: //06 @flwt   wait for flag to go positive
+		case 7: return; //07 @wt     uncontitional wait
+		case 8: {//08 @rbwt   wait for rcb to go ready
+			let dst = this.pcfetchw();
+			//console.log('rcb wait', hex(dst, 4));
+			return;
+		}
+		case 9: //09 @abrt   abort task
+			throw {svcret: 9, code: this.pcfetch()};
+		case 10: //0A @exit   exit to ojx00
+			throw {svcret: 10, code: this.pcfetch()};
+		case 11: {//0B @dt     get binary date
+			this.levelreg.b = 0x4444;
+			mcsim.reg.b = 0x4444;
+			return;
+		}
+		//case 12: //0C @pgiob  protected get i/o block
+		case 13: {//0D @jxm    protected change to jx map
+			// no inline args
+			break;
+		}
+		case 14: {//0E @dirnm  search directory for file name specified
+			// inline arg: ptr file name?
+			break;
+		}
+		case 15: { //0F @conio  console i/o
+			// no inline args
+			break;
+		}
+		case 16: { //10 @sysio  device independant logical unit i/o (all units)
+			const rcb = this.levelreg.b;
+			let maxbuf = this.fetchw(rcb+4);
+			let bufadr = this.fetchw(rcb+6);
+			let ctrl = this.fetchw(rcb+8);
+			const prcb = this.rcb_io(rcb, false);
+			//console.log('@sysio', prcb, hex(bufadr, 4), hex(maxbuf, 4), hex(this.fetchw(bufadr), 4));
+			if(prcb.f == 'write') {
+				console.log('@sysio', this.fetch_str(bufadr));
+			}
+			return;
+		}
+		//case 17: //11 @gmemr  @gmem with a=addr b=size
+		//case 18: //12 @flwtr  @flwt with flag address in al
+		//case 19: //13 @rmemr  @rmem with address in a
+		//case 20: //14 @drdy   disk ready check
+		//case 21: //15 @gbr    get bin time into a and b regs
+		case 22: {//16 @gmem   get memory block from transient area
+			// inline args: 2 ptr
+			break;
+		}
+		//case 23: //17 @rmem   release memory block back to transient area
+		case 24: {//18 @lioc   logical i/o control
+			const rcb = this.levelreg.b;
+			let maxbuf = this.fetchw(rcb+4);
+			let bufadr = this.fetchw(rcb+6);
+			let ctrl = this.fetchw(rcb+8);
+			// this was seen using the RCB logical I/O extensions
+			// others also?
+			const prcb = this.rcb_io(rcb, true);
+			if(prcb.f == 'rewind' && prcb.rcb == 1) {
+				this.src_pointer = 0;
+				this.m_write(rcb, 0);
+			} else if(prcb.f == 'read' && prcb.rcb == 1 && prcb.ext) {
+				let a = prcb.rec_address;
+				if(this.src_pointer >= this.src_buffer.length) {
+					this.m_write(rcb, 1);
+					return;
+				}
+				let rec_line = this.src_buffer[this.src_pointer];
+				if(rec_line.length > prcb.max_rec_size) {
+					rec_line = rec_line.substring(0, prcb.max_rec_size - 1);
+				}
+				this.m_writew(a, rec_line.length);
+				this.m_writew(bufadr, rec_line.length);
+				a += 2;
+				bufadr += 2;
+				for(let i = 0; i < rec_line.length; i++) {
+					let c = rec_line.charCodeAt(i) & 127;
+					if(c == 10) c = 13;
+					c |= 128;
+					this.m_write(a, c);
+					this.m_write(bufadr, c);
+					bufadr++;
+					a++;
+				}
+				this.m_write(a, 0);
+				this.m_write(rcb, 0);
+				this.src_pointer += 1;
+			} else if(prcb.f == 'write' && prcb.ext) {
+				if(prcb.rcb == 3) {
+					if(editors.out_m) {
+						softlog(this.fetch_str(prcb.rec_address));
+					} else {
+						console.log('@lioc:w3', this.fetch_str(prcb.rec_address));
+					}
+				}
+				else console.log('@lioc:w', prcb, hex(this.fetchw(prcb.rec_address),4), hex(prcb.rec_address,4));
+			} else {
+				console.log('@lioc', prcb, hex(bufadr, 4), hex(maxbuf, 4), hex(this.fetchw(bufadr), 4));
+			}
+			return;
+		}
+		//case 25: //19 @exp    file expand
+		//case 26: //1A @user   change to user mode
+		//case 27: //1B @gb     get binary time
+		//case 28: //1C @gc     get character time
+		//case 29: //1D @stime  set time lock
+		//case 30: //1E @ld     cpl 32-bit load
+		//case 31: //1F @st     cpl 32-bit store
+		//case 32: //20 @ad     cpl 32-bit add
+		//case 33: //21 @tsr    @ts with tx# in au
+		//case 34: //22 @su     cpl 32-bit subtract
+		//case 35: //23 @gdpub  locate pub for disk specified in al
+		//case 36: //24 @mu     cpl 32-bit multiply
+		//case 37: //25 @dv     cpl 32-bit divide
+		//case 38: //26 @cn     cpl 32-bit numeric compare
+		//case 39: //27 @cs     cpl string compare
+		//case 40: //28 @cg     cpl 32-bit computed goto
+		//case 41: //29 @mv     cpl string move
+		//case 42: //2A @cp     cpl cursor position
+		case 43:{//2B @mul16  16-bit multiply
+			let e = this.levelreg.a * this.levelreg.b;
+			mcsim.reg.b = this.levelreg.b = e & 65535;
+			mcsim.reg.a = this.levelreg.a = (e >> 16) & 65535;
+			return;
+		}
+		//case 44: //2C @div16  16-bit divide
+		//case 45: //2D @cvd16  16-bit cvt to dec from memory
+		case 46: {//2E @cvr16  16-bit cvt to dec from 'a' reg
+			let cv = `${this.levelreg.a}`;
+			let a = this.pcfetchw();
+			for(let i = 0; i < cv.length; i++) {
+				this.m_write(a, (cv.charCodeAt(i) & 127) | 128);
+				a++;
+			}
+			return;
+		}
+		//case 47: //2F @cb     cpl cursor blanking
+		//case 48: //30 @cc     cpl cursor blanking with specified string
+		//case 49: //31 @wn     cpl formatted write with out c/r
+		//case 50: //32 @dc     cpl decode
+		//case 51: //33 @nc     cpl encode
+		//case 52: //34 @rf     cpl formatted read
+		//case 53: //35 @wf     cpl formatted write
+		//case 54: //36 @rt     cpl re-write
+		//case 55: //37 @rb     cpl binary read
+		//case 56: //38 @wb     cpl binary write
+		//case 57: //39 @op     cpl open
+		//case 58: //3A @ct     cpl control function
+		//case 59: //3B @ld48   cpl 48-bit load
+		//case 60: //3C @st48   cpl 48-bit store
+		//case 61: //3D @ad48   cpl 48-bit add
+		//case 62: //3E @rs     cpl record skip
+		//case 63: //3F @su48   cpl 48-bit subtract
+		//case 64: //40 @tioc   tape io
+		//case 65: //41 @mu48   cpl 48-bit multiply
+		//case 66: //42 @dv48   cpl 48-bit divide
+		//case 67: //43 @cn48   cpl 48-bit numeric compare
+		//case 68: //44 @cg48   cpl 48-bit computed goto
+		//case 69: //45 @ld64   cpl 64-bit load
+		//case 70: //46 @st64   cpl 64-bit store
+		//case 71: //47 @ad64   cpl 64-bit add
+		//case 72: //48 @su64   cpl 64-bit subtract
+		//case 73: //49 @mu64   cpl 64-bit multiply
+		//case 74: //4A @dv64   cpl 64-bit divide
+		//case 75: //4B @ttime  test time lock
+		//case 76: //4C @dio    disk i/o
+		//case 77: //4D @shld   sector hold
+		//case 78: //4E @sfre   sector free
+		//case 79: //4F @dirl   search library directory
+		//case 80: //50 @dire   locate directory entry specified
+		//case 81: //51 @dird   set date of file or subfile
+		case 82: { //52 @giob   unprotected giob
+			let rcb = this.levelreg.b;
+			// does this read the PUB?
+			let unkn = this.pcfetch();
+			let count = this.pcfetch();
+			let offs = this.pcfetch();
+			let dest = this.pcfetchw();
+			if(count != 0) throw {svc:82};
+			this.levelreg.b = 0;
+			mcsim.reg.b = 0;
+			return;
+		}
+		//case 83: //53 @fmd    hard disk format
+		//case 84: //54 @drnmb  directory search
+		//case 85: //55 @diosx  execute disk command string
+		//case 86: //56 @fsvc   fake svc call
+		//case 87: //57 @lodtx  load tx module
+		//case 88: //58 @bug    bug
+		case 89: {//59 @aseg   add next free mem segment to curtb (wait for comp)
+			let load_seg = this.tibview.getUint16(12);
+			load_seg += 0x800;
+			this.tibview.setUint16(12, load_seg);
+			return;
+		}
+		case 90: {//5A @rseg   release memory segment specified in al
+			let seg = this.levelreg.al;
+			// no inline args
+			break;
+		}
+		case 91: //5B @lodnmt load name into transient area
+			break;
+		case 92: {//5C @gbkv   get os block value
+			let blk = this.pcfetch();
+			let count = this.pcfetch();
+			let offs = this.pcfetch();
+			let dest = this.pcfetchw();
+			if(blk == 1) {
+				let rcb = this.levelreg.b;
+				if(offs == 1) {
+					console.log('@gbkv 1:', this.rcb_io(rcb))
+					this.m_write(dest, 1);
+					return;
+				}
+			}
+			if(blk != 0) throw {};
+			while(count > 0 && offs < this.tib.length) {
+				this.m_write(dest, this.tib[offs]);
+				offs += 1; dest += 1; count -= 1;
+			}
+			return;
+		}
+		case 93: {//5D @pbkv   set os block value
+			let blk = this.pcfetch();
+			let count = this.pcfetch();
+			let offs = this.pcfetch();
+			let dest = this.pcfetchw();
+			if(blk != 0) throw {};
+			break;
+		}
+		//case 94: //5E @asegr  add next free mem seg to curtb (ret if not avail)
+		//case 95: //5F @gprm   get general parameter
+		//case 96: //60 @pprm   set general parameter
+		//case 97: //61 @ccc    security code check
+		//case 98: //62 @lodfr  load fcb from .run
+		//case 99: //63 @rsegx  release other part memory
+		//case 100://64 @dirlf  create fcb for file in private lib
+		//case 101://65 @dirsz  access size of file in private lib
+		//case 102://66 @eom    check for eof/eom
+		//case 103://67 @gvol   get volume name
+		//case 104://68 @rlsr   return from lsr
+		//case 105://69 @isrm   connect/disconnect isr from pub
+		//case 106://6A @basic  enter basic monitor for current partition
+		//case 107://6B @abrtr  abort with ab code in al
+		//case 108://6C @exitr  exit with cc al
+		default: break;
+		}
+		throw {svc:svc};
+	}
+	f_ldab(ea:number):void {
+		this.levelreg.al = this.flags_8vm(this.fetch(ea));
+	}
+	f_lda(ea:number):void {
+		this.levelreg.a = this.flags_16vm(this.fetchw(ea));
+	}
+	f_jsr(ea:number):void {
+		const levelreg = this.levelreg;
+		this.stackw(levelreg.x);
+		levelreg.x = this.pc;
+		//this.trace.add('JSR', ea);
+		this.pc = ea;
+	}
+	f_branch(cm:number, cn:string, z:boolean):void {
+		const rref = this.rref;
+		let t = this.trace.add(cn, rref.addr);
+		t.tk = false;
+		if(cn == 'BZ ' || cn == 'BNZ') {
+			t.param = this.reason_v;
+		}
+		if(cn == 'BM ' || cn == 'BP ') {
+			t.param = this.reason_m;
+		}
+		if(z) {
+			if((this.cc & cm)==0) {this.pc = rref.addr;t.tk=true;}
+		} else {
+			if((this.cc & cm)!=0) {this.pc = rref.addr;t.tk=true;}
+		}
+	}
+	step():void {
+		this.trace.count = 0;
+		//this.reason_v = '';
+		const soi = this.pc;
+		const op = this.pcfetch();
+		const opl = oplist[op];
+		const rref = this.rref;
+		rref.reg = this.registers[this.level];
+		switch(opl.md) {
+		case OPM.IMPL: break;
+		case OPM.IMM: if(opl.w == TXS.B) this.lea_immb(); else this.lea_immw(); break;
+		case OPM.DIR: this.lea_dir(); break;
+		case OPM.IND: this.lea_ind(); break;
+		case OPM.PCO: this.lea_pco(); break;
+		case OPM.MOD: this.lea_mod(); break;
+		case OPM.RR: if(opl.w == TXS.B) this.rrfetchb(); else this.rrfetchw(); break;
+		case OPM.RRX: throw 0;
+		case OPM.RRSR: throw 0;
+		case OPM.RRS: this.rrsfetchw(); break;
+		case OPM.RC: if(opl.w == TXS.B) this.rcfetchb(); else this.rcfetchw(); break;
+		case OPM.IMPL_R:
+			if(opl.dr == undefined) {
+				throw new Error(`(${hex(op)}) opcode table error, no destination register`);
+			} else {
+				rref.dstreg = opl.dr;
+				if(opl.ms == undefined) {
+					rref.srcreg = rref.dstreg;
+					if(opl.w == TXS.B) {
+						rref.srcval = rref.cdval = this.get_rb(rref.dstreg);
+					} else {
+						rref.srcval = rref.cdval = this.get_rw(rref.dstreg);
+					}
+				} else if(opl.ms == OPM.IMPL_R) {
+					if(opl.w == TXS.B) {
+						rref.cdval = this.get_rb(rref.dstreg);
+					} else {
+						rref.cdval = this.get_rw(rref.dstreg);
+					}
+				} // else ... pure destination
+			}
+			break;
+		case OPM.IMPL_R_DIR:
+			if(opl.dr == undefined) {
+				throw new Error(`(${hex(op)}) opcode table error, no destination register`);
+			} else {
+				rref.dstreg = opl.dr;
+				rref.addr = this.get_rb(rref.dstreg);
+			}
+			break;
+		}
+		switch(opl.ms) {
+		case undefined:
+		case OPM.IMPL: break;
+		case OPM.IMM:
+			if(opl.w == TXS.B) {
+				this.lea_immb();
+				rref.srcval = this.fetch(rref.addr);
+			} else {
+				this.lea_immw();
+				rref.srcval = this.fetchw(rref.addr);
+			}
+			break;
+		case OPM.DIR: this.lea_dir();
+			if(opl.w == TXS.B) rref.srcval = this.fetch(rref.addr);
+			else rref.srcval = this.fetchw(rref.addr);
+			break;
+		case OPM.IND: this.lea_ind();
+			if(opl.w == TXS.B) rref.srcval = this.fetch(rref.addr);
+			else rref.srcval = this.fetchw(rref.addr);
+			break;
+		case OPM.PCO: this.lea_pco();
+			if(opl.w == TXS.B) rref.srcval = this.fetch(rref.addr);
+			else rref.srcval = this.fetchw(rref.addr);
+			break;
+		case OPM.MOD: this.lea_mod();
+			if(opl.w == TXS.B) rref.srcval = this.fetch(rref.addr);
+			else rref.srcval = this.fetchw(rref.addr);
+			break;
+		case OPM.IMPL_R:
+			if(opl.sr == undefined) {
+				throw new Error(`(${hex(op)}) opcode table error, no source register`);
+			} else {
+				rref.srcreg = opl.sr;
+				if(opl.w == TXS.B) {
+					rref.srcval = this.get_rb(rref.srcreg);
+				} else {
+					rref.srcval = this.get_rw(rref.srcreg);
+				}
+			}
+			break;
+		case OPM.IMPL_R_DIR:
+			if(opl.sr == undefined) {
+				throw new Error(`(${hex(op)}) opcode table error, no source register`);
+			} else {
+				rref.srcreg = opl.sr;
+				rref.addr = this.get_rw(rref.srcreg);
+				if(opl.w == TXS.B) {
+					rref.srcval = this.fetch(rref.addr);
+				} else {
+					rref.srcval = this.fetchw(rref.addr);
+				}
+			}
+			break;
+		default:
+			throw new Error(`(${hex(op)}) unsupported source mode`);
+		}
+		if(opl.aop == undefined) {
+			if(opl.opc != undefined) {
+				opl.opc.call(this, rref);
+				return;
+			} else if(opl.opf != undefined) {
+				let fr = opl.opf.call(this, rref);
+				softlog(`(${hex(op)}) is OPF (${fr})`);
+			} else {
+				softlog(`(${hex(op)}) is TODO`);
+			}
+		} else {
+			if(opl.opc != undefined) {
+				opl.opc.call(this, rref);
+				return;
+			} else if(opl.opf != undefined) {
+				let fr = opl.opf.call(this, rref);
+				softlog(`(${hex(op)}) is OPF (${fr})`);
+			} else {
+				softlog(`(${hex(op)}) is AOP only`);
+			}
+		}
+		throw {soi: soi};
+		switch(op) {
+		case 0: console.log('HALT'); throw 0;
+		case 1: return; // NOP
+
+		case 4: break; /*EI*/
+		case 5: break; /*DI*/
+
+		case 0x0a:/*RI*/break;
+		case 0x0b: throw 1; // illegal
+		case 0x0c: console.log('SYN'); return; // SYN
+		case 0x0d:/*PCX*/break;
+		case 0x0e: return; // DLY (softstep NOP)
+		case 0x0f:/*RSV*/break;
+		// 1X
+
+		// 2X
+		case 0x20:/*INRB*/{
+			const rc = this.rcfetchb();
+			this.set_rb(rc.srcreg, this.flags_a8vmf(rc.srcval, rc.cdval+1, 0));
+			return;
+		}
+		case 0x21:/*DCRB*/{
+			const rc = this.rcfetchb();
+			this.set_rb(rc.srcreg, this.flags_a8vmf(rc.srcval, rc.cdval+1, 1));
+			return;
+		}
+		case 0x22:/*CLRB*/{
+			const rc = this.rcfetchb();
+			this.set_rb(rc.srcreg, this.flags_a8vmfl(0, rc.cdval, 0));
+			return;
+		}
+		case 0x23:/*IVRB*/{
+			const rc = this.rcfetchb();
+			this.set_rw(rc.srcreg, this.flags_8vm(rc.srcval ^ 255));
+			return;
+		}
+		case 0x24:/*SRRB*/{
+			const rc = this.rcfetchb();
+			rc.srcval = sbyte(rc.srcval);
+			this.set_rb(rc.srcreg, this.flags_8vml(rc.srcval >> (rc.cdval+1), (rc.srcval & (1 << rc.cdval)) != 0 ?1:0));
+			return;
+		}
+		case 0x25:/*SLRB*/{
+			const rc = this.rcfetchb();
+			let v = rc.srcval;
+			let link = 0;
+			v = (v << (rc.cdval + 1)) & 255;
+			link = (v & 0x100) >> 8;
+			this.set_rb(rc.srcreg, this.flags_8vml(v, link));
+			return;
+		}
+		case 0x26:/*RRRB*/{
+			const rc = this.rcfetchb();
+			let v = rc.srcval;
+			let link = 0;
+			while(rc.cdval > -1) {
+				link = v & 1;
+				v = (v >> 1) | ((this.cc & 0x10) << 3);
+				rc.cdval -= 1;
+			}
+			this.set_rb(rc.srcreg, this.flags_8vml(v, link));
+			return;
+		}
+		case 0x27:/*RLRB*/ break;
+		//case 0x28:/*INAB*/levelreg.al = this.flags_a8vmf(levelreg.al, 1); return;
+		//case 0x29:/*DCAB*/levelreg.al = this.flags_a8vmf(levelreg.al, 254, 1); return;
+		//case 0x2a:/*CLAB*/levelreg.al = this.flags_a8vmfl(0, 0, 0); return;
+		//case 0x2b:/*IVAB*/levelreg.al = this.flags_8vm(levelreg.al ^ 255); return;
+		//case 0x2c:/*SRAB*/levelreg.al = this.flags_8vml((levelreg.al >> 1) | (levelreg.al & 128), levelreg.al & 1); return;
+		//case 0x2d:/*SLAB*/levelreg.al = this.flags_8vml((levelreg.al << 1) & 255, (levelreg.al & 128)!=0?1:0); return;
+		case 0x2e: // page
+			//"LDM","STM","LSM","SSM","FLM","MFM"
+			break;
+		case 0x2f: // DMA
+			// 'SAD','RAD','SCT','RCT','SDV','RDV'
+			// 'EAB','DAB','SMN','RMN'
+			break;
+		// 3X
+		case 0x30:/*INR*/{
+			const rc = this.rcfetchw();
+			this.set_rw(rc.srcreg, this.flags_a16vmf(rc.srcval, rc.cdval+1, 0));
+			return;
+		}
+		case 0x31:/*DCR*/{
+			const rc = this.rcfetchw();
+			this.set_rw(rc.srcreg, this.flags_a16vmf(rc.srcval, rc.cdval+1, 1));
+			return;
+		}
+		case 0x32:/*CLR*/{
+			const rc = this.rcfetchw();
+			this.set_rw(rc.srcreg, this.flags_a16vmfl(0, rc.cdval, 0));
+			return;
+		}
+		case 0x33:/*IVR*/{
+			const rc = this.rcfetchw();
+			this.set_rw(rc.srcreg, this.flags_16vm(rc.srcval ^ 65535));
+			return;
+		}
+		case 0x34:/*SRR*/{
+			const rc = this.rcfetchw();
+			rc.srcval = sword(rc.srcval);
+			this.set_rw(rc.srcreg, this.flags_16vml(rc.srcval >> (rc.cdval+1), (rc.srcval & (1 << rc.cdval)) != 0 ?1:0));
+			return;
+		}
+		case 0x35:/*SLR*/{
+			const rc = this.rcfetchw();
+			this.set_rw(rc.srcreg, this.flags_16vml(rc.srcval << (rc.cdval+1), (rc.srcval & (0x8000 >> rc.cdval)) != 0 ?1:0));
+			return;
+		}
+		case 0x36:/*RRR*/ {
+			const rc = this.rcfetchw();
+			if(rc.cdval!=0) break;
+			if((rc.srcreg & 1) != 0) {
+				break;
+			} else {
+				let v = rc.srcval;
+				let link = v & 1;
+				v = (v >> 1) | ((this.cc & 0x10) << 11);
+				this.set_rw(rc.srcreg, this.flags_16vml(v, link));
+				return;
+			}
+		}
+		case 0x37:/*RLR*/ break;
+		//case 0x38:/*INA*/levelreg.a = this.flags_a16vmf(levelreg.a, 1, 0); return;
+		//case 0x39:/*DCA*/levelreg.a = this.flags_a16vmf(levelreg.a, 1, 1); return;
+		//case 0x3a:/*CLA*/levelreg.a = this.flags_a16vmfl(0, 0); return;
+		//case 0x3b:/*IVA*/levelreg.a = this.flags_16vm(levelreg.a ^ 65535); return;
+		//case 0x3c:/*SRA*/levelreg.a = this.flags_16vml(levelreg.a >> 1, levelreg.a & 1); return;
+		//case 0x3d:/*SLA*/levelreg.a = this.flags_16vml((levelreg.a << 1) & 65535, (levelreg.a & 32768)!=0?1:0); return;
+		//case 0x3e:/*INX*/levelreg.x = this.flags_a16vmf(levelreg.x, 1, 0); return;
+		//case 0x3f:/*DCX*/levelreg.x = this.flags_a16vmf(levelreg.x, 1, 1); return;
+		// 4X
+		case 0x40:/*ADD.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_a8vmfl(rr.srcval, rr.cdval, 0)); return; }
+		case 0x41:/*SUB.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_a8vmfl(rr.srcval, rr.cdval, 1)); return; }
+		case 0x42:/*AND.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval & rr.cdval)); return; }
+		case 0x43:/*OR.B */{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval | rr.cdval)); return; }
+		case 0x44:/*XOR.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval ^ rr.cdval)); return; }
+		case 0x45:/*XFR.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval)); return; }
+		case 0x46: {// BIG.
+			const lenb = this.pcfetch();
+			const ib = this.pcfetch();
+			const sel = ib >> 4;
+			switch(sel) {
+			case 0:/*A*/ break;
+			case 1:/*S*/ break;
+			case 2:/*C*/ break;
+			case 3:/*ZAD*/{
+				let sl = (lenb>>4)& 15;
+				let dl = lenb&15;
+				const ex = this.ex_decode(ib, sl+1);
+				let src_addr = (ex.srcval + sl) & 65535;
+				let dst_addr = (ex.addr + dl) & 65535;
+				const src_sign = this.fetch(ex.srcval);
+				let dst_sign = 0;
+				let dst_zero = 0;
+				this.cc &= CC_NF & CC_NM & CC_NV;
+				while(dl > -1) {
+					let c = 0;
+					if(sl > -1) {
+						c = this.fetch(src_addr);
+						src_addr = (src_addr - 1) & 65535;
+						sl -= 1;
+					}
+					dst_zero |= c;
+					this.write(dst_addr, c);
+					dst_addr = (dst_addr - 1) & 65535;
+					if(dl == 0) {
+						dst_sign = c;
+						break;
+					}
+					dl -= 1;
+				}
+				console.log('ZAD',hex(ex.srcval,4),this.fetch_hex(ex.srcval, ((lenb>>4)& 15)), hex(ex.addr,4), this.fetch_hex(ex.addr, (lenb&15)));
+				if(dst_zero == 0) this.cc |= CC_V;
+				if(src_sign > 127) this.cc |= CC_M;
+				if((dst_sign ^ src_sign) > 127) this.cc |= CC_F;
+				return;
+			}
+			case 4:/*ZSU*/ break;
+			case 5:/*M*/ break;
+			case 6:/*D*/ break;
+			case 7:/*DRM*/ break;
+			case 8:/*CTB*/{
+				const b = ((lenb>>4) & 15) + 2;
+				let sl = this.levelreg.al;
+				const dl = lenb&15;
+				const ex = this.ex_decode(ib, sl+1);
+				for(;sl > 0;sl -= 1) {
+					let c = this.fetch(ex.srcval);
+					ex.srcval = (ex.srcval + 1) & 65535;
+					if(c == 0) continue;
+					c &= 0x4f;
+					if(c > 15) c -= 55;
+					let dptr = ex.addr;
+					let v = 0;
+					let dcount = dl;
+					while(dcount > -1) {
+						v = this.fetch(dptr);
+						v *= b;
+						if(dcount==0) v += c;
+						this.write(dptr, v);
+						let a = v>>8;
+						let rcount = dcount;
+						const sptr = dptr + 1;
+						while((a != 0) && (rcount < dl)) {
+							dptr -= 1;
+							v = a + this.fetch(dptr);
+							a = v>>8;
+							this.write(dptr, v);
+							rcount += 1;
+						}
+						dcount -= 1;
+						dptr = sptr;
+					}
+				}
+				this.cc &= CC_NL;
+				return;
+			}
+			case 9:/*CFB*/ break;
+			}
+			break;
+		}
+		case 0x47: {// MEM.
+			const ib = this.pcfetch();
+			let iml = this.pcfetch();
+			const sel = ib >> 4;
+			switch(sel) {
+				case 0:/*CVX*/break;
+				case 1:/*CPV*/break;
+				case 2:/*MVV*/break;
+				case 3:/*SCN*/break;
+				case 4:/*MVF*/{
+					const ex = this.ex_decode(ib, iml+1);
+					let z = 0;
+					let c = this.fetch(ex.srcval);
+					z |= c;
+					this.write(ex.addr, c);
+					while(iml > 0) {
+						ex.srcval = (ex.srcval + 1) & 65535;
+						ex.addr = (ex.addr + 1) & 65535;
+						let c = this.fetch(ex.srcval);
+						z |= c;
+						this.write(ex.addr, c);
+						iml -= 1;
+					}
+					this.cc &= (CC_V ^ 255);
+					if(z == 0) this.cc |= CC_V;
+					//this.levelreg.y = ex.sv;
+					//this.levelreg.z = ex.ea;
+					return;
+				}
+				case 5:/*ANC*/break;
+				case 6:/*ORC*/break;
+				case 7:/*XRC*/break;
+				case 8:/*CPF*/{
+					const ex = this.ex_decode(ib, iml+1);
+					break;
+				}
+				case 9:{/*FIL*/
+					const ex = this.ex_decode(ib, 1);
+					let c = this.fetch(ex.srcval);
+					while(true) {
+						this.write(ex.addr, c);
+						if(iml == 0) break;
+						ex.addr = (ex.addr + 1) & 65535;
+						iml -= 1;
+					}
+					return;
+				}
+				default: break;
+			}
+			break;
+		}
+		case 0x48:/*AABB (ADD)*/this.levelreg.bl = this.flags_a8vmfl(this.levelreg.al, this.levelreg.bl, 0); return;
+		case 0x49:/*SABB (SUB)*/this.levelreg.bl = this.flags_a8vmfl(this.levelreg.al, this.levelreg.bl, 1); return;
+		case 0x4a:/*NABB (AND)*/this.levelreg.bl = this.flags_8vm(this.levelreg.al & this.levelreg.bl); return;
+		case 0x4b:/*XAXB (XFR)*/this.levelreg.xl = this.flags_8vm(this.levelreg.al); return;
+		case 0x4c:/*XAYB (XFR)*/this.levelreg.yl = this.flags_8vm(this.levelreg.al); return;
+		case 0x4d:/*XABB (XFR)*/this.levelreg.bl = this.flags_8vm(this.levelreg.al); return;
+		case 0x4e:/*XAZB (XFR)*/this.levelreg.zl = this.flags_8vm(this.levelreg.al); return;
+		case 0x4f:/*XASB (XFR)*/this.levelreg.sl = this.flags_8vm(this.levelreg.al); return;
+		// 5X
+		case 0x50:/*ADD*/{ const rr = this.rrfetchw();
+			this.set_rw(rr.dstreg, this.flags_a16vmfl(rr.srcval, rr.cdval));
+			return;
+		}
+		case 0x51:/*SUB*/{ const rr = this.rrfetchw();
+			this.set_rw(rr.dstreg, this.flags_a16vmfl(rr.srcval, rr.cdval ^ 65535, 1));
+			return;
+		}
+		case 0x52:/*AND*/{ const rr = this.rrfetchw();
+			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval & rr.cdval));
+			return;
+		}
+		case 0x53:/*ORI*/{ const rr = this.rrfetchw();
+			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval | rr.cdval));
+			return;
+		}
+		case 0x54:/*ORE*/{ const rr = this.rrfetchw();
+			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval ^ rr.cdval));
+			return;
+		}
+		case 0x55: { // XFR
+			const rr = this.rrfetchw();
+			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval));
+			return;
+		}
+		case 0x56:/*EAO*/break;
+		case 0x57:/*DAO*/break;
+		case 0x58:/*AAB*/this.levelreg.b = this.flags_a16vmfl(this.levelreg.a, this.levelreg.b); return;
+		case 0x59:/*SAB*/this.levelreg.b = this.flags_a16vmfl(this.levelreg.a, this.levelreg.b ^ 65535, 1); return;
+		case 0x5a:/*NAB*/this.levelreg.b = this.flags_16vm(this.levelreg.a & this.levelreg.b); return;
+		case 0x5b:/*XAX*/this.levelreg.x = this.flags_16vm(this.levelreg.a); return;
+		case 0x5c:/*XAY*/this.levelreg.y = this.flags_16vm(this.levelreg.a); return;
+		case 0x5d:/*XAB*/this.levelreg.b = this.flags_16vm(this.levelreg.a); return;
+		case 0x5e:/*XAZ*/this.levelreg.z = this.flags_16vm(this.levelreg.a); return;
+		case 0x5f:/*XAS*/this.levelreg.s = this.flags_16vm(this.levelreg.a); return;
+		// 6X
+		//case 0x60:/*LDX IMM,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_immw())); return;
+		//case 0x61:/*LDX DIR,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_dir())); return;
+		//case 0x62:/*LDX IND,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_ind())); return;
+		//case 0x63:/*LDX PCO,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_pco())); return;
+		//case 0x64:/*LDX IPO,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_ipo())); return;
+		//case 0x65:/*LDX MOD,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_mod(2))); return;
+		case 0x66: // SVC
+			this.handle_svc(this.pcfetch());
+			return;
+		case 0x67: {// MEM.
+			const ib = this.pcfetch();
+			const sel = ib >> 4;
+			let l = this.levelreg.al;
+			switch(sel) {
+				case 0:/*CVXR*/break;
+				case 1:/*CPVR*/break;
+				case 2:/*MVVR*/break;
+				case 3:/*SCNR*/break;
+				case 4:/*MVFR*/{
+					const ex = this.ex_decode(ib, l+1);
+					let z = 0;
+					this.cc &= CC_NV & CC_NM;
+					let c = this.fetch(ex.srcval);
+					z |= c;
+					this.write(ex.addr, c);
+					if((c & 128) != 0) this.cc |= CC_M;
+					while(l > 0) {
+						ex.srcval = (ex.srcval + 1) & 65535;
+						ex.addr = (ex.addr + 1) & 65535;
+						c = this.fetch(ex.srcval);
+						z |= c;
+						this.write(ex.addr, c);
+						l -= 1;
+					}
+					if(z == 0) this.cc |= CC_V;
+					//this.levelreg.z = ex.sv;
+					//this.levelreg.y = ex.ea;
+					return;
+				}
+				case 5:/*ANCR*/break;
+				case 6:/*ORCR*/break;
+				case 7:/*XRCR*/break;
+				case 8:/*CPFR*/{
+					const ex = this.ex_decode(ib, l+1);
+					let c, d;
+					while(l > -1) {
+						c = this.fetch(ex.srcval);
+						d = this.fetch(ex.addr);
+						this.flags_a8vml(d, c, 1);
+						if((this.cc & CC_V) == 0) break;
+						ex.srcval = (ex.srcval + 1) & 65535;
+						ex.addr = (ex.addr + 1) & 65535;
+						l -= 1;
+					}
+					this.cc &= CC_NF;
+					if(l == -1) this.cc |= CC_F;
+					return;
+				}
+				case 9:{/*FILR*/
+					const ex = this.ex_decode(ib, 1);
+					let c = this.fetch(ex.srcval);
+					while(true) {
+						this.write(ex.addr, c);
+						if(l == 0) break;
+						ex.addr = (ex.addr + 1) & 65535;
+						l -= 1;
+					}
+					return;
+				}
+				default: break;
+			}
+			break;
+		}
+		//case 0x68:/*STX*/this.writew(this.lea_immw(), this.flags_16vm(levelreg.x)); return;
+		//case 0x69:/*STX*/this.writew(this.lea_dir(), this.flags_16vm(levelreg.x)); return;
+		//case 0x6a:/*STX*/this.writew(this.lea_ind(), this.flags_16vm(levelreg.x)); return;
+		//case 0x6b:/*STX*/this.writew(this.lea_pco(), this.flags_16vm(levelreg.x)); return;
+		//case 0x6c:/*STX*/this.writew(this.lea_ipo(), this.flags_16vm(levelreg.x)); return;
+		//case 0x6d:/*STX*/this.writew(this.lea_mod(2), this.flags_16vm(levelreg.x)); return;
+		case 0x6e:/*LST*/break;
+		case 0x6f:/*SST*/break;
+		// 7X
+		case 0x70: throw 1; // !ill70
+		//case 0x71:/*JMP*/this.pc = this.lea_dir(); return;
+		//case 0x72:/*JMP*/this.pc = this.lea_ind(); return;
+		//case 0x73:/*JMP*/this.pc = this.lea_pco(); return;
+		//case 0x74:/*JMP*/this.pc = this.lea_ipo(); return;
+		//case 0x75:/*JMP*/this.pc = this.lea_mod(2); return;
+		case 0x76:/*EPE*/break;
+		case 0x77:/*MUL*/break;
+		case 0x78:/*DIV*/break;
+		//case 0x79:/*JSR*/this.f_jsr(this.lea_dir()); return;
+		//case 0x7a:/*JSR*/this.f_jsr(this.lea_ind()); return;
+		//case 0x7b:/*JSR*/this.f_jsr(this.lea_pco()); return;
+		//case 0x7c:/*JSR*/this.f_jsr(this.lea_ipo()); return;
+		//case 0x7d:/*JSR*/this.f_jsr(this.lea_mod(2)); return;
+		case 0x7e:/*STK*/{
+			let r = this.pcfetch();
+			let c = r & 15;
+			r = ((r >> 4) + c) & 15;
+			let s = this.levelreg.s;
+			while(true) {
+				s = (s - 1) & 65535;
+				this.write(s, this.get_rb(r));
+				if(c==0) break;
+				r = (r - 1) & 15;
+				c -= 1;
+			}
+			this.levelreg.s = s;
+			return;
+		}
+		case 0x7f:/*POP*/{
+			let r = this.pcfetch();
+			let c = r & 15;
+			r = (r >> 4) & 15;
+			let s = this.levelreg.s;
+			while(true) {
+				this.set_rb(r, this.fetch(s));
+				s = (s + 1) & 65535;
+				if(c==0) break;
+				r = (r + 1) & 15;
+				c -= 1;
+			}
+			this.levelreg.s = s;
+			return;
+		}
+		// 8X
+		//case 0x80:/*LDAB*/this.f_ldab(this.lea_immb()); return;
+		//case 0x81:/*LDAB*/this.f_ldab(this.lea_dir()); return;
+		//case 0x82:/*LDAB*/this.f_ldab(this.lea_ind()); return;
+		//case 0x83:/*LDAB*/this.f_ldab(this.lea_pco()); return;
+		//case 0x84:/*LDAB*/this.f_ldab(this.lea_ipo()); return;
+		//case 0x85:/*LDAB*/this.f_ldab(this.lea_mod()); return;
+		case 0x86:/*DPE // priv*/break;
+		case 0x87: throw 1; // !ill87
+		//case 0x88:/* LAAB */this.f_ldab(levelreg.a); return;
+		//case 0x89:/* LABB */this.f_ldab(levelreg.b); return;
+		//case 0x8a:/* LAXB */this.f_ldab(levelreg.x); return;
+		//case 0x8b:/* LAYB */this.f_ldab(levelreg.y); return;
+		//case 0x8c:/* LAZB */this.f_ldab(levelreg.z); return;
+		//case 0x8d:/* LASB */this.f_ldab(levelreg.s); return;
+		//case 0x8e:/* LACB */this.f_ldab(levelreg.c); return;
+		//case 0x8f:/* LAPB */this.f_ldab(levelreg.p); return;
+		// 9X
+		//case 0x90:/*LDA*/this.f_lda(this.lea_immw()); return;
+		//case 0x91:/*LDA*/this.f_lda(this.lea_dir()); return;
+		//case 0x92:/*LDA*/this.f_lda(this.lea_ind()); return;
+		//case 0x93:/*LDA*/this.f_lda(this.lea_pco()); return;
+		//case 0x94:/*LDA*/this.f_lda(this.lea_ipo()); return;
+		//case 0x95:/*LDA*/this.f_lda(this.lea_mod(2)); return;
+		case 0x96:/*SOP*/break;
+		case 0x97: throw 1; // !ill97
+		//case 0x98:/* LAA */this.f_lda(levelreg.a); return;
+		//case 0x99:/* LAB */this.f_lda(levelreg.b); return;
+		//case 0x9a:/* LAX */this.f_lda(levelreg.x); return;
+		//case 0x9b:/* LAY */this.f_lda(levelreg.y); return;
+		//case 0x9c:/* LAZ */this.f_lda(levelreg.z); return;
+		//case 0x9d:/* LAS */this.f_lda(levelreg.s); return;
+		//case 0x9e:/* LAC */this.f_lda(levelreg.c); return;
+		//case 0x9f:/* LAP */this.f_lda(levelreg.p); return;
+		// AX
+		//case 0xa0:/*STAB*/this.write(this.lea_immb(), this.flags_8vm(levelreg.al)); return;
+		//case 0xa1:/*STAB*/this.write(this.lea_dir(), this.flags_8vm(levelreg.al)); return;
+		//case 0xa2:/*STAB*/this.write(this.lea_ind(), this.flags_8vm(levelreg.al)); return;
+		//case 0xa3:/*STAB*/this.write(this.lea_pco(), this.flags_8vm(levelreg.al)); return;
+		//case 0xa4:/*STAB*/this.write(this.lea_ipo(), this.flags_8vm(levelreg.al)); return;
+		//case 0xa5:/*STAB*/this.write(this.lea_mod(), this.flags_8vm(levelreg.al)); return;
+		case 0xa6:/*SEP*/break;
+		case 0xa7: throw 1; // !illA7
+		//case 0xa8:/*SAAB*/this.write(levelreg.a, this.flags_8vm(levelreg.al)); return;
+		//case 0xa9:/*SABB*/this.write(levelreg.b, this.flags_8vm(levelreg.al)); return;
+		//case 0xaa:/*SAXB*/this.write(levelreg.x, this.flags_8vm(levelreg.al)); return;
+		//case 0xab:/*SAYB*/this.write(levelreg.y, this.flags_8vm(levelreg.al)); return;
+		//case 0xac:/*SAZB*/this.write(levelreg.z, this.flags_8vm(levelreg.al)); return;
+		//case 0xad:/*SASB*/this.write(levelreg.s, this.flags_8vm(levelreg.al)); return;
+		//case 0xae:/*SACB*/this.write(levelreg.c, this.flags_8vm(levelreg.al)); return;
+		//case 0xaf:/*SAPB*/this.write(levelreg.p, this.flags_8vm(levelreg.al)); return;
+		// BX
+		//case 0xb0:/*STA*/this.writew(this.lea_immw(), this.flags_16vm(levelreg.a)); return;
+		//case 0xb1:/*STA*/this.writew(this.lea_dir(), this.flags_16vm(levelreg.a)); return;
+		//case 0xb2:/*STA*/this.writew(this.lea_ind(), this.flags_16vm(levelreg.a)); return;
+		//case 0xb3:/*STA*/this.writew(this.lea_pco(), this.flags_16vm(levelreg.a)); return;
+		//case 0xb4:/*STA*/this.writew(this.lea_ipo(), this.flags_16vm(levelreg.a)); return;
+		//case 0xb5:/*STA*/this.writew(this.lea_mod(2), this.flags_16vm(levelreg.a)); return;
+		case 0xb6:/*ECK*/break;
+		case 0xb7: throw 1; // !illB7
+		//case 0xb8:/*SAA*/this.writew(levelreg.a, this.flags_16vm(levelreg.a)); return;
+		//case 0xb9:/*SAB*/this.writew(levelreg.b, this.flags_16vm(levelreg.a)); return;
+		//case 0xba:/*SAX*/this.writew(levelreg.x, this.flags_16vm(levelreg.a)); return;
+		//case 0xbb:/*SAY*/this.writew(levelreg.y, this.flags_16vm(levelreg.a)); return;
+		//case 0xbc:/*SAZ*/this.writew(levelreg.z, this.flags_16vm(levelreg.a)); return;
+		//case 0xbd:/*SAS*/this.writew(levelreg.s, this.flags_16vm(levelreg.a)); return;
+		//case 0xbe:/*SAC*/this.writew(levelreg.c, this.flags_16vm(levelreg.a)); return;
+		//case 0xbf:/*SAP*/this.writew(levelreg.p, this.flags_16vm(levelreg.a)); return;
+		// CX
+		//case 0xc0:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_immb())); return;
+		//case 0xc1:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_dir())); return;
+		//case 0xc2:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_ind())); return;
+		//case 0xc3:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_pco())); return;
+		//case 0xc4:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_ipo())); return;
+		//case 0xc5:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_mod())); return;
+		case 0xc6:/*DCK*/break;
+		case 0xc7: throw 1; // !illC7
+		//case 0xc8:/*LBAB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.a)); return;
+		//case 0xc9:/*LBBB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.b)); return;
+		//case 0xca:/*LBXB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.x)); return;
+		//case 0xcb:/*LBYB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.y)); return;
+		//case 0xcc:/*LBZB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.z)); return;
+		//case 0xcd:/*LBSB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.s)); return;
+		//case 0xce:/*LBCB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.c)); return;
+		//case 0xcf:/*LBPB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.p)); return;
+		// DX
+		//case 0xd0:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_immw())); return;
+		//case 0xd1:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_dir())); return;
+		//case 0xd2:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_ind())); return;
+		//case 0xd3:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_pco())); return;
+		//case 0xd4:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_ipo())); return;
+		//case 0xd5:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_mod(2))); return;
+		case 0xd6:{/*STR*/
+			const rrs = this.rrsfetchw();
+			if(rrs.cdval > -1) this.set_rw(rrs.srcreg, rrs.srcval);
+			else this.writew(rrs.addr, rrs.srcval);
+			return;
+		}
+		case 0xd7:/*SAR*/break;
+		//case 0xd8:/*LBA*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.a)); return;
+		//case 0xd9:/*LBB*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.b)); return;
+		//case 0xda:/*LBX*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.x)); return;
+		//case 0xdb:/*LBY*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.y)); return;
+		//case 0xdc:/*LBZ*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.z)); return;
+		//case 0xdd:/*LBS*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.s)); return;
+		//case 0xde:/*LBC*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.c)); return;
+		//case 0xdf:/*LBP*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.p)); return;
+		// EX
+		//case 0xe0:/*STBB*/this.write(this.lea_immb(), this.flags_8vm(levelreg.bl)); return;
+		//case 0xe1:/*STBB*/this.write(this.lea_dir(), this.flags_8vm(levelreg.bl)); return;
+		//case 0xe2:/*STBB*/this.write(this.lea_ind(), this.flags_8vm(levelreg.bl)); return;
+		//case 0xe3:/*STBB*/this.write(this.lea_pco(), this.flags_8vm(levelreg.bl)); return;
+		//case 0xe4:/*STBB*/this.write(this.lea_ipo(), this.flags_8vm(levelreg.bl)); return;
+		//case 0xe5:/*STBB*/this.write(this.lea_mod(), this.flags_8vm(levelreg.bl)); return;
+		case 0xe6:/*LAR*/break;
+		case 0xe7: throw 1; // !illE7
+		//case 0xe8:/*SBAB*/this.write(levelreg.a, this.flags_8vm(levelreg.bl)); return;
+		//case 0xe9:/*SBBB*/this.write(levelreg.b, this.flags_8vm(levelreg.bl)); return;
+		//case 0xea:/*SBXB*/this.write(levelreg.x, this.flags_8vm(levelreg.bl)); return;
+		//case 0xeb:/*SBYB*/this.write(levelreg.y, this.flags_8vm(levelreg.bl)); return;
+		//case 0xec:/*SBZB*/this.write(levelreg.z, this.flags_8vm(levelreg.bl)); return;
+		//case 0xed:/*SBSB*/this.write(levelreg.s, this.flags_8vm(levelreg.bl)); return;
+		//case 0xee:/*SBCB*/this.write(levelreg.c, this.flags_8vm(levelreg.bl)); return;
+		//case 0xef:/*SBPB*/this.write(levelreg.p, this.flags_8vm(levelreg.bl)); return;
+		// FX
+		//case 0xf0:/*STB*/this.writew(this.lea_immw(), this.flags_16vm(levelreg.b)); return;
+		//case 0xf1:/*STB*/this.writew(this.lea_dir(), this.flags_16vm(levelreg.b)); return;
+		//case 0xf2:/*STB*/this.writew(this.lea_ind(), this.flags_16vm(levelreg.b)); return;
+		//case 0xf3:/*STB*/this.writew(this.lea_pco(), this.flags_16vm(levelreg.b)); return;
+		//case 0xf4:/*STB*/this.writew(this.lea_ipo(), this.flags_16vm(levelreg.b)); return;
+		//case 0xf5:/*STB*/this.writew(this.lea_mod(2), this.flags_16vm(levelreg.b)); return;
+		case 0xf6:/*LIO/SIO*/break;
+		case 0xf7:/*MVL*/break;
+		//case 0xf8:/*SBA*/this.writew(levelreg.a, this.flags_16vm(levelreg.b)); return;
+		//case 0xf9:/*SBB*/this.writew(levelreg.b, this.flags_16vm(levelreg.b)); return;
+		//case 0xfa:/*SBX*/this.writew(levelreg.x, this.flags_16vm(levelreg.b)); return;
+		//case 0xfb:/*SBY*/this.writew(levelreg.y, this.flags_16vm(levelreg.b)); return;
+		//case 0xfc:/*SBZ*/this.writew(levelreg.z, this.flags_16vm(levelreg.b)); return;
+		//case 0xfd:/*SBS*/this.writew(levelreg.s, this.flags_16vm(levelreg.b)); return;
+		//case 0xfe:/*SBC*/this.writew(levelreg.c, this.flags_16vm(levelreg.b)); return;
+		//case 0xff:/*SBP*/this.writew(levelreg.p, this.flags_16vm(levelreg.b)); return;
+		}
+	}
+}
+
 class CPU6 {
 
 	// TODO backplane
-	mem: Backplane;
+	mem: MemAccess;
 	page_ram: Uint8Array;
 	_map: number = 0;
-	constructor(m: Backplane, page: Uint8Array) {
+	constructor(m: MemAccess, page: Uint8Array) {
 		this.mem = m;
 		this.page_ram = page;
 	}
@@ -7152,10 +9378,10 @@ class CPU6 {
 		return (page << 11) | (address & 2047)
 	}
 	disassembly(address:number, ret:DisAsmResult):void {
-		const DREF_L = name_conv == NAMECON.MEI ? '[' : '(';
-		const DREF_R = name_conv == NAMECON.MEI ? ']' : ')';
-		const DDREF_L = name_conv == NAMECON.MEI ? '[[' : '((';
-		const DDREF_R = name_conv == NAMECON.MEI ? ']]' : '))';
+		const DREF_L = ['','[','('][name_conv];
+		const DREF_R = ['',']',')'][name_conv];
+		const DDREF_L = ['*','[[','(('][name_conv];
+		const DDREF_R = ['',']]','))'][name_conv];
 		let vpc = address;
 		let page = address >> 11;
 		let ppc = this.phys(vpc++);
@@ -7175,7 +9401,17 @@ class CPU6 {
 		let opcs = oplist[op];
 		let anpre = '';
 		let anstr = '';
-		let opname = opcs.n;
+		let opname: string;
+		let opsfx = '';
+		if(typeof opcs.n != 'string') {
+			if(opcs.n.length > name_conv) {
+				opname = opcs.n[name_conv];
+			} else {
+				opname = opcs.n[0];
+			}
+		} else {
+			opname = opcs.n;
+		}
 		let anno_data = '';
 		datah.push(op);
 		function check_anno(a:number) {
@@ -7425,8 +9661,11 @@ class CPU6 {
 		}
 		let rsh = 0;
 		if (opcs.w == TXS.W) {
-			rsh = 16;
+			rsh = 1;
 		}
+		const litpfx = LIT_PFX[name_conv];
+		const regconv = regname[name_conv == NAMECON.MEI ? 1:0];
+		const is_cent = (name_conv == NAMECON.CENT);
 		function decode_mode(mode:OPM, is_write:boolean, regm?:REG):string {
 			let disp;
 			let rvc:number;
@@ -7434,19 +9673,24 @@ class CPU6 {
 			switch(mode) {
 			case OPM.IMPL: return '';
 			case OPM.IMM:
+				opsfx = '=';
 				if (opcs.w == TXS.B) {
-					return (is_write?'>#':'#') + hexlist(dfetch());
+					return (is_write?litpfx.sw:litpfx.sr) + hexlist(dfetch());
 				}
 				if (opcs.w == TXS.W) {
 					let hi = dfetch();
 					let lo = dfetch();
-					return (is_write?'>#':'#') + hexlist((hi << 8) | lo, 4);
+					return (is_write?litpfx.sw:litpfx.sr) + hexlist((hi << 8) | lo, 4);
 				}
-				return (is_write?'>#':'#') + '<invalid>';
+				return (is_write?litpfx.sw:litpfx.sr) + '<invalid>';
 			case OPM.DIR:
+				opsfx = '/';
 				advh = dfetch();
 				advl = dfetch();
 				adr = (advh << 8) | advl;
+				if(is_cent) {
+					return hexlist(adr,4);
+				}
 				switch (opcs.w) {
 				case TXS.F: return `:${addrref(adr)}`;
 				case TXS.B: return `${DREF_L}${addrref(adr)}${DREF_R}`;
@@ -7454,9 +9698,13 @@ class CPU6 {
 				}
 				return '#<invalid>';
 			case OPM.IND:
+				opsfx = '$';
 				advh = dfetch();
 				advl = dfetch();
 				adr = (advh << 8) | advl;
+				if(is_cent) {
+					return hexlist(adr,4);
+				}
 				if (opcs.w == TXS.F) {
 					return ':' + DREF_L + addrref(adr) + DREF_R;
 				}
@@ -7464,13 +9712,26 @@ class CPU6 {
 			case OPM.PCO:
 				disp = sbyte(dfetch());
 				if (opcs.w == TXS.F) {
+					if(is_cent) {
+						return hexlist((vpc + disp) & 65535,4);
+					}
 					return `PC${hexlistp(disp)} \u21d2 ${addrrefw(vpc + disp)}`;
 				} else if (opcs.w == TXS.W) {
+					if(is_cent) {
+						return hexlist((vpc + disp) & 65535,4);
+					}
 					return `${DREF_L} PC${hexlistp(disp)} \u21d2 ${addrrefw(vpc + disp)} ${DREF_R}`;
+				}
+				if(is_cent) {
+					return hexlist((vpc + disp) & 65535,4);
 				}
 				return `${DREF_L} PC${hexlistp(disp)} \u21d2 ${addrref(vpc + disp)} ${DREF_R}`;
 			case OPM.IPO:
+				opsfx = '*';
 				disp = sbyte(dfetch());
+				if(is_cent) {
+					return hexlist((vpc + disp) & 65535,4);
+				}
 				if (opcs.w == TXS.F) {
 					return `${DREF_L} PC${hexlistp(disp)} \u21d2 ${addrrefw(vpc + disp)} ${DREF_R}`;
 				} else if (opcs.w == TXS.W) {
@@ -7478,28 +9739,43 @@ class CPU6 {
 				}
 				return `${DDREF_L} PC${hexlistp(disp)} \u21d2 ${addrref(vpc + disp)} ${DDREF_R}`;
 			case OPM.MOD: {
+				opsfx = '+';
 				rvc = dfetch();
-				let modv = rvc & 15;
-				let reg = rvc >> 4;
+				const modv = rvc & 15;
+				const incdec = rvc & 3;
+				const reg = rvc >> 4;
 				disp = 0;
-				let res = regname[16 + reg];
+				let res = regconv[1][reg];
 				if((reg & 1) != 0) {
 					return '<invalid>' + res;
 				}
+				
+				if (incdec == 2) {
+					if(name_conv == NAMECON.MEI)
+						res = '--' + res;
+					else
+						res += '-';
+				} else if (incdec == 1) {
+					if(name_conv == NAMECON.MEI)
+						res += '++';
+					else
+						res += '+';
+				}
 				if ((modv & 8) > 0) {
 					disp = sbyte(dfetch());
+					if(name_conv == NAMECON.MEI) {
+						res = `${res}${hexlistp(disp)}`;
+					} else {
+						res = `${res},${hexlist(disp & 255)}`;
+					}
 				}
-				if ((modv & 3) == 2){
-					res = '--' + res;
-				} else if ((modv & 3) == 1) {
-					res = res + '++';
-				}
-				if ((modv & 8) > 0) {
-					res = `${res} ${disp<0?'-':'+'} ${hexlist(disp<0?-disp:disp)}`;
-				}
-				res = `${DREF_L}${res}${DREF_R}`;
-				if ((modv & 4) > 0) {
+				if(name_conv == NAMECON.MEI) {
 					res = `${DREF_L}${res}${DREF_R}`;
+					if ((modv & 4) > 0) {
+						res = `${DREF_L}${res}${DREF_R}`;
+					}
+				} else if ((modv & 4) > 0) {
+					res = '*' + res;
 				}
 				return res;
 			}
@@ -7516,12 +9792,12 @@ class CPU6 {
 				if(opcs.w == TXS.W) {
 					regsrc = regsrc & 14;
 					regdst = regdst & 14;
-					if (mode == OPM.RRX && (regdst != (regdst|2)))
-						strdst = `${regname[16+regdst]}:${regname[16+(regdst|2)]}`;
+					if (mode == OPM.RRX && !is_cent && (regdst != (regdst|2)))
+						strdst = `${regconv[1][regdst]}:${regconv[1][regdst|2]}`;
 					else
-						strdst = regname[16+regdst];
+						strdst = regconv[1][regdst];
 				} else {
-					strdst = regname[regdst];
+					strdst = regconv[0][regdst];
 				}
 				if (opcs.w == TXS.W && rrmode > 0) {
 					// nibbles mismatch
@@ -7539,38 +9815,61 @@ class CPU6 {
 					advl = dfetch();
 					adr = (advh << 8) | advl;
 					if (mode == OPM.RRSR) {
+						if(is_cent) {
+							if (rrmode == 2) {
+								// MSN odd
+								return `${strdst},${litpfx.iw}${hexlist(adr, 4)}`;
+							} else if (rrmode == 1) {
+								// MSN even
+								return `${strdst},/${addrrefw(adr)}`;
+							} else {
+								return `${strdst},${regconv[1][regsrc]},/${hexlist(adr)}`;
+							}
+						}
 						if (rrmode == 2) {
 							// MSN odd
-							return `${strdst}, >#${hexlist(adr, 4)}`;
+							return `${strdst}, ${litpfx.iw}${hexlist(adr, 4)}`;
 						} else if (rrmode == 1) {
 							// MSN even
 							return `${strdst}, ${DREF_L}${addrrefw(sword(adr))}${DREF_R}`;
 						} else {
-							return `${strdst}, ${DREF_L}${regname[16 + regsrc]}${hexlistp(sword(adr))}${DREF_R}`;
+							return `${strdst}, ${DREF_L}${regconv[1][regsrc]}${hexlistp(sword(adr))}${DREF_R}`;
 						}
 					} else if (mode == OPM.RRS) {
+						if(is_cent) {
+							if (rrmode == 2) {
+								// MSN odd
+								opsfx = litpfx.ir;
+								return `${litpfx.sr}${hexlist(adr, 4)},${strdst}`;
+							} else if (rrmode == 1) {
+								// MSN even
+								return `/${hexlist(adr, 4)},${strdst}`;
+							} else {
+								return `${regconv[1][regsrc]},${hexlist(adr)},${strdst}`;
+							}
+						}
 						if (rrmode == 2) {
 							// MSN odd
-							return `#${hexlist(adr, 4)}, ${strdst}`;
+							return `${litpfx.sr}${hexlist(adr, 4)}, ${strdst}`;
 						} else if (rrmode == 1) {
 							// MSN even
 							return `${DREF_L}${addrrefw(sword(adr))}${DREF_R}, ${strdst}`;
 						} else {
-							return `${DREF_L}${regname[16 + regsrc]}${hexlistp(sword(adr))}${DREF_R}, ${strdst}`;
+							return `${DREF_L}${regconv[1][regsrc]}${hexlistp(sword(adr))}${DREF_R}, ${strdst}`;
 						}
 					} else if (rrmode == 2) {
 						// MSN odd
-						return `#${hexlist(adr, 4)}, ${regname[16 + regsrc]} \u21d2 ${strdst}`;
+						return `${litpfx.ir}${hexlist(adr, 4)}, ${regconv[1][regsrc]} \u21d2 ${strdst}`;
 					} else if (rrmode == 1) {
 						// MSN even
-						return `${DREF_L}${addrrefw(sword(adr))}${DREF_R}, ${regname[16 + regsrc]} \u21d2 ${strdst}`;
+						return `${DREF_L}${addrrefw(sword(adr))}${DREF_R}, ${regconv[1][regsrc]} \u21d2 ${strdst}`;
 					} else {
-						return `${DREF_L}${regname[16 + regsrc]} + ${hexlistp(sword(adr))}${DREF_R}, ${regname[16 + regdst]} \u21d2 ${strdst}`;
+						return `${DREF_L}${regconv[1][regsrc]}${hexlistp(sword(adr))}${DREF_R}, ${regconv[1][regdst]} \u21d2 ${strdst}`;
 					}
 				} else {
-					return `${regname[rsh + regsrc]}, ${regname[rsh + regdst]}`;
+					if(is_cent) return `${regconv[rsh][regsrc]},${regconv[rsh][regdst]}`;
+					return `${regconv[rsh][regsrc]}, ${regconv[rsh][regdst]}`;
 				}
-				break;
 			}
 			case OPM.RC: {
 				if(!is_write) throw new Error('RC in source operand, should be in dest');
@@ -7581,16 +9880,28 @@ class CPU6 {
 					regsrc += opcs.i;
 				}
 				if (opcs.w == TXS.W && (regdst & 1) != 0) {
+					// some nmemonics are different when accessing memory
+					if(opcs.nm != undefined) {
+						if(typeof opcs.nm != 'string') {
+							if(opcs.nm.length > name_conv) {
+								opname = opcs.nm[name_conv];
+							} else {
+								opname = opcs.nm[0];
+							}
+						} else {
+							opname = opcs.nm;
+						}
+					}
 					advh = dfetch();
 					advl = dfetch();
 					adr = sword((advh << 8) | advl);
 					regdst = regdst & 14;
 					if(regdst == 0) {
-						return `${DREF_L}${addrref(adr)}${DREF_R}, ${hexlist(regsrc, 1)}`;
+						return `${DREF_L}${addrref(adr)}${DREF_R}, ${regsrc}`;
 					}
-					return `${DREF_L}${addrref(adr)} + ${regname[16 + regdst]}${DREF_R}, ${hexlist(regsrc, 1)}`;
+					return `${DREF_L}${regconv[1][regdst]}${hexlistp(adr,4)}${DREF_R}, ${regsrc}`;
 				} else {
-					return regname[rsh + regdst] + ',' + hexlist(regsrc, 1);
+					return `${regconv[rsh][regdst]},${regsrc}`;
 				}
 			}
 			case OPM.IMPL_R:
@@ -7598,7 +9909,7 @@ class CPU6 {
 					return '';
 				}
 				if (regm != undefined) {
-					return regname[rsh + regm];
+					return regconv[rsh][regm];
 				} else {
 					return '!R';
 				}
@@ -7607,7 +9918,7 @@ class CPU6 {
 					return '';
 				}
 				if (regm != undefined) {
-					return `${DREF_L}${regname[16 + regm]}${DREF_R}`;
+					return `${DREF_L}${regconv[1][regm]}${DREF_R}`;
 				} else {
 					return `${DREF_L}!R${DREF_R}`;
 				}
@@ -7615,7 +9926,7 @@ class CPU6 {
 		}
 		let exm_data = 0;
 		let exm_reg = false;
-		function decode_exmode(mode:number, is_dest:boolean):string {
+		function decode_exmode(mode:number, is_dest:boolean, par_len?:number):string {
 			let v0:number;
 			if(mode == 2 && exm_reg) v0 = exm_data;
 			else v0 = dfetch();
@@ -7624,6 +9935,7 @@ class CPU6 {
 			switch(mode) {
 			case 0:
 				let al = dfetch();
+				if(is_cent) return `/${hexlist((v0<<8)|al,4)}`;
 				return `${DREF_L}${hexlist((v0<<8)|al,4)}${DREF_R}`;
 			case 1:
 				let litv = dfetch();
@@ -7636,16 +9948,27 @@ class CPU6 {
 				} else {
 					litv = sbyte(litv);
 				}
-				return `${DREF_L}${regname[16+regh]}${(regl != 0) ? ' + '+regname[16+regl]:''}${hexlistp(litv)}${DREF_R}`;
+				if(is_cent) return `-${regconv[1][regh]}${(regl != 0) ? ','+regconv[1][regl]:''}${hexlistp(litv)} ; todo syntax`;
+				return `${DREF_L}${regconv[1][regh]}${(regl != 0) ? ' + '+regconv[1][regl]:''}${hexlistp(litv)}${DREF_R}`;
 			case 2:
-				if(is_dest) return `${DREF_L}${regname[16+regl]}${DREF_R}`;
-				else {
+				if(is_dest) {
+					if(is_cent) return `-${regconv[1][regl]}`;
+					return `${DREF_L}${regconv[1][regl]}${DREF_R}`;
+				} else {
 					exm_data = v0;
 					exm_reg = true;
-					return `${DREF_L}${regname[16+regh]}${DREF_R}`;
+					if(is_cent) return `-${regconv[1][regh]}`;
+					return `${DREF_L}${regconv[1][regh]}${DREF_R}`;
 				}
 			case 3:
-				return `#${hexlist(v0,2)}`;
+				let lits = hex(v0);
+				if(par_len != undefined) {
+					while(par_len > 1) {
+						lits += hex(dfetch());
+						par_len -= 1;
+					}
+				}
+				return litpfx.ir+hexcs(lits);
 			}
 			throw 0;
 		}
@@ -7662,16 +9985,12 @@ class CPU6 {
 		case OPL_EXT.MPUSH:
 		case OPL_EXT.MPOP: {
 			let rvc = dfetch();
-			if (opcs.x == OPL_EXT.MPOP) {
-				opname = 'MPOP';
-			} else {
-				opname = 'MPUSH';
-			}
 			let rstart = (rvc >> 4);
 			let rcount = (rvc & 15);
-			pstr = regname[rstart++];
+			pstr = regconv[0][rstart++];
 			while(rcount > 0) {
-				pstr += ',' + regname[rstart++];
+				pstr += ',' + regconv[0][rstart++];
+				if(rstart > 15) rstart = 0;
 				rcount--;
 			}
 			break;
@@ -7682,16 +10001,23 @@ class CPU6 {
 			let mod2 = rvc & 3;
 			let sel = (rvc >> 4);
 			const opr1 = (opcs.xd[0] as string[])[sel];
-			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 1 : 2] as string[];
+			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 2 : 1] as string[];
 			if(sel < ncon.length) {
-				opname += '.'+ncon[sel];
+				opname += ncon[sel];
 			} else {
-				opname += '.'+hex(sel, 1);
+				opname += hex(sel, 1);
 			}
 			if(opr1 == undefined) {
 				pstr='#<invalid>';
 			} else try {
-				if(mod1 == 3) {
+				if(is_cent) {
+					if(mod1 == 3) {
+						let v = dfetch();
+						pstr = `=${hexlist(v,2)}`;
+					} else {
+						pstr = `${decode_exmode(mod1, false)}`;
+					}
+				} else if(mod1 == 3) {
 					let v = dfetch();
 					pstr = `m=#${hexlist(v&7,1)},${opr1}=#${hexlist(v>>3,2)}`;
 				} else {
@@ -7710,24 +10036,23 @@ class CPU6 {
 			let rvc = dfetch();
 			let reg = (rvc >> 4);
 			let sel = (rvc & 15);
-			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 2:1] as string[];
+			const ncon = opcs.xd[name_conv] as string[];
 			if(sel < ncon.length) {
-				if(name_conv == NAMECON.MEI) opname += '.'+ncon[sel];
-				else opname = ncon[sel];
+				opname += ncon[sel];
 			} else {
 				opname += hex(sel, 1);
 			}
 			switch(sel) {
-			case 0: pstr = regname[16 + reg]; break;
-			case 1: psstr = regname[16 + reg]; break;
-			case 2: pstr = regname[16 + reg]; break;
-			case 3: psstr = regname[16 + reg]; break;
-			case 4: psstr = `#${hexlist(reg,1)}`; break;
-			case 5: psstr = regname[reg|1]; break;
+			case 0: pstr = regconv[1][reg]; break;
+			case 1: psstr = regconv[1][reg]; break;
+			case 2: pstr = regconv[1][reg]; break;
+			case 3: psstr = regconv[1][reg]; break;
+			case 4: psstr = litpfx.ir + hexlist(reg,1); break;
+			case 5: psstr = regconv[0][reg|1]; break;
 			case 6: break;
 			case 7: break;
-			case 8: psstr = regname[reg|1]; break;
-			case 9: pstr = regname[reg|1]; break;
+			case 8: psstr = regconv[0][reg|1]; break;
+			case 9: pstr = regconv[0][reg|1]; break;
 			}
 			break; }
 		case OPL_EXT.BIG: {
@@ -7738,24 +10063,23 @@ class CPU6 {
 			const mod1 = (rvc >> 2) & 3;
 			const mod2 = rvc & 3;
 			const sel = (rvc >> 4);
-			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 0 : 1] as string[];
+			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 1 : 0] as string[];
 			if(sel < ncon.length) {
-				if(name_conv == NAMECON.MEI) opname += '.'+ncon[sel];
-				else opname = ncon[sel];
+				opname += ncon[sel];
 			} else {
-				opname += '.'+hex(sel, 1);
-				pstr='#<invalid>';
+				opname += hex(sel, 1);
+				pstr='<invalid-bigop>';
 				break;
 			}
 			try {
-				pstr = `${hexlist(oss,1)}/${decode_exmode(mod1, false)}`;
-				if(mod2 == 3) {
-					pstr = '#<invalid>';
+				pstr = `${oss}/${decode_exmode(mod1, false, oss)}`;
+				if(mod2 == 3 && sel < 8) {
+					psstr = `${osd}/<invalid-dest>`;
 				} else {
-					psstr = `${hexlist(osd,1)}/${decode_exmode(mod2, true)}`;
+					psstr = `${osd}/${decode_exmode(mod2, true)}`;
 				}
 			} catch(e) {
-				pstr = '#<invalid>';
+				pstr = '<invalid-reg>';
 			}
 			break;
 		}
@@ -7766,11 +10090,10 @@ class CPU6 {
 			const sel = (rvc >> 4);
 			const ncon = opcs.xd[name_conv == NAMECON.MEI ? 2:1];
 			if(sel < ncon.length) {
-				if(name_conv == NAMECON.MEI) opname += '.'+ncon[sel];
-				else opname = ncon[sel];
+				opname += ncon[sel];
 			} else {
 				opname += hex(sel, 1);
-				pstr = '#<invalid>';
+				pstr = '<invalid-memop>';
 				break;
 			}
 			const nci = opcs.xd[0][sel];
@@ -7784,6 +10107,7 @@ class CPU6 {
 			// TODO 7: len=AL
 			// TODO 8: len=AL
 			// TODO 9: len=AL
+			let lvlen = -1;
 			if(opcs.sr !== undefined) {
 				if(name_conv == NAMECON.MEI) {
 					if((nci & 2) != 0) {
@@ -7793,32 +10117,49 @@ class CPU6 {
 						pstr += 't=AH, ';
 					}
 				}
+				if((mod1 == 3) && ((nci & 4) != 0) && lvlen == -1) {
+					pstr += '!<unknown length>';
+				}
 			} else {
 				if((nci & 2) != 0) {
-					const lvl = dfetch();
-					pstr = `${name_conv == NAMECON.MEI?'l=':''}#${hexlist(lvl)}, `;
+					lvlen = dfetch()+1;
+					if(name_conv == NAMECON.MEI) {
+						pstr = `${name_conv == NAMECON.MEI?'l=#':litpfx.ir}${lvlen}, `;
+					} else if(is_cent) {
+						pstr = `(${lvlen}`;
+					} else {
+						pstr = `'l=#'${lvlen}, `;
+					}
 				}
 				if((nci & 1) != 0) {
 					const lvt = dfetch();
-					pstr += `${name_conv == NAMECON.MEI?'t=':''}#${hexlist(lvt)}, `;
+					if(name_conv == NAMECON.MEI) {
+						pstr += `${'t=#'}${hexlist(lvt)}, `;
+					} else {
+						pstr += `,${hexlist(lvt)}`;
+					}
 				}
+				if(is_cent) pstr += ')';
 			}
 			try {
-				if(mod2 == 3 || (mod1 == 3 && (nci & 4) == 0)) {
-					pstr = '#<invalid>';
+				if((mod2 == 3) || ((mod1 == 3) && ((nci & 4) == 0))) {
+					pstr = '#<invalid-dest>';
 				} else {
-					pstr += decode_exmode(mod1, false);
+					if(sel == 9) lvlen = 1;
+					pstr += decode_exmode(mod1, false, lvlen!=-1?lvlen:1);
 					psstr = decode_exmode(mod2, true);
 				}
 			} catch(e) {
-				pstr = '#<invalid>';
+				pstr = '#<invalid-reg>';
 			}
 			break;
 		}
 		case OPL_EXT.RII: {
 			const rvc = dfetch();
-			if(opcs.ms == OPM.IMPL) pstr = `r#${hexlist(rvc)}`;
-			else psstr = `r#${hexlist(rvc)}`;
+			if(opcs.i == 1)
+				pstr = litpfx.ir + hexlist(rvc);
+			else
+				psstr = litpfx.ir + hexlist(rvc);
 			break;
 		}
 		case OPL_EXT.XIO: {
@@ -7835,24 +10176,22 @@ class CPU6 {
 			// 1,0: LIOB JL = [EA] // always reads I/O area
 			// 0,1: SIO  EA = [JW] // always writes I/O area
 			// 1,1: SIOB EA = [JL] // always writes I/O area
-			pstr = `${DREF_L}${regname[16+regl]}${hexlistp(rvd)}${DREF_R}`;
+			pstr = `${DREF_L}${regconv[1][regl]}${hexlistp(rvd)}${DREF_R}`;
 			if((rvc & 1) != 0) {
-				opname = name_conv == NAMECON.MEI ? 'ST.IO':'SIO';
+				opname = name_conv == NAMECON.MEI ? 'S.IO':'SIO';
 				psstr = pstr;
-				pstr = regname[regh + ((rvc & 16) != 0 ? 0:16)];
+				pstr = regconv[(rvc & 16) != 0 ? 0:1][regh];
 			} else {
-				if(name_conv == NAMECON.MEI) opname = 'LD.IO';
-				psstr = regname[regh + ((rvc & 16) != 0 ? 0:16)];
+				if(name_conv == NAMECON.MEI) opname = 'L.IO';
+				psstr = regconv[(rvc & 16) != 0 ? 0:1][regh];
 			}
 			break;
 		}
 		default: opname += '.<unhandled>';
 		}
-		if (name_conv == NAMECON.MEI && opcs.nm !== undefined) {
-			opname = opcs.nm;
-		}
 		if (pstr.length > 0 && psstr.length > 0) {
-			pstr += ', ';
+			if(is_cent) pstr += ',';
+			else pstr += ', ';
 		}
 		for(let i = 0; i < datah.length; i++) {
 			//@ts-ignore
@@ -7861,7 +10200,9 @@ class CPU6 {
 
 		ret.hb = datah.join(datah.length > 5?'':' ');
 		ret.asc = datah.length > 5?'':astr;
-		ret.ins = opname;
+		if(is_cent) {
+			ret.ins = opname + opsfx;
+		} else { ret.ins = opname; }
 		ret.par = ` ${pstr}${psstr}`;
 		ret.is_brk = is_brk;
 		ret.l = vpc - address;
@@ -7890,6 +10231,16 @@ const mmio_mux = new MMIOMux();
 const mem0 = new SysMem();
 const mem1 = new SysMem();
 const bpl_rom_fc = new ROM512();
+const mmio_0 = new MMIOMulti();
+const mmio_1 = new MMIOMulti();
+const mmio_7 = new MMIOMulti();
+const mmio_8 = new MMIOMulti();
+const prt_0 = new MockPrinter();
+const dsk2_0 = new DSK2();
+const mmio_t = new MMIOTrace();
+const test_tape = new MockTape9Tk();
+const main_ffc = new FinchFloppyControl();
+const test_cmd = new TestCMD();
 loadbin(bpl_rom_fc, bpl_rom, {invert:true, remap:[0,1,2,3,4,8,5,6,7]});
 cx_crt0.mux = mmio_mux.muxports[0];
 mmio_mux.muxports[0].line = cx_crt0;
@@ -7901,29 +10252,20 @@ if(cx_crt2) {
 	cx_crt2.mux = mmio_mux.muxports[2];
 	mmio_mux.muxports[2].line = cx_crt2;
 }
-const dsk2_0 = new DSK2();
+mmio_mux.muxports[3].line = prt_0;
 run_hw.push(dsk2_0);
 bpl.configio(0, mmio_mux);
 bpl.configio(1, dsk2_0);
-const mmio_0 = new MMIOMulti();
-const mmio_1 = new MMIOMulti();
-const mmio_7 = new MMIOMulti();
-const mmio_8 = new MMIOMulti();
+mmio_0.adddev(0xe0, 0x10, prt_0);
 mmio_1.adddev(0, 0x20, cx_diag0);
 mmio_1.adddev(0x40, 0x10, dsk2_0);
-const mmio_t = new MMIOTrace();
-const test_tape = new MockTape9Tk();
 mmio_7.adddev(0, 16, test_tape);
 mmio_7.adddev(0x10, 240, mmio_t);
-const main_ffc = new FinchFloppyControl();
 bpl.configio(2, main_ffc);
 mmio_8.adddev(0, 2, main_ffc);
 run_hshw.push(main_ffc);
-const test_cmd = new TestCMD();
 run_hshw.push(test_cmd);
 mmio_8.adddev(0x08, 2, test_cmd);
-const prt_0 = new MockPrinter();
-mmio_0.adddev(0xe0, 0x10, prt_0);
 mcsim.dma_register(dsk2_0);
 mcsim.dma_register(main_ffc);
 mcsim.dma_register(test_cmd);
@@ -8434,7 +10776,7 @@ function config_save() {
 }
 
 //@ts-ignore
-this.window.rtd = rtd;
+window.rtd = rtd;
 //@ts-ignore
 window.brsave = brsave;
 //@ts-ignore
@@ -8520,7 +10862,10 @@ window.disk_images = disk_images;
 window.export_disk_image = export_disk;
 
 const cpu = new CPU6(bpl, mcsim.page_ram);
-
+const ucpu = new UMCPU6();
+const udiscpu = new CPU6(ucpu.mem, ucpu.page);
+//@ts-ignore
+window.umc = ucpu;
 loadhex(mem0, program_rotr, 0x100);
 //mem.loadbin(wipl_dump);
 
@@ -8588,6 +10933,296 @@ function handle_dbg_input(cmd:HTMLInputElement) {
 	}
 }
 handle_dbg_input(in_dbgcmd);
+function um_reset() {
+	ucpu.loadxrec(programx_xassm, 0x8000);
+	
+}
+const xassm_ignore_branches = new Set<number>();
+{
+	const v = xassm_ignore_branches;
+	const b = 0x8000;
+	[
+	0x153,0x8b5,0x8bc,
+	0xa7a, // BEGin
+	0x13c4, // end of reg table
+	0x1812,0x186b,0x1870,
+	0x2150,0x2156,0x215b,
+	0x235f,0x236a,0x236d,//RTrim
+	].forEach((n)=>v.add(b+n));
+}
+
+function um_xassm() {
+	// listing string: 0x21BD (+0x1FBD)
+	// source string: 0x514 (+0x0314)
+	// Eval stack: 0x2343 (+0x2143)
+	const b = 0x8000;
+	let mem_hi = ucpu.fetchw(b+0x06E9);
+	let mem_endh = ucpu.fetchw(b+0x06EB);
+	let mem_sttb = ucpu.fetchw(b+0x06ED);
+	let mem_exlen = ucpu.fetchw(b+0x06EF);
+	let ops = ucpu.fetch(b+0x089D); // B: L_operandsize: 0x0A9D
+	let f9a = ucpu.fetch(b+0x089a); // B: 0a9a
+	let f9b = ucpu.fetchw(b+0x089b); // W: 0a9b
+	let loc = ucpu.fetchw(b+0x089E); // W: location counter: 0x0A9E
+	let opf = ucpu.fetch(b+0x08A0); // B: operand flag?: 0x0AA0
+	let lptr1 = ucpu.fetchw(b+0x08A1); // W: Line ptr ?: 0x0AA1
+	let lptr2 = ucpu.fetchw(b+0x08A3); // W: Line end?: 0x0AA3
+	let lptr3 = ucpu.fetchw(b+0x08A5); // W: Line ptr ?: 0x0AA5
+	let lptr4 = ucpu.fetchw(b+0x08A9); // W: Line skip spc ptr: 0x0AA9
+	let lptr5 = ucpu.fetchw(b+0x08AB); // W: Line ptr ?: 0x0AAB
+	let lptr6 = ucpu.fetchw(b+0x08AD); // W: Line ptr ?: 0x0AAD
+	let lptr7 = ucpu.fetchw(b+0x08AF); // W: F_LineEndPtr: 0x0AAF
+	let lerr = ucpu.fetch(b+0x185F); // B: Line Error flag: 0x1A5F
+	let err_count = ucpu.fetchw(b+0x026D); // W: Error count: 0x046D
+	let lst_str = ucpu.fetch_str(b+0x1FBD);
+	let src_str = ucpu.fetch_str(b+0x314);
+	let head_str = ucpu.fetch_str(b+0x282);
+	let evl_str = '';
+	for(let r = 0; r < 16; r++) {
+		evl_str += hex(ucpu.fetch(b+0x2143-r));
+	}
+	return `SML:${hex(mem_hi,4)} TS:${hex(mem_sttb,4)} TE:${hex(mem_endh,4)} XL:${mem_exlen}\n`+
+	`OS:${ops} 9A:${f9a} 9B:${hex(f9b,4)} LOC:${hex(loc,4)} OF:${opf} LE:${lerr} EC:${err_count}\n`+
+	`LP: ${hex(lptr1,4)} ${hex(lptr2,4)} ${hex(lptr3,4)} ${hex(lptr4,4)} ${hex(lptr5,4)} ${hex(lptr6,4)} ${hex(lptr7,4)}`+
+	`\nHD:${head_str}\nLST:"${lst_str}"\nSRC:"${src_str}"\nEVAL:${evl_str}`;
+}
+function um_show_soi(st:number) {
+	const ret: DisAsmResult = {
+		asc: '', hb: '', ic: null, ins: '',
+		is_brk: false, l: 0,pa: 0, pg: 0,
+		par: '', post: '', pre: ''
+	};
+	udiscpu.disassembly(st, ret);
+	return `${hex(st,4)}: ${
+	ret.pre} ${ret.hb} ${ret.ins}${ret.par} ${ret.post}`;
+}
+interface BRTrace {
+	oaddr: number;
+	opr: string;
+	opp: string[];
+	tcount: number;
+	taddr: number;
+	fcount: number;
+}
+let brtrace = new Map<number, BRTrace>();
+function um_run(ncount = 1) {
+	let soi = ucpu.pc;
+	let pass_flag = 0;
+	const b = 0x8000;
+	for(let k = 0; k < ncount; k++) {
+		try {
+			if(ucpu.pc == b+0x8b1) {
+				if(k > 0 && ucpu.src_pointer < ucpu.src_buffer.length) break;
+				if(pass_flag == 0) {
+					console.log('clrtrace');
+					brtrace.clear();
+				}
+				pass_flag++;
+			}
+			soi = ucpu.pc;
+			let op_byte = ucpu.fetch(soi);
+			ucpu.step();
+			if(um_enable_sync) {
+				if(op_byte != 0x66) {
+					let r = 0;
+					while(mcsim.at_boundry && r < 10000) {
+						mcsim.step(false);
+						r++;
+					}
+					while(!mcsim.at_boundry && r < 10000) {
+						mcsim.step(false);
+						r++;
+					}
+				} else {
+					mcsim.set_pc(ucpu._pc);
+				}
+			}
+			if(soi == b+0x185b) {
+				break; // Line Error!
+			}
+			if(um_enable_sync) {
+				if(mcsim.pc != ucpu.pc) {
+					console.log('!v fail: PC','h',hex(mcsim.pc,4),'u',hex(ucpu.pc,4), um_show_soi(soi));
+					break;
+				}
+				if(mcsim.cc != ucpu.cc) {
+					console.log('!v fail: CC','h',ccr_str(mcsim.cc),'u',ccr_str(ucpu.cc), um_show_soi(soi));
+				}
+				if(mcsim.reg.a != ucpu.levelreg.a) {
+					console.log('!v fail: A','h',hex(mcsim.reg.a,4),'u',hex(ucpu.levelreg.a,4), um_show_soi(soi));
+					break;
+				}
+				if(mcsim.reg.b != ucpu.levelreg.b) {
+					console.log('!v fail: B','h',hex(mcsim.reg.b,4),'u',hex(ucpu.levelreg.b,4), um_show_soi(soi));
+					break;
+				}
+				if(mcsim.reg.x != ucpu.levelreg.x) {
+					console.log('!v fail: X','h',hex(mcsim.reg.x,4),'u',hex(ucpu.levelreg.x,4), um_show_soi(soi));
+					break;
+				}
+				if(mcsim.reg.y != ucpu.levelreg.y) {
+					console.log('!v fail: Y','h',hex(mcsim.reg.y,4),'u',hex(ucpu.levelreg.y,4), um_show_soi(soi));
+					break;
+				}
+				if(mcsim.reg.z != ucpu.levelreg.z) {
+					console.log('!v fail: Z','h',hex(mcsim.reg.z,4),'u',hex(ucpu.levelreg.z,4), um_show_soi(soi));
+					break;
+				}
+				if(mcsim.reg.s != ucpu.levelreg.s) {
+					console.log('!v fail: S','h',hex(mcsim.reg.s,4),'u',hex(ucpu.levelreg.s,4), um_show_soi(soi));
+					break;
+				}
+			}
+			if(ucpu.trace.count > 0) {
+				let memfail = false;
+				if(um_enable_sync) {
+					for(let i = 0; i < ucpu.trace.count; i++) {
+						let tr = ucpu.trace.list[i];
+						if(tr.op == 'ST' && tr.wh) {
+							let c = ucpu.fetch(tr.wh);
+							let v = bpl.readmeta(tr.wh) & 255;
+							if(v != c) {
+								console.log('!v fail: MEM', `${hex(tr.wh,4)}: h ${hex(v)} != u ${hex(c)}`, um_show_soi(soi));
+								memfail = true;
+							}
+						}
+					}
+				}
+				if(memfail) break;
+				if(xassm_ignore_branches.has(soi)) {
+					continue;
+				}
+				let ti = brtrace.get(soi);
+				let tr = ucpu.trace.list[0];
+				if(ti == undefined) {
+					ti = {
+						oaddr: soi,
+						tcount: 0, fcount: 0,
+						taddr: tr.wh as number,
+						opr: tr.op, opp: [],
+					};
+					brtrace.set(soi, ti);
+				} else {
+					ti.opr = tr.op;
+				}
+				if(tr.tk !== undefined) {
+					if(tr.param !== undefined) {
+						if(!ti.opp.includes(tr.param)) {
+							ti.opp.push(tr.param);
+						}
+					}
+					if(tr.tk) ti.tcount++; else ti.fcount++;
+					//ti = `${hex(soi,4)} ${tr.op} ${tr.tk?'T':'F'} ${hex(tr.wh as number)}; `;
+					
+				} else if(tr.wh) {
+					if(tr.wh == b+0x185F) {
+						//ti = `${hex(soi,4)} ${tr.op} > ${hex(tr.wh)}; `;
+					}
+				}
+			}
+			softlog('ucpu: step: '+um_show_soi(soi));
+		} catch(e) {
+			ucpu.pc = soi;
+			if(e === 0) { // priv
+				console.error('ucpu: priv:',um_show_soi(soi));
+			} else if(e === 1) { // ill
+				console.error('ucpu: ill:',um_show_soi(soi));
+			} else if(typeof e == 'object' && e != null) { // NYI
+				softlog(`ucpu: NYI: ${e} ${um_show_soi(soi)}`);
+				console.error('ucpu: NYI:',e,um_show_soi(soi));
+			}
+			break;
+		}
+	}
+	if(um_enable_sync) mcsim.showstate(true);
+	let strace = '';
+	let slc = 0;
+	brtrace.forEach((v,k)=>{
+		strace += `${hex(v.oaddr,4)} ${v.opr} ${v.opp.join(' ')} ${hex(v.taddr,4)}`;
+		if(v.tcount > 0) strace += ` T${v.tcount}`;
+		if(v.fcount > 0) strace += ` F${v.fcount}`;
+		strace += '; ';
+		if(++slc > 7) {
+			//strace += '\n';
+			slc = 0;
+		}
+	});
+	/*`cpu: ${ucpu.showreg()
+	}\nstep: ${um_show_soi(soi)
+	}\nnext: ${um_show_soi(ucpu.pc)}\nBR:${strace}\n` + um_xassm();
+	*/
+}
+vc_sync.addEventListener('click', function(ev) {
+	um_enable_sync = !um_enable_sync;
+	style_if(this, 'active', um_enable_sync);
+})
+vc_reset.addEventListener('click', function(ev) {
+	um_reset();
+	brtrace.clear();
+	let r = 0;
+	ucpu.src_buffer = []; //vc_input.value.split('\n');
+	if(um_enable_sync) {
+		while(!mcsim.at_boundry && r < 10000) {
+			mcsim.step(false);
+			r++;
+		}
+		if(mcsim.at_boundry) {
+			mcsim.set_pc(ucpu._pc);
+		}
+		mcsim.showstate(true);
+		if (dis_after) show_disasm();
+		if (memv_after) update_memview();
+	}
+});
+vc_step.addEventListener('click', function(ev) {
+	um_run();
+	if(um_enable_sync) {
+		if (dis_after) show_disasm();
+		if (memv_after) update_memview();
+	}
+});
+vc_snap.addEventListener('click', function(ev) {
+	ucpu.snap();
+	brtrace.clear();
+});
+vc_restore.addEventListener('click', function(ev) {
+	ucpu.restore();
+	brtrace.clear();
+	//vc_log.value = `cpu: ${ucpu.showreg()}\n<restore>\nnext: ${um_show_soi(ucpu.pc)}`;
+	if(um_enable_sync) {
+		if (dis_after) show_disasm();
+		if (memv_after) update_memview();
+	}
+});
+vc_run.addEventListener('click', function(ev) {
+	um_run(50);
+	if(um_enable_sync) {
+		if (dis_after) show_disasm();
+		if (memv_after) update_memview();
+	}
+});
+vc_rerun.addEventListener('click', function(ev) {
+	ucpu.restore();
+	brtrace.clear();
+	um_run(2000);
+	if(um_enable_sync) {
+		if (dis_after) show_disasm();
+		if (memv_after) update_memview();
+	}
+});
+// vc_input.addEventListener('input', function(ev) {
+// 	ucpu.src_buffer = vc_input.value.split('\n');
+// 	ucpu.restore();
+// 	brtrace.clear();
+// 	um_run(1500);
+// 	if(um_enable_sync) {
+// 		if (dis_after) show_disasm();
+// 		if (memv_after) update_memview();
+// 	}
+// });
+vc_clear.addEventListener('click', function(ev) {
+	editors.out_m?.setValue('');
+});
 in_dbgcmd.addEventListener('input', function(ev) {
 	handle_dbg_input(this);
 });
@@ -8677,7 +11312,6 @@ btn_dt4.addEventListener('click', function(ev) { cx_dip ^= 4; update_diagsw(); }
 btn_dt8.addEventListener('click', function(ev) { cx_dip ^= 8; update_diagsw(); });
 btn_dtrun.addEventListener('click', function(ev) { cx_diag0.dip = cx_dip; update_diagsw(); config_updated(); });
 local_button.addEventListener('click', remote_check);
-reset_button.addEventListener('click', function(ev) { mcsim.reset(); });
 fp_rf.addEventListener('click', function(ev) { sense_switch ^= 8; update_sense(); config_updated(); });
 fp_load.addEventListener('click', function(ev) {
 	if((sense_switch|2)!=sense_switch) {
@@ -8692,6 +11326,10 @@ fp_select.addEventListener('click', function(ev) {
 		update_sense();
 	}
 	mcsim.reset();
+});
+assm_button.addEventListener('click', function(ev) {
+	frame_manager.toggle_show_raise(frame_assm);
+	if(!editor_loaded) load_editor();
 });
 micro_button.addEventListener('click', function(ev) {
 	frame_manager.toggle_show_raise(frame_mclist);
@@ -8762,10 +11400,10 @@ btn_settings.addEventListener('click', function(ev) {
 	}
 });
 
-btn_cm_import.addEventListener('click', function(ev) {
-	annotation_import(txt_anno.value);
-	show_disasm();
-});
+// btn_cm_import.addEventListener('click', function(ev) {
+// 	annotation_import(txt_anno.value);
+// 	show_disasm();
+// });
 btn_cm_tocrt.addEventListener('click', function(ev) {
 	console_text_import(txt_anno.value);
 });
@@ -9073,6 +11711,55 @@ document.body.addEventListener('drop', async function(ev) {
 	}
 });
 
-show_disasm();
+let editor_loaded = false;
 
-});
+function load_editor() {
+	editor_loaded = true;
+
+	monaco.languages.register({
+		id: 'centasm',
+	});
+	monaco.languages.register({
+		id: 'cjcl',
+	});
+	monaco.languages.register({
+		id: 'cpl',
+	});
+	// @ts-ignore
+	monaco.languages.setMonarchTokensProvider('centasm', {
+		ignoreCase: true,
+		defaultToken: 'invalid',
+		tokenizer: {
+			root: [
+				[/TIT[\w@]*/, "function"]
+			]
+		}
+	})
+	editors.editor1 = monaco.editor.create(con_assm_edit, {
+		value: ` TITLE 'Program'\n BEGIN 0\nFOREVER JMP FOREVER\n END FOREVER\n`,
+		language: 'centasm',
+		cursorBlinking: 'phase',
+		cursorStyle: 'underline',
+		rulers: [
+			{column:80, color: '#886666'}
+		],
+		roundedSelection: false,
+		selectOnLineNumbers: true,
+	});
+	let m = editors.editor1.getModel();
+	if(m) editors.edit1 = m;
+	editors.output1 = monaco.editor.create(con_assm_out, {
+		value: 'TEST',
+		minimap: {enabled:false},
+		readOnly: true,
+		cursorBlinking: 'phase',
+		cursorStyle: 'underline',
+		roundedSelection: false,
+		selectOnLineNumbers: true,
+	});
+	m = editors.output1.getModel();
+	if(m) editors.out_m = m;
+}
+
+show_disasm();
+export const __meisaka = undefined;

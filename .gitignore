@@ -4,5 +4,6 @@ node_modules
 .idea
 *.iml
 *~
+vs
 package-lock.json
 

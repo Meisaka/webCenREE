@@ -6,7 +6,14 @@
 		"alwaysStrict": true,
 		"strict": true,
 		"newLine": "lf",
-		"sourceMap": true
+		"sourceMap": true,
+		"module": "AMD",
+		"moduleResolution": "node",
+		"checkJs": false,
+		"paths": {
+			"vs/*": ["./node_modules/monaco-editor/min/vs/*"],
+			"monaco-editor": ["./node_modules/monaco-editor/min/vs/editor/editor.main"]
+		}
 	},
 	"exclude": ["js"],
 	"include": ["src"]
