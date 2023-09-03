@@ -2,7 +2,7 @@
 import * as monaco from 'monaco-editor';
 
 //@ts-ignore
-window.cen_ts_version = 17;
+window.cen_ts_version = 18;
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
 const view_page = document.getElementById('view_page') as HTMLInputElement;
@@ -2757,6 +2757,8 @@ interface DMAControl {
 
 interface DMADevice {
 	dma_request:boolean;
+	dma_mask:number;
+	dma_select(enable:boolean, dev:number):void;
 	dma_step(ctrl:DMAControl):void;
 }
 let sense_switch = 0;
@@ -3177,8 +3179,9 @@ class MCCPU {
 	reset = reset;
 	dma_register = dma_register;
 	dma_request = dma_request;
-	dma_int(en:boolean) {
-		dma_12 = en ? 1 : 0;
+	dma_int(dev:DMADevice, en:boolean) {
+		const n = dev.dma_mask ^ 0xffffffff;
+		dma_12 = (dma_12 & n) | (en ? dev.dma_mask : 0);
 	}
 	dma_end = false;
 	get physaddr() { return physaddr; }
@@ -3187,6 +3190,13 @@ class MCCPU {
 	memfault = 0
 }
 const mco = new MCCPU();
+
+function dma_selection(enable:boolean, dev:number):void {
+	for(let i = 0; i < dma_sources.length; i++) {
+		const device = dma_sources[i];
+		device.dma_select(enable, dev);
+	}
+}
 
 function reset() {
 	s0.reset();
@@ -3205,6 +3215,7 @@ function reset() {
 	dma_12 = 0;
 	cycles = 0;
 	bpl.reset();
+	dma_selection(false, 0);
 	dma_request();
 }
 
@@ -3467,6 +3478,7 @@ function mempt_set() {
 }
 
 function dma_register(device:DMADevice):void {
+	device.dma_mask = 1 << dma_sources.length;
 	dma_sources.push(device);
 }
 
@@ -3750,9 +3762,11 @@ function hsstep() {
 			reqlevel = 0;
 		}
 		sysctl = (sysctl & mci.busctlmask) | mci.busctlset;
+		if(mci.busctla < 2) dma_selection((busctl & 128)!=0, sysctl & 3);
 		break;
 	case 3: // BusCtl
 		busctl = (busctl & mci.busctlmask) | mci.busctlset;
+		if(mci.busctla == 7) dma_selection((busctl & 128)!=0, sysctl & 3);
 		mco.parity = (busctl >> 5) & 1;
 		break;
 	case 4: // REG_WR
@@ -4228,6 +4242,7 @@ function step(debug_output:boolean = false) {
 			reqlevel = 0;
 		}
 		sysctl = (sysctl & mci.busctlmask) | mci.busctlset;
+		if(mci.busctla < 2) dma_selection((busctl & 128)!=0, sysctl & 3);
 		break;
 	case 3: // BusCtl
 		if ((mci.busctlset == 0x20) && ((busctl & 0x20) == 0)) {
@@ -4239,6 +4254,7 @@ function step(debug_output:boolean = false) {
 			mco.parity = 0;
 		}
 		busctl = (busctl & mci.busctlmask) | mci.busctlset;
+		if(mci.busctla == 7) dma_selection((busctl & 128)!=0, sysctl & 3);
 		break;
 	case 4: // REG_WR
 		regfile[rindex] = result;
@@ -5417,6 +5433,7 @@ class DSK2Unit implements DiskContainer {
 	sel_address = 0;
 	image:DiskImage|null = null;
 }
+const DSK2Commands = ['Read  ','Write ','Seek  ','SeekTZ','Verify','Format','FPre  '];
 class DSK2 implements MemAccess, IOAccess, DMADevice {
 	readmeta(address: number):number { return MEMSTAT.IO; }
 	writemeta(address: number, value: number): void {}
@@ -5425,10 +5442,17 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	units = [new DSK2Unit(), new DSK2Unit()];
 	busy = false;
 	busy_time = 0;
+	busy_timeout = 0;
+	addr_err = false;
+	format_err = false;
+	time_err = false;
 	wpmask = 0;
 	seeking = false;
 	seek_done = false;
 	sect_remain = 0;
+	sect_crc = 0;
+	sect_info_crc = -1;
+	sect_base = 0;
 	stat_start_sector = 0;
 	stat_transfer_count = 0;
 	stat_log_transfers = false;
@@ -5437,7 +5461,9 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	interrupt_en = false;
 	interrupt_pend = false;
 	dma_request = false;
+	dma_mask = 0;
 	dma_op = 0;
+	dma_selected = false;
 	verify_fail = false;
 	is_interrupt(): boolean {
 		return false;
@@ -5454,12 +5480,26 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		this.seeking = false;
 		this.seek_done = false;
 		this.busy = false;
+		this.addr_err = false;
 		this.busy_time = 0;
 		this.wpmask = 0;
 		this.sel_unit = 0;
 		this.interrupt_en = false;
 		this.interrupt_pend = false;
-		mcsim.dma_int(false);
+		mcsim.dma_int(this, false);
+	}
+	clear_errors():void {
+		this.addr_err = false;
+		this.format_err = false;
+		this.verify_fail = false;
+		this.time_err = false;
+	}
+	dma_select(enable: boolean, dev: number):void {
+		const was_selected = this.dma_selected;
+		this.dma_selected = enable && (dev == 0);
+		if(was_selected != this.dma_selected) {
+			mcsim.dma_int(this, this.interrupt_pend && this.interrupt_en);
+		}
 	}
 	tickbusy() {
 		this.busy_time--;
@@ -5471,8 +5511,17 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			case 1:
 			case 4:
 			case 5:
-				if(this.stat_log_transfers)
-					console.log(`DSK C:${this.command} S:${hex(this.stat_start_sector, 4)} DMA:`, this.stat_transfer_count);
+				if(this.stat_log_transfers) {
+					console.log(
+						`DSK ${DSK2Commands[this.command]
+						} S:${hex(this.stat_start_sector, 4)
+						}/${hex(this.sel_address, 4)} DMA:`,
+						this.stat_transfer_count,
+						this.interrupt_pend ? 'Int':'-',
+						this.format_err ? '!Fmt':'-',
+						this.addr_err ? '!Addr':'-',
+						this.verify_fail ? '!Data':'-');
+				}
 				this.stat_transfer_count = 0;
 				break;
 			case 6:
@@ -5493,18 +5542,29 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 					console.log('unknown command');
 				}
 			}
-			if (this.interrupt_pend && this.interrupt_en) mcsim.dma_int(true);
+			mcsim.dma_int(this, this.dma_selected && this.interrupt_pend && this.interrupt_en);
 			this.command = -1;
 		}
 	}
 	run(increment:number):void {
+		if (this.busy) {
+			this.busy_timeout += increment;
+			if (this.command < 2 || this.command == 4 || this.command == 5) {
+				const unit = this.units[this.sel_unit & 7];
+				if(unit != null && unit.image != null) this.busy_timeout = 0;
+			}
+			if (this.busy_timeout > 300000) {
+				this.busy = false;
+				this.time_err = true;
+			}
+		}
 		if (this.busy_time > 0) {
 			this.tickbusy();
 		}
 	}
 	readbyte(address:number):number {
 		let v = 0;
-		let unit = this.units[this.sel_unit & 7];
+		const unit = this.units[this.sel_unit & 7];
 		switch(address) {
 		case 0:
 			v = this.sel_unit | 0xf0;
@@ -5518,8 +5578,11 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		case 3: // wpmask?
 			v = this.wpmask;
 			break;
-		case 4: // stat hi / 0 tmo adrerr fmterr | 0 seekerr fault busy
-			v = this.busy ? 1 : 0;
+		case 4: // stat hi
+			// tmoerr crcdaterr adrerr fmterr | 0 seekerr fault busy
+			v = (this.time_err ? 0x80:0) | (this.verify_fail ? 0x40:0) |
+			(this.addr_err ? 0x20:0) | (this.format_err ? 0x10:0) |
+			(this.busy ? 1 : 0);
 			break;
 		case 5: // stat lo / wtpr wten oncyl ready | seekcom3..0
 			if (unit) {
@@ -5529,14 +5592,17 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				(unit.image != null ? 0x10 : 0) /* ready */ |
 				(this.seek_done ? 0x01 : 0);
 			} else {
-				v = 0;
+				v = (this.seek_done ? 0x01 : 0);
 			}
 			break;
-		case 8: // busy?
-			v = this.busy ? 1 : 0;
+		case 8: // get input shift register
+			break;
+		case 9: // get output shift register
+			break;
+		case 10: // get state (gates | FSM next)
 			break;
 		default:
-			console.log('DSK2:R:', hex(address, 1), hex(v));
+			return 255;
 		}
 		return v;
 	}
@@ -5550,25 +5616,76 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		} else {
 			if (this.sect_remain <= 0) {
 				this.sect_remain = 400;
-				unit.sel_address = (unit.sel_address + 1) & 0xffff;
+				let sela = (this.sel_address + 1) & 255;
+				this.sel_address = (this.sel_address & 0xff00) | sela;
 			}
-			const fileaddr = unit.sel_address * unitdata.stride;
-			if(this.dma_op == 0) {
-				// verify
-				let b = ctrl.read();
-				if(unitdata.data[fileaddr + 400 - this.sect_remain] != b) {}
-				this.verify_fail = true;
-			} else if(this.dma_op == 1) {
-				// read
-				let b = unitdata.data[fileaddr + 400 - this.sect_remain];
+			if (this.sect_remain == 400) {
+				if((this.sel_address & 0xffe0) != (unit.sel_address & 0xffe0)) {
+					this.addr_err = true;
+					ctrl.end();
+					this.busy_time = 200;
+					return;
+				}
+				const fileaddr = this.sel_address * unitdata.stride;
+				this.sect_base = fileaddr;
+				this.sect_crc = 0;
+				this.sect_info_crc = -1;
+				if(unitdata.stride > 400) {
+					let info = unitdata.data[fileaddr + 402];
+					// emulation feature
+					// meta info about the sector after it
+					if(info == 0x43) { // sector has a CRC
+						this.sect_info_crc =
+						(unitdata.data[fileaddr + 400] << 8) |
+						unitdata.data[fileaddr + 401]
+					} else if(info == 0x41) { // forced sector address error
+						this.addr_err = true;
+						ctrl.end();
+						this.busy_time = 20;
+						return;
+					} else if(info == 0x46) { // sector format error
+						this.format_err = true;
+						ctrl.end();
+						this.busy_time = 20;
+						return;
+					}
+				}
+			}
+			const secofs = this.sect_base + 400 - this.sect_remain;
+			const b = unitdata.data[secofs];
+			let d = 0;
+			if(this.dma_op != 1) d = ctrl.read();
+			switch(this.dma_op) {
+			case 0: // verify
+				this.sect_crc = this.sect_crc ^ (((this.sect_remain & 1)==0) ? b << 8 : b);
+				if(d != b) {
+					this.verify_fail = true;
+				}
+				break;
+			case 1: // read
+				this.sect_crc = this.sect_crc ^ (((this.sect_remain & 1)==0) ? b << 8 : b);
 				ctrl.write(b);
-			} else {
-				// write
-				let b = ctrl.read();
-				unitdata.data[fileaddr + 400 - this.sect_remain] = b;
+				break;
+			case 2: // write
+				this.sect_crc = this.sect_crc ^ (((this.sect_remain & 1)==0) ? d << 8 : d);
+				unitdata.data[secofs] = d;
+				break;
 			}
-			this.sect_remain--;
 			this.stat_transfer_count += 1;
+			this.sect_remain--;
+			if(this.sect_remain == 0) {
+				if(/*this.dma_op == 2 &&*/ unitdata.stride > 400) {
+					unitdata.data[this.sect_base + 400] = (this.sect_crc >> 8) & 255;
+					unitdata.data[this.sect_base + 401] = this.sect_crc & 255;
+					//unitdata.data[this.sect_base + 402] = 0x43;
+				} else if(this.sect_info_crc != -1) {
+					if (this.sect_info_crc != this.sect_crc) {
+						this.verify_fail = true;
+						ctrl.end();
+						this.busy_time = 20;
+					}
+				}
+			}
 		}
 	}
 	do_dma_read() {
@@ -5587,7 +5704,8 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		mcsim.dma_request();
 	}
 	writebyte(address:number, value:number):void {
-		const unit = this.units[this.sel_unit & 7];
+		const unitindex = this.sel_unit & 7;
+		const unit = this.units[unitindex];
 		switch(address) {
 		case 0:
 			this.sel_unit = value & 0xF;
@@ -5602,30 +5720,30 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			this.wpmask = value & 0xff;
 			break;
 		case 8: // cmd
+			this.clear_errors();
+			this.busy_timeout = 0;
+			if((value & 2) == 0) this.busy = true;
 			if (unit == null) break;
 			this.seek_done = false;
-			if((value & 2) == 0) this.busy = true;
 			this.command = value;
 			if(value != 5) {
 				this.format_permit = false;
 			}
-			switch (value) {
+			switch (value & 7) {
 			case 0:// 0=read
 				//console.log('DSK2:read:', hex(u.sel_address, 4));
 				this.busy_time = 0;
 				this.sect_remain = 400;
-				this.stat_start_sector = unit.sel_address;
+				this.stat_start_sector = this.sel_address;
 				this.do_dma_read();
 				break;
 			case 1: // 1=write
-				this.busy_time = 1;
+				this.busy_time = 0;
 				this.sect_remain = 400;
-				this.stat_start_sector = unit.sel_address;
-				if (((this.wpmask & (1 << (this.sel_unit & 7))) != 0) && (unit.image?.protect === false)) {
-					this.busy_time = 0;
-					//console.log('DSK2:do_write:', hex(u.sel_address, 4));
-					this.do_dma_write();
-				} else {
+				this.stat_start_sector = this.sel_address;
+				this.do_dma_write();
+				if (((this.wpmask & (1 << unitindex)) == 0) || (unit.image?.protect !== false)) {
+					this.dma_op = 3;
 					console.log('DSK2:wp_write:', hex(unit.sel_address, 4));
 				}
 				break;
@@ -5644,7 +5762,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 			case 4: // verify (typically issued after cmd 1)
 				this.busy_time = 0;
 				this.sect_remain = 400;
-				this.stat_start_sector = unit.sel_address;
+				this.stat_start_sector = this.sel_address;
 				//console.log('DSK2:do_verify:', hex(u.sel_address, 4));
 				this.do_dma_verify();
 				break;
@@ -5662,33 +5780,34 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 				this.format_permit = true;
 				break;
 			default:
-				console.log('DSK2:cmd:', hex(value), hex(unit.sel_address, 4));
-				this.busy_time = 10;
+				console.log('DSK2:cmd:', value & 7, hex(unit.sel_address, 4));
 				break;
 			}
 			break;
-		case 11:
+		case 9: // diag register
+			break;
+		case 10: // diag clocks
+			break;
+		case 11: // reset card with unit select
 			this.reset();
 			this.sel_unit = value & 0xF;
 			break;
-		case 12:
+		case 12: // force interrupt
 			this.interrupt_pend = true;
-			if (this.interrupt_en) {
-				mcsim.dma_int(true);
-				//console.log('DSK2:W:IFORCE');
-			}
+			mcsim.dma_int(this, this.dma_selected && this.interrupt_en);
+			//console.log('DSK2:W:IFORCE');
 			break;
-		case 13:
+		case 13: // disable interrupt gate
 			this.interrupt_en = false;
-			mcsim.dma_int(false);
+			mcsim.dma_int(this, false);
 			break;
-		case 14:
+		case 14: // enable interrupt gate
 			this.interrupt_en = true;
-			if(this.interrupt_pend) mcsim.dma_int(true);
+			mcsim.dma_int(this, this.dma_selected && this.interrupt_pend);
 			break;
-		case 15:
+		case 15: // clear interrupt
 			this.interrupt_pend = false;
-			mcsim.dma_int(false);
+			mcsim.dma_int(this, false);
 			break;
 		default:
 			console.log('DSK2:W:', hex(address, 1), hex(value));
@@ -5730,6 +5849,7 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 	is_interrupt(): boolean { return false; }
 	getlevel(): number { return 0; }
 	acknowledge(): boolean { return false; }
+	dma_select(enable: boolean, dev: number): void {}
 	sys_data: number = 0;
 	flag_cardtocpu: boolean = false; // bit 0
 	flag_cputocard: boolean = false; // bit 1
@@ -5740,6 +5860,7 @@ class FinchFloppyControl implements MemAccess, Run, IOAccess, DMADevice {
 	cardram = new Uint8Array(0x1000);
 	dma_read = false;
 	dma_request = false;
+	dma_mask = 0;
 	dma_active = false;
 	dma_cycle = false;
 	dcr1 = 0;
@@ -6385,6 +6506,7 @@ const enum CMDERR {
 class TestCMD implements MemAccess, Run, DMADevice {
 	readmeta(address: number):number { return MEMSTAT.IO; }
 	writemeta(address: number, value: number): void {}
+	dma_select(enable: boolean, dev: number): void {}
 	data_in = 0;
 	data_out = 0;
 	data_fout = false;
@@ -6393,6 +6515,7 @@ class TestCMD implements MemAccess, Run, DMADevice {
 	address = 0;
 	dma_len = 0;
 	dma_request: boolean = false;
+	dma_mask = 0;
 	dma_mode = 0;
 	busy = false;
 	cardram = new Uint8Array(0x1000);
@@ -11619,7 +11742,7 @@ class DiskImageUI {
 			image.protect = this.wp.checked;
 			this.sta.innerText = image.filename;
 			this.selrem.innerText = 'Rem';
-			this.newdl.innerText = 'DL';
+			this.newdl.innerText = 'Save';
 		} else {
 			delete this.image;
 			this.sta.innerText = '';
