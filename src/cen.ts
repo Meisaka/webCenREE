@@ -1,8 +1,9 @@
 "use strict";
-import * as monaco from 'monaco-editor';
+
+import type * as monaco from 'monaco-editor';
 
 //@ts-ignore
-window.cen_ts_version = 19;
+window.cen_ts_version = 20;
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
 const view_page = document.getElementById('view_page') as HTMLInputElement;
@@ -110,8 +111,6 @@ const btn_dtrun = document.getElementById('diagrun') as HTMLButtonElement;
 const fp_rf = document.getElementById('fp_r') as HTMLButtonElement;
 const fp_load = document.getElementById('fp_l') as HTMLButtonElement;
 const fp_select = document.getElementById('fp_s') as HTMLButtonElement;
-const fp_addr = document.getElementById('fp_addr') as HTMLSpanElement;
-const fp_level = document.getElementById('fp_level') as HTMLSpanElement;
 const fp_perf = document.getElementById('fp_perf') as HTMLSpanElement;
 const mcs_p = document.getElementById('mcs_p') as HTMLSpanElement;
 const mcs_s = document.getElementById('mcs_s') as HTMLSpanElement;
@@ -123,7 +122,7 @@ const mcr_bus = document.getElementById('mcr_bus') as HTMLSpanElement;
 const mcr_sys = document.getElementById('mcr_sys') as HTMLSpanElement;
 const mcr_addr = document.getElementById('mcr_addr') as HTMLSpanElement;
 const mcr_swap = document.getElementById('mcr_swap') as HTMLSpanElement;
-const btn_sound = document.getElementById('b_sound') as HTMLButtonElement;
+const check_sound = document.getElementById('ck_sound') as HTMLInputElement;
 const crtcol = document.getElementById('crtcol') as HTMLSelectElement;
 const crtcrev = document.getElementById('crtcrev') as HTMLInputElement;
 const nio = {
@@ -175,10 +174,6 @@ const mcr_file_v = new Uint16Array(128);
 			col.innerText = '0000';
 			row.appendChild(col);
 			mcr_file.push(col);
-			if(col_index == 7) {
-				const txt = document.createTextNode(' ');
-				row.appendChild(txt);
-			}
 		}
 		row_index += 2;
 	}
@@ -225,10 +220,32 @@ const btn_cm_clear = document.getElementById('cm_clear') as HTMLButtonElement;
 const txt_anno = document.getElementById('anno') as HTMLTextAreaElement;
 const cv_diag = document.getElementById('fp_diag') as HTMLCanvasElement;
 const cx_diag = cv_diag.getContext('2d') as CanvasRenderingContext2D;
+const com_conf = {
+	mux: [
+		document.getElementById('com_m0') as HTMLSelectElement,
+		document.getElementById('com_m1') as HTMLSelectElement,
+		document.getElementById('com_m2') as HTMLSelectElement,
+		document.getElementById('com_m3') as HTMLSelectElement,
+	],
+	crt: [
+		document.getElementById('com_c0') as HTMLSelectElement,
+		document.getElementById('com_c1') as HTMLSelectElement,
+		document.getElementById('com_c2') as HTMLSelectElement,
+	],
+	have_net: false,
+	net: [] as NetSerial[],
+	dev: [] as string[],
+	ext: [
+		{sel:document.getElementById('com_x0') as HTMLSelectElement, opts:[]},
+		{sel:document.getElementById('com_x1') as HTMLSelectElement, opts:[]},
+		{sel:document.getElementById('com_x2') as HTMLSelectElement, opts:[]},
+		{sel:document.getElementById('com_x3') as HTMLSelectElement, opts:[]},
+	] as {sel:HTMLSelectElement, opts:HTMLOptionElement[]}[]
+};
 
 const RUNRATES = [1,10,100,1000,10000,50000,100000,150000];
 interface ConfigSchema {
-	0:[number, boolean],
+	0:[number, boolean, boolean],
 	1:[boolean[],number,number],
 	2:[number],
 	3:[boolean[],number,number,number,number], // net
@@ -241,7 +258,7 @@ interface ConfigSchema {
 	20?: [boolean,boolean][],
 }
 const CONFIG_LL:BRObject & ConfigSchema = {
-	0: [0, false],
+	0: [0, false, false],
 	1: [[false,false,false,false],0,0],
 	2: [0],
 	3: [[false,false,false,false,false],0,0,0,0], // net
@@ -279,19 +296,26 @@ class ConfigClass {
 	diag = CONFIG_LL[5];// diag
 	crt = CONFIG_LL[16];// crt[]
 	ffc = CONFIG_LL[20];// ffc[]
+	get sound() { return CONFIG_LL[0][2]; }
+	set sound(v:boolean) {
+		if(v!=CONFIG_LL[0][2]) {CONFIG_LL[0][2]=v;this.updated();}
+	}
 	get vt_colors() { return vt_colors[CONFIG_LL[0][0]]; }
 	get vt_color_scheme() { return CONFIG_LL[0][0]; }
 	set vt_color_scheme(v:number) {
 		if(v != this.vt_color_scheme) {
 			CONFIG_LL[0][0] = v;
 			update_font_data(CONFIG.vt_colors);
-			vt_font_ctx.putImageData(vt_font_data, 0, 0);
 			this.updated();
 		}
 	}
 	get vt_reverse() { return CONFIG_LL[0][1]; }
 	set vt_reverse(v:boolean) {
-		if(v != this.vt_reverse) { CONFIG_LL[0][1] = v; this.updated(); }
+		if(v != this.vt_reverse) {
+			CONFIG_LL[0][1] = v;
+			vt_force_redraw = true;
+			this.updated();
+		}
 	}
 
 	static config_timeout = 0;
@@ -303,7 +327,7 @@ class ConfigClass {
 		if(ConfigClass.config_timeout != 0) {
 			clearTimeout(ConfigClass.config_timeout);
 		}
-		ConfigClass.config_timeout = setTimeout(ConfigClass.handle_timer, 10000);
+		ConfigClass.config_timeout = setTimeout(ConfigClass.handle_timer, 3000);
 	}
 }
 const CONFIG = new ConfigClass();
@@ -529,9 +553,6 @@ const win_load = (function() {
 	});
 	return o;
 })();
-const cv_term0 = document.getElementById('term0') as HTMLCanvasElement;
-const cv_term1 = document.getElementById('term1') as HTMLCanvasElement;
-const cv_term2 = document.getElementById('term2') as HTMLCanvasElement;
 const cv_map = document.getElementById('fp_flagsc') as HTMLCanvasElement;
 const cx_map = cv_map.getContext('2d') as CanvasRenderingContext2D;
 const cv_addr = document.getElementById('fp_addrc') as HTMLCanvasElement;
@@ -548,6 +569,7 @@ interface Run {
 let selsim:ICCPU;
 let selcdsp:ICCPU;
 let active_connection:WSConnection|null = null;
+let net_provides_rc = false;
 let show_reg = view_reg.checked;
 let show_page = view_page.checked;
 let show_int = view_int.checked;
@@ -576,9 +598,14 @@ let memv_end = 0;
 let run_accu = 0;
 let run_accutime = 0;
 let run_once = false;
+let HEX_CONV = conv_hex.checked;
+let name_conv = NAMECON.MEI;
+let sense_switch = 0;
+let dswitch = 0; // inverted on bus - R H I 0
+const mux_hw:MUXPort[] = [];
 const run_hw:Run[] = [];
 const run_hshw:Run[] = [];
-let hs_wait = 0;
+
 let run_stop:null | (()=>void);
 function do_run_stop():void {
 	if (run_stop) {
@@ -587,12 +614,14 @@ function do_run_stop():void {
 	}
 }
 function run_hw_steps(inc:number) {
-	for(let i = 0; i < run_hw.length; i++) {
+	const l = run_hw.length;
+	for(let i = 0; i < l; i++) {
 		run_hw[i].run(inc);
 	}
 }
 function run_hshw_steps() {
-	for(let i = 0; i < run_hshw.length; i++) {
+	const l = run_hshw.length;
+	for(let i = 0; i < l; i++) {
 		run_hshw[i].run(5);
 	}
 }
@@ -600,6 +629,9 @@ function run_core() {
 	if (!selsim.can_step) return;
 	run_busy = true;
 	let runtime = Date.now();
+	for(let i = 0; i < mux_hw.length; i++) {
+		mux_hw[i].run_tx();
+	}
 	if (run_rate > 10000) {
 		let hsr = (run_rate / 100) | 0;
 		mcsim.hspre();
@@ -626,10 +658,8 @@ function run_core() {
 		}
 		selcdsp.step(true);
 	}
-	runtime = Date.now() - runtime;
-	run_accutime += runtime;
-	run_accu += run_rate;
 	run_busy = false;
+	if(active_connection) active_connection.handle_tx_tick();
 	if(run_ctl == 0) {
 		selcdsp.showstate(true);
 	} else {
@@ -638,6 +668,10 @@ function run_core() {
 	main_ffc.step(true);
 	if (show_dis) show_disasm();
 	if (memv_after) update_memview();
+	if (disk_view_update) disk_view.update();
+	runtime = Date.now() - runtime;
+	run_accutime += runtime;
+	run_accu += run_rate;
 }
 function run_control(run:boolean):void {
 	if (!run && (run_ctl !== 0)) {
@@ -1373,17 +1407,27 @@ mfm:bload(`ICABAQAAAQEgIAEBAAABASAIAQIAAAQBECABAgAABAE=`)
 const mclisting:MicroListing[] = [];
 
 interface DiskImage {
-	type:'empty'|'hawk'|'finch',
-	filename:string,
+	type: 'empty'|'hawk'|'finch',
+	filename: string,
+	identifier?: string,
 	stride: number,
-	backing_data:ArrayBuffer,
+	backing_data: ArrayBuffer,
 	protect: boolean,
-	data:Uint8Array,
+	data: Uint8Array,
+}
+function disk_image_luid(image: DiskImage) {
+	if(image.identifier) {
+		return `${image.identifier}:${image.filename}`;
+	}
+	return image.filename;
 }
 const FINCH_TRACK = 13440;
 const FINCH_TPP = 605;
 const FINCH_PLAT = FINCH_TRACK * FINCH_TPP;
-const disk_images:{[id:string]:DiskImage} = {};
+const disk_images_lu:{[id:string]:number} = {};
+const disk_images:DiskImage[] = [];
+let disk_view:DiskViewer;
+let disk_view_update = false;
 
 function export_disk(image:DiskImage) {
 	const unitdata = image;
@@ -1415,18 +1459,18 @@ let wa:{
 	context: AudioContext,
 	filter: BiquadFilterNode,
 	gain: GainNode,
+	osc: OscillatorNode,
 } | undefined;
-let wa_osc;
 function wa_setup() {
 	const context = new AudioContext();
 	const filter = new BiquadFilterNode(context, {type: 'bandpass', frequency: 8192, Q: 1});
 	const gain = new GainNode(context, {gain: 0.0});
 	filter.connect(gain);
 	gain.connect(context.destination);
-	wa_osc = new OscillatorNode(context, {frequency: 3200, type: 'square'});
+	let wa_osc = new OscillatorNode(context, {frequency: 3200, type: 'square'});
 	wa_osc.connect(filter);
 	wa_osc.start();
-	return {context, filter, gain};
+	return {context, filter, gain, osc: wa_osc};
 }
 function wa_do_beep() {
 	if(wa == undefined) return;
@@ -1434,17 +1478,42 @@ function wa_do_beep() {
 	wa.gain.gain.setTargetAtTime(0.0625, ctime + 0.125, 0.01);
 	wa.gain.gain.setTargetAtTime(0.0, ctime + 0.825, 0.01);
 }
-btn_sound.addEventListener('click', function() {
-	if(wa == undefined) wa = wa_setup();
-	wa_do_beep();
+check_sound.addEventListener('change', function() {
+	CONFIG.sound = check_sound.checked;
+	if(check_sound.checked) {
+		if(wa == undefined) wa = wa_setup();
+		wa_do_beep();
+	}
 });
 
 const vt_width = 8;
 const vt_height = 10;
-const vt_font_data = new ImageData(512, 320);
-const vt_font_canv = new OffscreenCanvas(512, 320);
-const vt_font_ctx = vt_font_canv.getContext('2d') as OffscreenCanvasRenderingContext2D;
-
+const vt_font_data = new ImageData(512, 512);
+const vtx_quad = [0,0,0,0, 0,1,0,1, 1,0,1,0, 1,1,1,1];
+const vtx_quadidx = [0,1,2,2,1,3];
+let vt_font_bmp: ImageBitmap | undefined;
+let vt_use_gl = true;
+let vt_use_offscreen = true;
+if ((window.WebGLRenderingContext == undefined) || localStorage.getItem('nogl') != null) {
+	vt_use_gl = false;
+}
+if ((window.OffscreenCanvas == undefined) || localStorage.getItem('nooffscreen') != null) {
+	vt_use_offscreen = false;
+}
+let vt_force_redraw = false;
+let vt_font_canv: OffscreenCanvas | HTMLCanvasElement;
+let vt_font_ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+if (vt_use_offscreen) {
+	vt_use_offscreen = true;
+	vt_font_canv = new OffscreenCanvas(512, 512)
+	vt_font_ctx = vt_font_canv.getContext('2d') as OffscreenCanvasRenderingContext2D
+} else {
+	vt_use_offscreen = false;
+	vt_font_canv = document.createElement('canvas');
+	vt_font_canv.width = 512;
+	vt_font_canv.height = 512;
+	vt_font_ctx = vt_font_canv.getContext('2d', { willReadFrequently:true }) as CanvasRenderingContext2D;
+}
 function get_vt_style_color(col: [number,number], bg = false):string {
 	const r = col[bg?1:0] & 255;
 	const g = (col[bg?1:0] >> 8) & 255;
@@ -1503,7 +1572,7 @@ function update_font_data(main_colors:[number, number]) {
 					let vlr = 0;
 					if(cx > 0) vlr |= (vtfont[vtline + cellx] >> (cx - 1)) & 1;
 					if (cx < 7) vlr |= (vtfont[vtline + cellx] >> (cx + 1)) & 1;
-					if (vlr > 0) {
+					if (false&& vlr > 0) {
 						vtf[line0 + x] = main_aa;
 						vtf[line0h + x] = main_aa;
 						vtf[line0uf + x] = main_aa;
@@ -1532,7 +1601,7 @@ function update_font_data(main_colors:[number, number]) {
 				vtf[line0 + x] = fore_color;
 				vtf[line0h + x] = half_color;
 				vtf[line0uf + x] = fore_color;
-				vtf[line0uh + x] = fore_color;
+				vtf[line0uh + x] = half_color;
 			}
 		} else if(vrow == 9) {
 			for(let x = 0; x < 128; x++) {
@@ -1555,21 +1624,183 @@ function update_font_data(main_colors:[number, number]) {
 			vcid++;
 		}
 	}
+	for(let y = 0; y < 10; y++) {
+		const block0 = (150 + y) * 512 + 112;
+		const block0i = (150 + y) * 512 + 112 + 128;
+		const block0h = (150 + y) * 512 + 112 + 256;
+		const block0hi = (150 + y) * 512 + 112 + 384;
+		const block1 = (310 + y) * 512 + 112;
+		const block1i = (310 + y) * 512 + 112 + 128;
+		const block1h = (310 + y) * 512 + 112 + 256;
+		const block1hi = (310 + y) * 512 + 112 + 384;
+		for(let x = 0; x < 16; x++) {
+			vtf[block0 + x] = back_color & 0xffffff;
+			vtf[block0i + x] = fore_color & 0xffffff;
+			vtf[block0h + x] = back_color & 0xffffff;
+			vtf[block0hi + x] = half_color & 0xffffff;
+			vtf[block1 + x] = back_color & 0xffffff;
+			vtf[block1i + x] = fore_color & 0xffffff;
+			vtf[block1h + x] = back_color & 0xffffff;
+			vtf[block1hi + x] = half_color & 0xffffff;
+		}
+		if(y >= 8) {
+			for(let x = 8; x < 16; x++) {
+				vtf[block0 + x] = fore_color;
+				vtf[block0i + x] = back_color;
+				vtf[block0h + x] = half_color;
+				vtf[block0hi + x] = back_color;
+				vtf[block1 + x] = fore_color;
+				vtf[block1i + x] = back_color;
+				vtf[block1h + x] = half_color;
+				vtf[block1hi + x] = back_color;
+			}
+		}
+	}
+	vt_font_ctx.putImageData(vt_font_data, 0, 0);
+	if(vt_font_bmp != null) {
+		vt_font_bmp.close();
+		vt_font_bmp = undefined;
+	}
+	createImageBitmap(vt_font_canv).then(function(v) {
+		vt_font_bmp = v;
+		vt_force_redraw = true;
+	});
 }
 
 let font_load = (async function() {
 	await new Promise((res) => { setTimeout(res, 10); });
 	update_font_data(CONFIG.vt_colors);
-	vt_font_ctx.putImageData(vt_font_data, 0, 0);
 })();
 
-interface CharDevice {
-	write(c:number):void;
-	check_read():void;
-	clear_buffer():void;
-	set_cts(value:boolean):void;
+interface GLVars {
+	ctx: WebGLRenderingContext,
+	v: WebGLShader,
+	f: WebGLShader,
+	p: WebGLProgram,
+	fd: Uint8Array,
+	fi: Uint16Array,
+	vb: WebGLBuffer,
+	ib: WebGLBuffer,
+	tx: WebGLTexture,
+	tx_loaded: boolean,
+	vb_update: boolean,
+	vb_min: number,
+	vb_max: number,
 }
-const vtctrlkeys:{[id:string]:number|number[]} = {
+
+function compile_gl(c:WebGLRenderingContext, flavor:number, src:string) {
+	let s = c.createShader(flavor);
+	if(s == null) throw new Error('ctx error 2');
+	c.shaderSource(s, src);
+	c.compileShader(s);
+	let status = c.getShaderParameter(s, c.COMPILE_STATUS);
+	if(!status) {
+		let l = c.getShaderInfoLog(s);
+		c.deleteShader(s);
+		if(l != null) console.error('shader:', l);
+		throw new Error('shader error');
+	}
+	return s;
+}
+
+function init_gl(canv:HTMLCanvasElement):GLVars|undefined {
+	const gl = canv.getContext('webgl', {antialias: false});
+	if(gl == null) {
+		console.warn('webgl is null');
+		return undefined;
+	}
+	const p = gl.createProgram();
+	if(p == null) throw new Error('ctx error 3');
+	let v = compile_gl(gl, gl.VERTEX_SHADER,
+		`attribute vec2 p;\nattribute vec2 c;\nvarying vec2 t;\nuniform vec2 scn;\nvoid main() { t=c*vec2(0.015625,0.01953125)+vec2(0,-1); gl_Position=vec4(p.xy*scn+vec2(-1,1),0.0,1.0); }`);
+	let f = compile_gl(gl, gl.FRAGMENT_SHADER,
+		`precision mediump float;\nuniform sampler2D tx;\nvarying vec2 t;\nvoid main() { gl_FragColor = texture2D(tx, t); }`);
+	gl.attachShader(p, v);
+	gl.attachShader(p, f);
+	gl.linkProgram(p);
+	gl.validateProgram(p);
+	let status = gl.getProgramParameter(p, gl.LINK_STATUS);
+	if(!status) {
+		let l = gl.getProgramInfoLog(p);
+		console.error(l);
+	}
+	gl.useProgram(p);
+	gl.uniform2f(gl.getUniformLocation(p, 'scn'), 2/80, -2/25);
+	gl.uniform1i(gl.getUniformLocation(p, 'tx'), 0);
+	let vb = gl.createBuffer();
+	let ib = gl.createBuffer();
+	if(vb == null || ib == null) throw new Error('ctx error 4');
+	const quad_count = 80 * 25 + 1;
+	const vb_size = quad_count * 4*4;
+	const ib_size = quad_count * 6;
+	const fd = new Uint8Array(vb_size);
+	const sample = [0,0,15,15];
+	for(let i = 0; i < 16; i++) {
+		fd[80*25*16+i] = sample[i & 3] + vtx_quad[i];
+	}
+	for(let y = 0; y < 25; y++) {
+		for(let x = 0; x < 80; x++) {
+			const q = y*80 + x;
+			sample[0] = x;
+			sample[1] = y;
+			sample[2] = q & 0x0f;
+			sample[3] = (q >> 4) & 0xf;
+			const dest = q * 16;
+			for(let i = 0; i < 16; i++) {
+				fd[dest+i] = sample[i & 3] + vtx_quad[i];
+			}
+		}
+	}
+	const fi = new Uint16Array(ib_size);
+	for(let q = 0; q < quad_count; q++) {
+		for(let i = 0; i < 6; i++) {
+			fi[q*6+i] = q*4 + vtx_quadidx[i];
+		}
+	}
+	gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+	gl.bufferData(gl.ARRAY_BUFFER, fd, gl.DYNAMIC_DRAW);
+	let atr = gl.getAttribLocation(p, 'p');
+	gl.enableVertexAttribArray(atr);
+	gl.vertexAttribPointer(atr, 2, gl.UNSIGNED_BYTE, false, 4, 0);
+	atr = gl.getAttribLocation(p, 'c');
+	gl.enableVertexAttribArray(atr);
+	gl.vertexAttribPointer(atr, 2, gl.UNSIGNED_BYTE, false, 4, 2);
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, fi, gl.DYNAMIC_DRAW);
+	gl.disable(gl.DEPTH_TEST);
+	gl.disable(gl.STENCIL_TEST);
+	gl.enable(gl.BLEND);
+	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+	let tx = gl.createTexture();
+	if(tx == null) throw new Error('ctx error 5');
+	gl.activeTexture(gl.TEXTURE0);
+	gl.bindTexture(gl.TEXTURE_2D, tx);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vt_font_canv);
+	if(gl.getError() != gl.NO_ERROR) {
+		console.warn('GL errors exist');
+	}
+	return {
+		ctx: gl, tx_loaded: false,
+		vb_update: false, vb_max: 0, vb_min: 0,
+		f, v, fd, fi, ib, p, tx, vb
+	};
+}
+
+interface CharDevice {
+	emu_linked?:boolean;
+	receive(c:number):void; // data into this device
+	can_receive():boolean; // VT cheat
+	check_send():void; // send budget (VT cheats)
+	get_dev():CharDevice | undefined; // get current remote device
+	bind_dev(dev:CharDevice | undefined):void; // the line (dis)connected
+	set_cts(value:boolean):void; // our rts line changed their cts
+	rts:boolean; // allow getting rts state
+}
+type KeySeq = number | number[];
+type KeyShift = KeySeq | {n:KeySeq, s:KeySeq};
+const vtctrlkeys:{[id:string]:KeyShift} = {
 	Digit2: 0, KeyA: 1, KeyB: 2, KeyC: 3,
 	KeyD: 4, KeyE: 5, KeyF: 6, KeyG: 7,
 	KeyH: 8, KeyI: 9, KeyJ:10, KeyK:11,
@@ -1578,9 +1809,22 @@ const vtctrlkeys:{[id:string]:number|number[]} = {
 	KeyT:20, KeyU:21, KeyV:22, KeyW:23,
 	KeyX:24, KeyY:25, KeyZ:26, BracketLeft: 27,
 	Backslash: 28, BracketRight: 29, Digit6: 30, Minus: 31,
-	Delete: [27, 76], Insert: [27, 77],
-	End: 12
+	Delete: [27,76], Insert: [27,77],
+	End: {n:12, s:[27,71]},
 };
+const vtkeys:{[id:string]:KeyShift} = {
+	End: {n:[27,75], s:[27,107]},
+	Delete: {n:[27,69], s:[27,101]},
+	Insert: {n:[27,70], s:[27,102]},
+	Tab: {n:9, s:[27,79]},
+	Home: 1, Backspace: 8, Enter: 13, NumpadEnter: 13, Escape: 27,
+	ArrowUp: 26, ArrowDown: 10, ArrowLeft: 21, ArrowRight: 6,
+	F1: {n:[2,49,13], s:[2,33,13]}, F2:{n:[2,50,13], s:[2,34,13]},
+	F3: {n:[2,51,13], s:[2,35,13]}, F4:{n:[2,52,13], s:[2,36,13]},
+	F5: {n:[2,53,13], s:[2,37,13]}, F6:{n:[2,54,13], s:[2,38,13]},
+	F7: {n:[2,55,13], s:[2,39,13]}, F8:{n:[2,56,13], s:[2,40,13]},
+};
+
 const fn_key_norm = ['1','2','3','4','5','6','7','8'];
 const fn_key_shift = ['!','"','#','$','%','&',"'",'('];
 const enum VTEscapeModes {
@@ -1609,14 +1853,19 @@ class VTerm implements CharDevice {
 	line_draw = false;
 	shift_aware = false;
 	local_mode = false;
+	rts = true;
 	lok:HTMLInputElement;
 	vctrl:HTMLButtonElement;
 	canv:HTMLCanvasElement;
-	ctx:CanvasRenderingContext2D;
-	octx:OffscreenCanvasRenderingContext2D;
+	ctx:CanvasRenderingContext2D| undefined;
+	glc:WebGLRenderingContext | undefined;
+	glv:GLVars | undefined;
+	octx:OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | undefined;
 	vbell?:HTMLElement;
 	static columns = 80;
+	static columnr = 79;
 	static rows = 24;
+	static rowb = 23;
 	static vt_limit = VTerm.columns * VTerm.rows;
 	static char_base = 0;
 	static input_interval_rate = 20000;
@@ -1627,15 +1876,18 @@ class VTerm implements CharDevice {
 	clear_status = true;
 	input_control = false;
 	carrier = false;
-	mux:MUXPort | null = null;
+	mux:CharDevice | undefined;
 	show_ctrl = false;
 	esc_mode:VTEscapeModes = VTEscapeModes.NORMAL;
 	esc_extra = 0;
 	vbel_id = 0;
 	vcontrol = false;
 	ident:string;
-	vt_ofs_canv = new OffscreenCanvas(640, 250);
-	constructor(ident:string, c:HTMLCanvasElement, div_crt:HTMLDivElement) {
+	vt_ofs_canv: OffscreenCanvas | undefined;
+	constructor(ident:string, container:HTMLDivElement) {
+		const div_crt = container.children[0] as HTMLDivElement;
+		const canv = container.children[1] as HTMLCanvasElement;
+		if(canv.tagName != 'CANVAS') throw new Error(`invalid HTML for VTerm:${ident}`);
 		const vctrl = div_crt.children[0] as HTMLButtonElement;
 		this.vctrl = vctrl;
 		this.vbell = div_crt.children[1] as HTMLSpanElement;
@@ -1651,26 +1903,40 @@ class VTerm implements CharDevice {
 		div_crt.children[9] as HTMLButtonElement,
 		div_crt.children[10] as HTMLButtonElement];
 
-		const canv = c;
 		const self = this;
-		const ctx = c.getContext('2d') as CanvasRenderingContext2D;
 		this.ident = ident.padEnd(4).substring(0, 4);
 		this.canv = canv;
-		this.ctx = ctx;
-		this.octx = this.vt_ofs_canv.getContext('2d') as OffscreenCanvasRenderingContext2D;
-		
-		ctx.fillStyle = '#6ac';
-		ctx.strokeStyle = '#6ac';
-		let i = 24;
-		let k = 80 * 2;
+		let glv:GLVars | undefined;
+		if(vt_use_gl) {
+			try {
+				glv = init_gl(canv);
+			} catch(exerr) { console.log(exerr); }
+		}
+		if(glv) {
+			this.glv = glv;
+		} else {
+			const ctx = canv.getContext('2d') as CanvasRenderingContext2D;
+			this.ctx = ctx;
+			if(!vt_use_offscreen || window.OffscreenCanvas == undefined) {
+				this.octx = ctx;
+			} else {
+				this.vt_ofs_canv = new OffscreenCanvas(640, 250);
+				this.octx = this.vt_ofs_canv.getContext('2d', { willReadFrequently:true }) as OffscreenCanvasRenderingContext2D;
+			}
+			ctx.fillStyle = '#6ac';
+			ctx.strokeStyle = '#6ac';
+		}
+		//@ts-ignore
+		const sver = `v0.${window.cen_ts_version}`.padStart(6);
+		const s1 = `   Centurion VI Simulator ${sver}   `;
+		const s2 = ` Copyright (c) 2023 Meisaka Yukara `;
+		const len = s2.length;
+		let i = 40 - ((len / 2)|0);
+		let k = 80 * 5;
 		this.buffer[k+i] = 128;
 		this.buffer[k+80+i] = 164;
 		this.buffer[k+160+i] = 164;
 		this.buffer[k+240+i] = 136; i++;
-		const s1 = '   Centurion VI Simulator   ';
-		//@ts-ignore
-		const s2 = `   2023 v0.${window.cen_ts_version}  by Meisaka   `;
-		const len = s1.length;
 		for(let c = 0; c < len; c++) {
 			this.buffer[k+i] = 160;
 			this.buffer[k+80+i] = s1.charCodeAt(c);
@@ -1697,7 +1963,7 @@ class VTerm implements CharDevice {
 		}
 		this.cursor_y = 0;
 		this.cursor_x = 0;
-		c.addEventListener('keypress', function(ev) {
+		canv.addEventListener('keypress', function(ev) {
 			ev.preventDefault();
 		});
 		if(vctrl) vctrl.addEventListener('click', function(ev) {
@@ -1705,11 +1971,11 @@ class VTerm implements CharDevice {
 			style_if(this, 'active', self.vcontrol);
 			canv.focus();
 		});
-		c.addEventListener('keydown', function(ev) {
-			ev.preventDefault();
-			self.key_input(ev);
+		canv.addEventListener('keydown', function(ev) {
+			if(self.key_input(ev))
+				ev.preventDefault();
 		});
-		c.addEventListener('keyup', function(ev) {
+		canv.addEventListener('keyup', function(ev) {
 			ev.preventDefault();
 		});
 		if(fnkeys) for(let i = 0; i < fnkeys.length && i < 8; i++) {
@@ -1727,116 +1993,225 @@ class VTerm implements CharDevice {
 			this.present_screen();
 		});
 	}
-	key_input(ev:KeyboardEvent) {
-		//console.log(ev.key.toUpperCase().charCodeAt(0));
+	key_input(ev:KeyboardEvent): boolean {
 		this.clear_buffer();
 		if (ev.key == 'PageDown') {
 			this.canv.blur();
-			return;
+			return true;
 		}
 		if (ev.key == 'PageUp') {
 			this.local_mode = !this.local_mode;
 			this.update_statusline();
 			this.present_screen();
-			return;
+			return true;
 		}
+		let vcc: KeyShift | undefined;
 		if (ev.ctrlKey || this.vcontrol) {
-			let vcc = vtctrlkeys[ev.code];
-			if (ev.shiftKey && ev.key == 'End') {
-				this.receive(27); this.receive(71);
-			} else if (Array.isArray(vcc)) {
-				for(let n = 0; n < vcc.length; n++) this.receive(vcc[n]);
-			} else if (vcc !== undefined) {
-				this.receive(vcc);
+			vcc = vtctrlkeys[ev.code];
+			if (vcc !== undefined) {
 				this.input_control = true;
 			}
 			this.vcontrol = false;
 			if(this.vctrl) this.vctrl.classList.remove('active');
 		} else if (ev.key.length == 1) {
 			if (this.lok && this.lok.checked) {
-				this.receive(ev.key.toUpperCase().charCodeAt(0));
+				vcc = ev.key.toUpperCase().charCodeAt(0);
 			} else {
-				this.receive(ev.key.charCodeAt(0));
+				vcc = ev.key.charCodeAt(0);
 			}
-		} else switch(ev.key) {
-		case 'End':
-			if (ev.shiftKey) {
-				this.receive(27); this.receive(107);
-			} else {
-				this.receive(27); this.receive(75);
-			}
-			break;
-		case 'Delete':
-			if (ev.shiftKey) {
-				this.receive(27); this.receive(101);
-			} else {
-				this.receive(27); this.receive(69);
-			}
-			break;
-		case 'Insert':
-			if (ev.shiftKey) {
-				this.receive(27); this.receive(102);
-			} else {
-				this.receive(27); this.receive(70);
-			}
-			break;
-		case 'Backspace': this.receive(8); break;
-		case 'Tab': if(ev.shiftKey) {
-			this.receive(27); this.receive(79);
-		} else this.receive(9); break;
-		case 'Enter': this.receive(13); break;
-		case 'Escape': this.receive(27); break;
-		case 'ArrowUp': this.receive(26); break;
-		case 'ArrowDown': this.receive(10); break;
-		case 'ArrowLeft': this.receive(21); break;
-		case 'ArrowRight': this.receive(6); break;
-		case 'Home': this.receive(1); break;
+		} else {
+			vcc = vtkeys[ev.code];
 		}
+		if (vcc == undefined) return false;
+		if (typeof vcc == 'object' && !Array.isArray(vcc)) {
+			vcc = ev.shiftKey ? vcc.s : vcc.n;
+		}
+		if (Array.isArray(vcc)) {
+			for(let n = 0; n < vcc.length; n++) this.send(vcc[n]);
+			this.check_send();
+		} else if(typeof vcc == 'number') {
+			this.send(vcc);
+			this.check_send();
+		}
+		return true;
 	}
 	run(increment:number):void {
 		if(this.import_buf.length > 0) {
 			this.input_interval -= increment;
 			if(this.input_interval < 1) {
-				this.check_read();
+				this.check_send();
 			}
 		}
 	}
-	private render_cell(cellx:number, celly:number, clear=true) {
+	private render_screen_gl() {
+		if(this.glv == null) return;
+		const gl = this.glv.ctx;
+		gl.viewport(0, 0, this.canv.width, this.canv.height);
+		let flr = this.blink ? 0.125 : 0.1875;
+		gl.clearColor(flr, 0.0, 0.0, 0);
+		if(vt_force_redraw) this.glv.tx_loaded = false;
+		if(!this.glv.tx_loaded && vt_font_bmp) {
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vt_font_bmp);
+			this.glv.tx_loaded = true;
+		}
+		if(this.glv.vb_update) {
+			let fd = this.glv.fd;
+			let vcc = this.buffer[this.cursor_y * VTerm.columns + this.cursor_x];
+			const ivr = CONFIG.vt_reverse ? 16 : 0;
+			const rev = ((vcc & 0x1000) != 0 ? 16 : 0) ^ ivr;
+			for(let i = 0; i < 16; i+=4) {
+				fd[32000+i] = this.cursor_x + vtx_quad[i];
+				fd[32001+i] = this.cursor_y + vtx_quad[i+1];
+				fd[32002+i] = (this.blink ? 14:15) + rev + vtx_quad[i+2];
+				fd[32003+i] = 15 + vtx_quad[i+3];
+			}
+			//gl.bufferSubData(gl.ARRAY_BUFFER, this.glv.vb_min * 16, this.glv.fd);
+			gl.bufferData(gl.ARRAY_BUFFER, this.glv.fd, gl.DYNAMIC_DRAW);
+			this.glv.vb_update = false;
+		}
+		//gl.clear(gl.COLOR_BUFFER_BIT);
+		gl.useProgram(this.glv.p as WebGLProgram);
+		// offset sizeof(u16)*elemperquad*quad [2*6*quad]
+		gl.drawElements(gl.TRIANGLES, 25*80*6+6, gl.UNSIGNED_SHORT, 0);
+		//gl.finish();
+		// let er = gl.getError();
+		// if(er != gl.NO_ERROR) console.warn('GL draw error:', er);
+	}
+	present_screen() {
+		if(this.ctx && this.vt_ofs_canv)
+			this.ctx.drawImage(this.vt_ofs_canv, 0, 0);
+		else this.render_screen_gl();
+	}
+	update_screen() {
+		if(this.octx)
+			this.octx.clearRect(0, 0, this.canv.width, this.canv.height);
+		for(let row = 0; row < VTerm.rows + 1; row++) { // updates the status line
+			const vcy = row * vt_height;
+			const vcra = row * VTerm.columns;
+			let vcx = 0;
+			for(let col = 0; col < VTerm.columns; col++) {
+				this.render_cell(vcra + col, col, row, vcx, vcy);
+				vcx += vt_width;
+			}
+		}
+	}
+	update_dirty() {
+		//this.octx.clearRect(0, 0, this.canv.width, this.canv.height);
+		for(let row = 0; row < VTerm.rows + 1; row++) { // updates the status line
+			const vcy = row * vt_height;
+			const vcra = row * VTerm.columns;
+			let vcx = 0;
+			for(let col = 0; col < VTerm.columns; col++) {
+				const vca = vcra + col
+				if((this.buffer[vca] & 0x8000) == 0)
+					this.render_cell(vca, col, row, vcx, vcy);
+				vcx += vt_width;
+			}
+		}
+	}
+	private check_cell(cellx:number, celly:number) {
 		const vcx = cellx * vt_width;
 		const vcy = celly * vt_height;
 		const vca = celly * VTerm.columns + cellx;
+		if((this.buffer[vca] & 0x8000) == 0)
+			this.render_cell(vca, cellx, celly, vcx, vcy);
+	}
+	private update_cell(cellx:number, celly:number) {
+		const vcx = cellx * vt_width;
+		const vcy = celly * vt_height;
+		this.render_cell(celly * VTerm.columns + cellx, cellx, celly, vcx, vcy);
+	}
+	private render_cell(vca:number, col:number, row:number, dx:number, dy:number) {
 		let vcc = this.buffer[vca];
-		if(clear) this.octx.clearRect(vcx, vcy, vt_width, vt_height);
-		const ivs = vca >= VTerm.vt_limit ? 128 : 0;
-		const ivr = CONFIG.vt_reverse ? 128 : 0;
+		if(vt_font_bmp == null) return; // unable to draw yet
+		this.buffer[vca] = vcc | 0x8000;
 		if((vcc & 0x400) != 0) vcc = 0x20;
-		if((vcc & 0x200) != 0 && !this.char_blink) vcc = (vcc & 0xff00) | 32;
-		const rev = ((vcc & 0x1000) != 0 ? 128 : 0) ^ ivs ^ ivr;
-		const half = vcc & 0x100;
-		const under = (vcc & 0x2000) != 0 ? 160 : 0;
-		// attrib bits
-		// . . U R . Z B H
-		const vtfx = ((vcc & 15) * 8) | rev | half;
-		const vtfy = ((vcc >> 4) & 15) * 10 + under;
-		this.octx.drawImage(vt_font_canv, vtfx, vtfy, 8, 10, vcx, vcy, 8, 10);
-		if(this.blink && cellx == this.cursor_x && celly == this.cursor_y) {
-			this.octx.fillStyle = get_vt_style_color(CONFIG.vt_colors, rev != 0);
-			this.octx.fillRect(vcx, vcy + 8, vt_width, 2);
+		if((vcc & 0x200) != 0 && !this.char_blink) vcc = (vcc & 0x7f00) | 32;
+		// attrib bits: . . U R . Z B H
+		const ivs = vca >= VTerm.vt_limit ? 16 : 0;
+		const ivr = CONFIG.vt_reverse ? 16 : 0;
+		const rev = ((vcc & 0x1000) != 0 ? 16 : 0) ^ ivs ^ ivr;
+		const half = (vcc & 0x100) >> 3;
+		const vtfx = (vcc & 15) | rev | half;
+		if(this.glv) {
+			const fd = this.glv.fd;
+			const dest = vca * 16;
+			const under = (vcc & 0x2000) != 0 ? 16 : 0;
+			const vtfy = ((vcc >> 4) & 15) + under;
+			for(let i = 0; i < 16; i+=4) {
+				fd[dest+i] = col + vtx_quad[i];
+				fd[dest+i+1] = row + vtx_quad[i+1];
+				fd[dest+i+2] = vtfx + vtx_quad[i+2];
+				fd[dest+i+3] = vtfy + vtx_quad[i+3];
+			}
+			if(this.glv.vb_update) {
+				if(vca < this.glv.vb_min)
+					this.glv.vb_min = vca;
+				if(vca > this.glv.vb_max)
+					this.glv.vb_max = vca;
+			} else {
+				this.glv.vb_min = vca;
+				this.glv.vb_max = vca;
+				this.glv.vb_update = true;
+			}
+		} else if(this.octx) {
+			const under = (vcc & 0x2000) != 0 ? 160 : 0;
+			const vtfy = ((vcc >> 4) & 15) * 10 + under;
+			this.octx.drawImage(vt_font_bmp, vtfx*8, vtfy, 8, 10, dx, dy, 8, 10);
+			// cursor:
+			if(this.blink && col == this.cursor_x && row == this.cursor_y) {
+				this.octx.fillStyle = get_vt_style_color(CONFIG.vt_colors, rev != 0);
+				this.octx.fillRect(dx, dy + 8, vt_width, 2);
+			}
 		}
 	}
-	update_charblink() {
-		this.char_blink = !this.char_blink;
-		this.update_screen();
+	// reset the cell if it's content is different
+	private set_cell(vca:number, cellval:number) {
+		cellval &= 0x7fff;
+		if((this.buffer[vca] & 0x7fff) != cellval)
+			this.buffer[vca] = cellval;
+	}
+	// change the cursor position and update visually
+	private set_cursor(col:number, row:number) {
+		if(col == this.cursor_x && row == this.cursor_y) return;
+		const lastx = this.cursor_x;
+		const lasty = this.cursor_y;
+		this.cursor_x = col;
+		this.cursor_y = row;
+		if(this.glv) {
+			this.check_cell(lastx, lasty);
+			this.glv.vb_update = true;
+		} else {
+			this.update_cell(lastx, lasty);
+			this.update_cell(this.cursor_x, this.cursor_y);
+		}
 	}
 	update_blink() {
 		this.blink = !this.blink;
 		this.update_statusline();
+		let do_screen_update = false;
 		if(this.blink_count++ > 3) {
 			this.char_blink = !this.char_blink;
 			this.blink_count = 0;
-			this.update_screen();
+			do_screen_update = true;
 		}
-		this.render_cell(this.cursor_x, this.cursor_y);
+		if (vt_force_redraw) {
+			this.update_screen();
+			this.present_screen();
+			return;
+		}
+		if (do_screen_update) {
+			for(let row = 0; row < VTerm.rows + 1; row++) { // updates the status line
+				for(let col = 0; col < VTerm.columns; col++) {
+					const vca = row * VTerm.columns + col;
+					let vcc = this.buffer[vca];
+					if((vcc & 0x200) != 0)
+						this.buffer[vca] = vcc & 0x7fff;
+				}
+			}
+			this.update_dirty();
+		}
+		this.update_cell(this.cursor_x, this.cursor_y);
 		//this.update_statusline();
 		this.present_screen();
 	}
@@ -1853,18 +2228,10 @@ class VTerm implements CharDevice {
 		// a3,4=1,1 even parity
 		// 3,4=...  11 Even, 01 odd, 10 space, 00 mark
 		// a5..8=0101 9600
-		// baud 5678<-switches
-		// 9600 0101
-		// 7200 1001
-		// 4800 0001
-		// 2400 1110
-		// 1800 0110
-		// 1200 1010
-		//  600 0010
-		//  300 1100
-		//  150 0100
-		//  110 1000
-		//   75 0000
+		// baud 5678 switches
+		// 4800 0001 : 7200 1001 : 9600 0101
+		//  600 0010 : 1200 1010 : 1800 0110 : 2400 1110
+		//   75 0000 :  110 1000 :  150 0100 :  300 1100
 		// b1,2=0,0 CR
 		// -> 01 CR ETX, 10, CR EOT, 00 CR, 11 invalid
 		// b3=0 no auto LF
@@ -1908,17 +2275,17 @@ class VTerm implements CharDevice {
 		if(this.clear_status) {
 			this.clear_status = false;
 			for(; x < 7; x++) {
-				this.buffer[VTerm.vt_limit + 30 + x] = 0x100;
+				this.set_cell(VTerm.vt_limit + 30 + x, 0x100);
 			}
 		}
 		for(x = 0; x < stxt.length; x++) {
 			let n = stxt.charCodeAt(x) | 0x100;
-			this.buffer[VTerm.vt_limit + 37 + x] = n;
+			this.set_cell(VTerm.vt_limit + 37 + x, n);
 		}
 		for(; x < 23; x++) {
-			this.buffer[VTerm.vt_limit + 37 + x] = 0x100;
+			this.set_cell(VTerm.vt_limit + 37 + x, 0x100);
 		}
-		this.buffer[VTerm.vt_limit + 62] = 0x100;
+		this.set_cell(VTerm.vt_limit + 62, 0x100);
 	}
 	update_statusline() {
 		// updates the status line
@@ -1928,53 +2295,49 @@ class VTerm implements CharDevice {
 			const stxt = ' SHIFT ';
 			for(let c = 0; c < stxt.length; c++) {
 				let n = (shift ? stxt.charCodeAt(c) : 0) | 0x100;
-				this.buffer[VTerm.vt_limit + 8 + c] = n;
+				this.set_cell(VTerm.vt_limit + 8 + c, n);
 			}
 		}
 		// mode (always) and shift
-		this.buffer[VTerm.vt_limit + 7] = 0x1100;
+		this.set_cell(VTerm.vt_limit + 7, 0x1100);
 		// shift and local
-		this.buffer[VTerm.vt_limit + 15] = (this.shift_aware || this.local_mode) ? 0x1100 : 0x100;
+		this.set_cell(VTerm.vt_limit + 15, (this.shift_aware || this.local_mode) ? 0x1100 : 0x100);
 		// local and aux (ignored)
-		this.buffer[VTerm.vt_limit + 23] = this.local_mode ? 0x1100 : 0x100;
+		this.set_cell(VTerm.vt_limit + 23, this.local_mode ? 0x1100 : 0x100);
 		if(this.local_mode) {
 			let s = ' LOCAL ';
 			for(let x = 0; x < s.length; x++)
-				this.buffer[VTerm.vt_limit + 16 + x] = s.charCodeAt(x) | 0x100;
+				this.set_cell(VTerm.vt_limit + 16 + x, s.charCodeAt(x) | 0x100);
 		} else {
 			for(let x = 0; x < 7; x++)
-				this.buffer[VTerm.vt_limit + 16 + x] = 0x100;
+				this.set_cell(VTerm.vt_limit + 16 + x, 0x100);
 		}
 		let carrier = this.mux != null
 		if(carrier != this.carrier) {
 			this.carrier = carrier;
 			const stxt = 'CARRIER';
 			for(let x = 0; x < stxt.length; x++) {
-				this.buffer[VTerm.vt_limit + 63 + x] = (carrier ? stxt.charCodeAt(x) : 0) | 0x100;
+				this.set_cell(VTerm.vt_limit + 63 + x, (carrier ? stxt.charCodeAt(x) : 0) | 0x100);
 			}
 		}
 		if(this.mux != null) {
-			let s = this.mux.cts ? ' SEND   ' : ' RECEIVE';
+			let s = this.mux.rts ? ' SEND   ' : ' RECEIVE';
 			for(let x = 0; x < s.length; x++)
-				this.buffer[VTerm.vt_limit + 71 + x] = s.charCodeAt(x) | 0x100;
+				this.set_cell(VTerm.vt_limit + 71 + x, s.charCodeAt(x) | 0x100);
 		} else {
 			for(let x = 0; x < 7; x++)
-				this.buffer[VTerm.vt_limit + 71 + x] = 0x100;
+				this.set_cell(VTerm.vt_limit + 71 + x, 0x100);
 		}
+		const vcy = VTerm.rows * vt_height;
+		const vcra = VTerm.vt_limit;
+		let vcx = 0;
 		for(let col = 0; col < VTerm.columns; col++) {
-			this.render_cell(col, VTerm.rows, false);
+			const vca = vcra + col
+			if((this.buffer[vca] & 0x8000) == 0)
+				this.render_cell(vca, col, VTerm.rows, vcx, vcy);
+			vcx += vt_width;
+			//this.update_cell(col, VTerm.rows);
 		}
-	}
-	update_screen() {
-		this.octx.clearRect(0, 0, this.canv.width, this.canv.height);
-		for(let r = 0; r < VTerm.rows + 1; r++) { // updates the status line
-			for(let col = 0; col < VTerm.columns; col++) {
-				this.render_cell(col, r, false);
-			}
-		}
-	}
-	present_screen() {
-		this.ctx.drawImage(this.vt_ofs_canv, 0, 0);
 	}
 	scroll() {
 		for(let r = 1; r < VTerm.rows; r++) {
@@ -1982,55 +2345,50 @@ class VTerm implements CharDevice {
 			const vcb = r * VTerm.columns;
 			for(let col = 0; col < VTerm.columns; col++) {
 				const vca = celly * VTerm.columns + col;
-				this.buffer[vca] = this.buffer[vcb + col];
+				this.set_cell(vca, this.buffer[vcb + col]);
 			}
 		}
 		const end_row = VTerm.rows - 1;
 		for(let vcx = 0; vcx < VTerm.columns; vcx++) {
 			const vca = end_row * VTerm.columns + vcx;
-			this.buffer[vca] = 32;
+			this.set_cell(vca, 32);
 		}
 		this.update_screen();
 		this.present_screen();
 	}
 	advance_line() {
-		const lasty = this.cursor_y;
-		this.cursor_y++;
-		if (this.cursor_y >= VTerm.rows) {
-			this.cursor_y = VTerm.rows - 1;
+		if (this.cursor_y == VTerm.rows - 1) {
 			this.scroll();
+			return;
 		} else {
-			this.render_cell(this.cursor_x, lasty);
-			this.render_cell(this.cursor_x, this.cursor_y);
+			this.set_cursor(this.cursor_x, this.cursor_y+1);
 		}
+		this.present_screen();
 	}
+	/** moves the cursor forwards, presents the screen when done */
 	advance_cursor() {
-		const lastx = this.cursor_x;
-		const lasty = this.cursor_y;
-		this.cursor_x++;
-		if (this.cursor_x >= VTerm.columns) {
-			this.cursor_x = 0;
-			this.cursor_y++;
-			if (this.cursor_y >= VTerm.rows) {
-				this.cursor_y = VTerm.rows - 1;
+		if (this.cursor_x == VTerm.columns - 1) {
+			if (this.cursor_y == VTerm.rows - 1) {
+				this.set_cursor(0, this.cursor_y);
 				this.scroll();
 				return;
 			}
+			this.set_cursor(0, this.cursor_y + 1);
+		} else {
+			this.set_cursor(this.cursor_x + 1, this.cursor_y);
 		}
-		this.render_cell(lastx, lasty);
-		this.render_cell(this.cursor_x, this.cursor_y);
+		this.present_screen();
 	}
 	send_fn(a:string) {
-		this.receive(2);
-		this.receive(a.charCodeAt(0));
-		this.receive(13);
+		this.send(2);
+		this.send(a.charCodeAt(0));
+		this.send(13);
+		this.check_send();
 		this.canv.focus();
 	}
-	write(c:number):void {
-		const lastcurx = this.cursor_x;
-		const lastcury = this.cursor_y;
-		const currow = lastcury * VTerm.columns;
-		const vca = currow + lastcurx;
+	receive(c:number):void {
+		const currow = this.cursor_y * VTerm.columns;
+		const vca = currow + this.cursor_x;
 		if(this.clear_status) {
 			this.set_status_message('');
 			this.update_statusline();
@@ -2047,20 +2405,14 @@ class VTerm implements CharDevice {
 			case VTEscapeModes.SEL_COL:
 				c -= 32;
 				if (c < VTerm.columns && this.esc_extra < VTerm.rows) {
-					this.cursor_x = c;
-					this.cursor_y = this.esc_extra;
-					this.render_cell(lastcurx, lastcury);
-					this.render_cell(this.cursor_x, this.cursor_y);
+					this.set_cursor(c, this.esc_extra);
 					this.present_screen();
 				}
 				return;
 			case VTEscapeModes.VTAB:
 				c = c & 0x1f;
 				if (c < VTerm.columns) {
-					this.cursor_x = c;
-					this.cursor_y = this.esc_extra;
-					this.render_cell(lastcurx, lastcury);
-					this.render_cell(this.cursor_x, this.cursor_y);
+					this.set_cursor(c, this.esc_extra);
 					this.present_screen();
 				}
 				return;
@@ -2092,9 +2444,7 @@ class VTerm implements CharDevice {
 				c = c & 0x7f;
 				c = ((c >> 4) * 10) + (c & 0xf);
 				if (c >= VTerm.columns) c = c - VTerm.columns;
-				this.cursor_x = c;
-				this.render_cell(lastcurx, lastcury);
-				this.render_cell(this.cursor_x, this.cursor_y);
+				this.set_cursor(c, this.cursor_y);
 				this.present_screen();
 				return;
 			}
@@ -2104,20 +2454,20 @@ class VTerm implements CharDevice {
 				this.make_status();
 				if(this.local_mode) {
 					const stxt = 'STATUS'
-					this.buffer[VTerm.vt_limit + 30] = 0x1100;
+					this.set_cell(VTerm.vt_limit + 30, 0x1100);
 					this.clear_status = true;
 					for(let x = 0; x < stxt.length; x++) {
 						let n = stxt.charCodeAt(x) | 0x100;
-						this.buffer[VTerm.vt_limit + 31 + x] = n;
+						this.set_cell(VTerm.vt_limit + 31 + x, n);
 					}
 					for(let x = 0; x < this.status_code.length; x++) {
 						let n = this.status_code[x] | 0x100;
-						this.buffer[VTerm.vt_limit + 37 + x] = n;
+						this.set_cell(VTerm.vt_limit + 37 + x, n);
 					}
 				} else {
 					console.log('vtt: status');
 					this.input_buf.push(...this.status_code);
-					this.check_read();
+					this.check_send();
 				}
 				break;
 			case 48: // set vis attr
@@ -2138,21 +2488,21 @@ class VTerm implements CharDevice {
 			case 65: // ESC,A set aux port baud rate
 				return;
 			case 69: // ESC,E del char inline
-				limit = VTerm.columns - 1;
+				limit = VTerm.columnr;
 				for (let q = this.cursor_x; q < limit; q++) {
-					this.buffer[currow + q] = this.buffer[currow + q + 1];
+					this.set_cell(currow + q, this.buffer[currow + q + 1]);
 				}
-				this.buffer[currow + limit] = 0x20;
-				this.update_screen();
+				this.set_cell(currow + limit, 0x20);
+				this.update_dirty();
 				this.present_screen();
 				return;
 			case 101: // ESC,e del char from page
 				limit = VTerm.vt_limit - 1;
 				for (let q = vca; q < limit; q++) {
-					this.buffer[q] = this.buffer[q + 1];
+					this.set_cell(q, this.buffer[q + 1]);
 				}
-				this.buffer[limit] = 0x20;
-				this.update_screen();
+				this.set_cell(limit, 0x20);
+				this.update_dirty();
 				this.present_screen();
 				return;
 			case 70: // ESC,F ins char inline
@@ -2174,45 +2524,44 @@ class VTerm implements CharDevice {
 				}
 				return;
 			case 76: // ESC,L (el, or 108 l?) delete line
-				this.cursor_x = 0;
 				limit = VTerm.vt_limit - VTerm.columns;
 				for (let q = currow; q < limit; q++) {
-					this.buffer[q] = this.buffer[q + VTerm.columns];
+					this.set_cell(q, this.buffer[q + VTerm.columns]);
 				}
 				for (let q = limit; q < VTerm.vt_limit; q++) {
-					this.buffer[q] = 0x20;
+					this.set_cell(q, 0x20);
 				}
-				this.update_screen();
+				this.update_dirty();
+				this.set_cursor(0, this.cursor_y);
 				this.present_screen();
 				return;
 			case 77: // ESC,M ins line
-				this.cursor_x = 0;
 				limit = currow + VTerm.columns;
 				for (let q = VTerm.vt_limit - 1; q >= limit; q--) {
-					this.buffer[q] = this.buffer[q - VTerm.columns];
+					this.set_cell(q, this.buffer[q - VTerm.columns]);
 				}
 				for (let q = currow; q < limit; q++) {
-					this.buffer[q] = 0x20;
+					this.set_cell(q, 0x20);
 				}
-				this.update_screen();
+				this.update_dirty();
+				this.set_cursor(0, this.cursor_y);
 				this.present_screen();
 				return;
 			case 71: // ESC,G erase all unprotected data + home cursor
-				this.cursor_x = 0;
-				this.cursor_y = 0;
 				limit = VTerm.vt_limit;
 				for (let q = 0; q < limit; q++) {
-					this.buffer[q] = 32;
+					this.set_cell(q, 32);
 				}
-				this.update_screen();
+				this.update_dirty();
+				this.set_cursor(0, 0);
 				this.present_screen();
 				return;
 			case 75: // ESC,K erase unprotected from cursor to next field (or EOL if null form)
 				limit = VTerm.columns;
-				for (let q = lastcurx; q < limit; q++) {
-					this.buffer[currow + q] = 32;
+				for (let q = this.cursor_x; q < limit; q++) {
+					this.set_cell(currow + q, 32);
 				}
-				this.update_screen();
+				this.update_dirty();
 				this.present_screen();
 				return;
 			case 79: // back tab: cursor to previous unprotected field
@@ -2233,9 +2582,9 @@ class VTerm implements CharDevice {
 			case 107: // ESC,k erase unprotected from cursor to end of screen
 				limit = VTerm.vt_limit;
 				for (let q = vca; q < limit; q++) {
-					this.buffer[q] = 32;
+					this.set_cell(q, 32);
 				}
-				this.update_screen();
+				this.update_dirty();
 				this.present_screen();
 				return;
 			case 115: // ESC,s reset
@@ -2257,10 +2606,9 @@ class VTerm implements CharDevice {
 		} else if (c < 32) {
 			switch(c) {
 			case 0: // NUL
-				break;
+				return;
 			case 1: // SOH
-				this.cursor_x = 0;
-				this.cursor_y = VTerm.rows - 1;
+				this.set_cursor(0, VTerm.rowb);
 				break;
 			case 6: // ACK
 				this.advance_cursor();
@@ -2270,47 +2618,52 @@ class VTerm implements CharDevice {
 				if (this.vbel_id > 0) {
 					clearTimeout(this.vbel_id);
 				}
-				wa_do_beep();
+				if(check_sound.checked) {
+					if(wa == undefined) wa = wa_setup();
+					wa_do_beep();
+				}
 				this.vbel_id = setTimeout(()=>{
 					this.vbel_id = 0;
 					if(this.vbell) this.vbell.classList.remove('a');
 				}, 1000);
 				//this.buffer[vca] = 7;
-				break;
+				return;
 			case 8: // BS
 			case 21:// NAK
-				if (this.cursor_x > 0) this.cursor_x--;
+				if (this.cursor_x > 0)
+					this.set_cursor(this.cursor_x-1, this.cursor_y);
+				else if(this.cursor_y > 0)
+					this.set_cursor(VTerm.columnr, this.cursor_y-1);
+				else
+					this.set_cursor(VTerm.columnr, VTerm.rowb);
 				break;
 			case 9: // HT
-				this.cursor_x = 0;
-				this.cursor_y = VTerm.rows - 1;
+				this.set_cursor(0, VTerm.rowb);
 				break;
 			case 10: // LF
 				this.advance_line();
-				this.present_screen();
 				return;
 			case 11: // VT
 				// next char & 0x1f is row address
 				this.esc_mode = VTEscapeModes.VTAB;
 				return;
 			case 12: {// FF (clear)
-				this.cursor_x = 0;
-				this.cursor_y = 0;
 				let limit = VTerm.vt_limit;
 				for (let q = 0; q < limit; q++) {
-					this.buffer[q] = 32;
+					this.set_cell(q, 32);
 				}
-				this.update_screen();
+				this.update_dirty();
+				this.set_cursor(0, 0);
 				this.present_screen();
 				return;
 			}
 			case 13: // CR
-				this.cursor_x = 0;
+				this.set_cursor(0, this.cursor_y);
 				break;
 			case 16: // DLE (set horz address)
 				// next char & 0x7f is converted to col address
 				this.esc_mode = VTEscapeModes.HADDR;
-				break;
+				return;
 			case 18: // DC4 (aux port on)
 				console.log('vtt: unhandled DC4 ON');
 				this.set_status_message('NOT IMPL:AUX');
@@ -2321,18 +2674,19 @@ class VTerm implements CharDevice {
 				this.clear_status = true;
 				break;
 			case 26: // SUB
-				this.cursor_y--;
-				if (this.cursor_y < 0) {
-					this.cursor_y = VTerm.rows - 1;
+				if (this.cursor_y == 0) {
+					this.set_cursor(this.cursor_x, VTerm.rowb);
+				} else {
+					this.set_cursor(this.cursor_x, this.cursor_y - 1);
 				}
 				break;
 			case 27: // ESC
 				this.esc_mode = VTEscapeModes.ESC;
 				return;
+			default:
+				console.log('vtt: unhandled control code:', '^'+String.fromCharCode(64+c), `[${hex(c)}]`);
+				return;
 			}
-			this.render_cell(lastcurx, lastcury);
-			if(this.cursor_x != lastcurx || this.cursor_y != lastcury)
-				this.render_cell(this.cursor_x, this.cursor_y);
 			this.present_screen();
 			return;
 		}
@@ -2343,34 +2697,47 @@ class VTerm implements CharDevice {
 			c = c | this.char_attr;
 		}
 		if (this.char_edit == VTEditCode.INS_CHAR_LINE) {
-			for(let q = currow + VTerm.columns - 1; q > vca; q--) {
-				this.buffer[q] = this.buffer[q - 1];
+			for(let q = currow + VTerm.columnr; q > vca; q--) {
+				this.set_cell(q, this.buffer[q - 1]);
 			}
 		} else if(this.char_edit == VTEditCode.INS_CHAR_SCREEN) {
 			for(let q = VTerm.vt_limit - 1; q > vca; q--) {
-				this.buffer[q] = this.buffer[q - 1];
+				this.set_cell(q, this.buffer[q - 1]);
 			}
 		}
-		this.buffer[vca] = c;
-		this.advance_cursor();
+		this.set_cell(vca, c);
 		if(this.char_edit != VTEditCode.NONE) {
 			// The *key* toggles this, but does the ESC code as well?
 			//this.char_edit = VTEditCode.NONE;
-			this.update_screen();
+			this.update_dirty();
 		}
-		this.present_screen();
+		this.advance_cursor();
+	}
+	get_dev(): CharDevice | undefined {
+		return this.mux;
+	}
+	bind_dev(dev: CharDevice | undefined): void {
+		this.mux = dev;
+		this.clear_buffer();
+		this.set_cts(dev?.rts || false);
+	}
+	can_receive(): boolean {
+		return true;
 	}
 	set_cts(value: boolean): void {
 		let s = value ? 'SEND   ' : 'RECEIVE';
-		for(let x = 0; x < s.length; x++) this.buffer[VTerm.vt_limit + 72 + x] = s.charCodeAt(x) | 0x100;
+		for(let x = 0; x < s.length; x++) this.set_cell(VTerm.vt_limit + 72 + x, s.charCodeAt(x) | 0x100);
 	}
 	clear_buffer() {
 		this.input_buf.length = 0;
 		this.import_buf.length = 0;
 	}
-	check_read() {
+	check_send() {
 		if (this.mux == null) return;
-		if (this.mux.can_receive() || this.input_control) {
+		if (this.input_control ||
+			(this.mux.can_receive() &&
+				(!this.mux.emu_linked || this.mux.rts)
+			)) {
 			if (this.input_buf.length > 0) {
 				this.input_interval = VTerm.input_interval_rate;
 				let sv = this.input_buf.shift() as number;
@@ -2385,9 +2752,9 @@ class VTerm implements CharDevice {
 			}
 		}
 	}
-	receive(c:number) {
+	send(c:number) {
 		if (this.local_mode) {
-			this.write(c);
+			this.receive(c);
 			return;
 		}
 		if (this.clear_status) {
@@ -2397,7 +2764,6 @@ class VTerm implements CharDevice {
 		}
 		if (this.input_buf.length < 12)
 			this.input_buf.push(c);
-		this.check_read();
 	}
 	text_import(txt:string):void {
 		let last = false;
@@ -2418,30 +2784,39 @@ class VTerm implements CharDevice {
 				last = false;
 			}
 		}
-		this.check_read();
+		this.check_send();
 	}
 }
-const cx_crt0 = new VTerm('CRT0', cv_term0, dc_crt0.children[0] as HTMLDivElement);
-run_hw.push(cx_crt0);
-
-let cx_crt1 = new VTerm('CRT1', cv_term1, frame_crt1.content.children[0] as HTMLDivElement);
-run_hw.push(cx_crt1);
-let cx_crt2 = new VTerm('CRT2', cv_term2, frame_crt2.content.children[0] as HTMLDivElement);
-run_hw.push(cx_crt2);
+const cx_crt = [
+	new VTerm('CRT0', dc_crt0),
+	new VTerm('CRT1', frame_crt1.content),
+	new VTerm('CRT2', frame_crt2.content),
+];
+run_hw.push(cx_crt[0]);
+run_hw.push(cx_crt[1]);
+run_hw.push(cx_crt[2]);
+if(cx_crt[0].glv && cx_crt[1].glv && cx_crt[2].glv) {
+	console.log('VT using WebGL renderer');
+} else {
+	cx_crt[0].glv && console.warn('VT CRT0 using WebGL renderer');
+	cx_crt[1].glv && console.warn('VT CRT1 using WebGL renderer');
+	cx_crt[2].glv && console.warn('VT CRT2 using WebGL renderer');
+	if(vt_use_offscreen) {
+		console.log('VT rendered using OffscreenCanvas');
+	} else {
+		console.warn('VT rendered direct to Canvas');
+	}
+}
 
 function console_text_import(txt:string):void {
-	cx_crt0.text_import(txt);
+	cx_crt[0].text_import(txt);
 }
 setInterval(function(){
-	cx_crt0.update_blink();
-	if(cx_crt1) cx_crt1.update_blink();
-	if(cx_crt2) cx_crt2.update_blink();
+	cx_crt[0].update_blink();
+	if(frame_crt1.show) cx_crt[1].update_blink();
+	if(frame_crt2.show) cx_crt[2].update_blink();
+	if(vt_font_bmp != null) vt_force_redraw = false;
 }, 125);
-// setInterval(function(){
-// 	cx_crt0.update_charblink();
-// 	if(cx_crt1) cx_crt1.update_charblink();
-// 	if(cx_crt2) cx_crt2.update_charblink();
-// }, 500);
 
 const init_program = '79 86 23 C8 E5 EC EC EF F2 EC E4 A1 8D 8A 00 71 80 01';
 const program_rotl = '60 AA AA 60 AA AA 55 40 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 37 00 71 01 03';
@@ -2636,12 +3011,10 @@ Iq4it48BAiLbB+gRAQIjEQetFQECIxEi+6wBAiMyGPaaAQIjMhm41wECI1cCAn8BAiN2BS8wAQIA
 yCaecQECCEwmpd4BAgK8Jt08AQICgibicQECAoIm7mUBAiMyJvGRAQICvCbzJgECArwm+CEBAgK8
 J0zMAQILDCdPcAECAQYnVnkBAgEGJ2doAQIBBidxXgECASQnezYBAgEkJ4wlAQIBJCeTHgECAMon
 mHQBAgDKJ59tAQIatyeiY4BI34AAAAAAAAAA`);
-let HEX_CONV = conv_hex.checked;
 const enum NAMECON {
 	CENT,
 	MEI, WIKI,
 }
-let name_conv = NAMECON.MEI;
 const NB = String.fromCodePoint(0xa0);
 
 function hexcs(s:string):string {
@@ -3377,8 +3750,6 @@ interface DMADevice {
 	dma_select(enable:boolean, dev:number):void;
 	dma_step(ctrl:DMAControl):void;
 }
-let sense_switch = 0;
-let dswitch = 0; // inverted on bus - R H I 0
 
 interface ILevelRegisters {
 	level: number; base: number;
@@ -3912,8 +4283,7 @@ function showstate(in_halt:boolean) {
 			}
 		}
 	}
-	fp_level.innerText = hex(level, 1);
-	
+
 	const is_running = (sysctl & 16) != 0;
 	style_if(fp_runhalt[0],'a',is_running); // run
 	style_if(fp_runhalt[1],'a',!is_running); // halt
@@ -4046,8 +4416,6 @@ function showstate(in_halt:boolean) {
 			mcpage[k].innerText = pgt;
 		}
 	}
-
-	fp_addr.innerText = hex(memaddr, 4);
 }
 
 ///////////////////////////////// Microcode stepping ////////////////////////////////////
@@ -5058,7 +5426,6 @@ function step(debug_output:boolean = false) {
 	aluc.step(mci.aluc_d, mci.aluc_b);
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 
-	hs_wait = 0;
 	run_hshw_steps();
 
 	run_once = false;
@@ -5214,7 +5581,7 @@ class RemCPU implements ICCPU {
 		}
 	}
 	step(dbg: boolean): void {
-		if(active_connection == null) return;
+		if(active_connection == null || !net_provides_rc) return;
 		const cmd = this.cmdbuf
 		if(dbg) {
 			cmd[0] = 11; // half step (for next state)
@@ -5293,7 +5660,6 @@ class RemCPU implements ICCPU {
 				}
 			}
 		}
-		fp_level.innerText = hex(this.level, 1);
 
 		const is_running = (this.sysctl & 16) != 0;
 		style_if(fp_runhalt[0],'a',is_running); // run
@@ -5387,11 +5753,9 @@ class RemCPU implements ICCPU {
 				mcpage[k].innerText = pgt;
 			}
 		}
-
-		fp_addr.innerText = hex(this.memaddr, 4);
 	}
 	reset(): void {
-		if(active_connection == null) return;
+		if(active_connection == null || !net_provides_rc) return;
 		const cmd = this.cmdbuf
 		cmd[0] = 12;
 		active_connection.socket.send(cmd);
@@ -6104,62 +6468,376 @@ function update_microlist() {
 		m.bpc.checked = m.bp;
 	}
 }
-// -2208988800000 // +2
-// -2208816000000 // +4
 const disk_origin_date = -2209161600000;
+const days_to_date = 86400000;
 const disk_file_types = [
-	{t:'D',x:'RAW'},
-	{t:'B',x:'BIN'},
-	{t:'A',x:'TXT'},
-	{t:'C',x:'BIN'},
-	{t:'E',x:'BIN'},
-	{t:'L',x:'VOL'},
-	{t:'I',x:'RAW'},
-	{t:'S',x:'RAWS'},
-	{t:'Q',x:'RAWQ'},
-	{t:'X',x:'FILE9'},
-	{t:'X',x:'FILE10'},
-	{t:'X',x:'FILE11'},
-	{t:'X',x:'FILE12'},
-	{t:'X',x:'FILE13'},
-	{t:'X',x:'FILE14'},
-	{t:' ',x:'FILE15'},
+	{i:0,t:'D',x:'RAW'},
+	{i:1,t:'B',x:'BIN'},
+	{i:2,t:'A',x:'TXT'},
+	{i:3,t:'C',x:'BIN'},
+	{i:4,t:'E',x:'BIN'},
+	{i:5,t:'L',x:'VOL'},
+	{i:6,t:'I',x:'RAW'},
+	{i:7,t:'S',x:'RAWS'},
+	{i:8,t:'Q',x:'RAWQ'},
+	{i:9,t:'X',x:'FILE9'},
+	{i:10,t:'X',x:'FILE10'},
+	{i:11,t:'X',x:'FILE11'},
+	{i:12,t:'X',x:'FILE12'},
+	{i:13,t:'X',x:'FILE13'},
+	{i:14,t:'X',x:'FILE14'},
+	{i:15,t:' ',x:'FILE15'},
 ];
+function fmt_disk_date(dts:number) {
+	let d = '';
+	if(dts != 0) {
+		let fe_dts = disk_origin_date + (days_to_date * dts);
+		d = (new Date(fe_dts)).toISOString().substring(0,10);
+	}
+	return d;
+}
+function u24(data:Uint8Array, ofs:number) {
+	return (data[ofs] << 16) | (data[ofs + 1] << 8) | data[ofs + 2];
+}
+function fixed_str(data:Uint8Array, ofs:number, count:number) {
+	let s = '';
+	for(let i = 0; i < count; i++) {
+		let c = data[ofs + i] & 127;
+		if(c == 0) return s;
+		if(c < 32) {
+			switch(c) {
+			case 10: s += '\\n'; break;
+			case 13: s += '\\r'; break;
+			default:
+				s += '^' + hex(data[ofs + i]);
+			}
+		} else s += String.fromCharCode(c);
+	}
+	return s;
+}
 
+interface FSDirEntry {
+	name: string,
+	map_sect: number, map_index: number,
+	ft: {i:number, t:string, x:string},
+	attr: number,
+	date: number,
+	ual_base: number,
+	loadaddr: number,
+	cls: number,
+	fsi: number,
+	fsi_shift: number,
+	fsi_str: string,
+	length: number,
+	t_len: string,
+	s_len: string,
+	ual?: number[],
+}
+class DiskVol {
+	image: DiskImage;
+	buf1 = new Uint8Array(400);
+	view1: DataView;
+	buf_ual = new Uint8Array(400);
+	view_ual: DataView;
+	name: string = '';
+	status: string = '';
+	max_sector_ofs: number;
+	max_sector: number;
+	guarded = true;
+	sys_date = 0;
+	reorg_date = 0;
+	reorg_errors = 0;
+	ual_sector = 0;
+	dir_offset = 0;
+	vrec_extra = '';
+	key = 100;
+	directory: (FSDirEntry | string)[] = [];
+	constructor(image: DiskImage) {
+		this.image = image;
+		this.view1 = new DataView(this.buf1.buffer);
+		this.view_ual = new DataView(this.buf_ual.buffer);
+		this.max_sector_ofs = image.backing_data.byteLength;
+		this.max_sector = (this.max_sector_ofs / image.stride) | 0;
+	}
+	read_media_sector(sector: number, buf: Uint8Array) {
+		let offset = sector * this.image.stride;
+		for(let i = 0; i < 400; i++) buf[i] = this.image.data[offset+i];
+	}
+	read_ual_sectors(entry: FSDirEntry) {
+		if(entry.ual) return entry.ual;
+		this.read_media_sector(entry.map_sect + this.ual_sector, this.buf_ual);
+		let sectors: number[] = [];
+		let ofs = entry.map_index + 6;
+		let ual_limit = 0;
+		while((++ual_limit) < 100 && sectors.length < entry.length) {
+			let si = u24(this.buf_ual, ofs);
+			if(si == 0xffffff) {
+				entry.ual = sectors;
+				break;
+			}
+			if(si > 0x800000) {
+				si = this.view_ual.getUint16(ofs) ^ 0xffff;
+				ofs = this.view_ual.getUint8(ofs + 2) * 3;
+				this.read_media_sector(si + this.ual_sector, this.buf_ual);
+			} else {
+				sectors.push(si);
+				ofs += 3;
+			}
+		}
+		return sectors;
+	}
+	private get_dir_ent(entry: number, ual_sect: number): FSDirEntry | null | string {
+		const fe_name = fixed_str(this.buf1, entry, 10);
+		const fe_map_index = this.buf1[entry + 10] * 3;
+		const fe_map_sect = this.view1.getUint16(entry + 11, false);
+		const fe_ft = disk_file_types[this.buf1[entry + 13] & 0xf];
+		const fe_attr = this.buf1[entry + 13];
+		const fe_date = this.view1.getUint16(entry + 14, false);
+		const fm_base = ual_sect + fe_map_sect;
+		if(fm_base >= this.max_sector || fe_map_index >= 396) {
+			return `${fe_name} ${fe_ft.t} <BAD:${hex(fe_map_sect,4)}:${hex(fe_map_index)}> ${fmt_disk_date(fe_date)}`;
+		}
+		this.read_media_sector(fm_base, this.buf_ual);
+		const fm_length = this.view_ual.getUint16(fe_map_index, false) + 1;
+		const fm_begin_ptr = this.view_ual.getUint16(fe_map_index + 2, false);
+		const fm_shift = this.buf_ual[fe_map_index + 4];
+		const fm_cls = this.buf_ual[fe_map_index + 5];
+		// u16 file length - 1 (zero length not allowed)
+		// u16 entrypoint (typically 0x8000)
+		// u8 FSI = 1 << thisval: File size increment, a # of sectors
+		// u8 file class: typically 0xff and not used
+		// i24[]: file usage allocation list:
+		//  positive values are a start sector #, points at FSI# sectors
+		//   the next UAL entry will immediately follow
+		//   up to 8.5 GB of storage can be addressed.
+		//  negative values:
+		//   -1, end of file allocation
+		//   else, reinterpret as:
+		//    u16: next UAL sector ^ 0xffff
+		//    u8: FAL index, multiply by 3, then use as offset into next UAL sector
+		//    index should not exceed 132 (byte offset 396)
+		//    next UAL sector numbers are relative to start of UAL
+		if(fm_shift > 15) {
+			const fm_6 = u24(this.buf_ual, fe_map_index + 6);
+			return `${fe_name} ${fe_ft.t}:${hex(fe_attr)} <BAD:${hex(fe_map_sect,4)}:${hex(fe_map_index)}> <${hex(fm_length,4)}:${hex(fm_begin_ptr,4)}:${hex(fm_shift)}:${hex(fm_cls)}:${hex(fm_6,6)}>`;
+		}
+		return {
+			name: fe_name,
+			map_sect: fe_map_sect, map_index: fe_map_index,
+			ft: fe_ft,
+			attr: fe_attr,
+			date: fe_date,
+			ual_base: fm_base,
+			loadaddr: fm_begin_ptr,
+			cls: fm_cls,
+			fsi: 1 << fm_shift,
+			fsi_shift: fm_shift,
+			fsi_str: DiskViewer.fsi_s[fm_shift],
+			length: fm_length,
+			t_len: `${fm_length >> 4}T`.padStart(4),
+			s_len: `${fm_length & 15}S`.padStart(3)
+		};
+	}
+	decode_image() {
+		this.read_media_sector(14, this.buf1);
+		let mcr = '';
+		const disk6_flag = (this.buf1[8] << 8) | this.buf1[9];
+		let disk_vol_pre = 0;
+		let disk_vol_ofs = 16;
+		this.sys_date = (this.buf1[0] << 8) | this.buf1[1];
+		const disk_guard = (this.buf1[2] << 8) | this.buf1[3];
+		this.guarded = disk_guard != 0x4321;
+		if(disk6_flag == 0xffff) {
+			let disk_key = (this.buf1[6] << 8) | this.buf1[7];
+			disk_key ^= 0xffff;
+			disk_key = ((disk_key >> 1) | (disk_key << 15)) & 0xffff;
+			disk_key ^= 0x8db1;
+			this.key = disk_key;
+			let dvo = this.buf1[5];
+			disk_vol_pre = ((this.buf1[4]^dvo) << 8) | dvo;
+			disk_vol_pre ^= 0x3cb1;
+			disk_vol_ofs = (disk_vol_pre + disk_key) & 0xfff;
+			disk_vol_ofs <<= 4;
+		}
+		this.dir_offset = disk_vol_ofs;
+		for(let i = 8; i < 12; i++) {
+			mcr += hex(this.buf1[i]);
+		}
+		this.vrec_extra = mcr;
+		this.read_media_sector(disk_vol_ofs, this.buf1);
+		this.reorg_date = this.view1.getUint16(10, false);
+		this.reorg_errors = this.view1.getUint8(12);
+		const vol_ual_sect = u24(this.buf1, 13);
+		this.name = '';
+		if(disk6_flag == 0xfdfd) {
+			this.status = '<<< INIT >>>';
+		} else if(disk6_flag == 0xffff || disk6_flag == 0) {
+			this.name = '';
+			if(vol_ual_sect == 0) {
+				this.status = '<<< NUL >>>';
+			} else if(vol_ual_sect >= this.max_sector) {
+				if(disk6_flag == 0xffff)
+					this.status = '<<<  6  >>>';
+				else this.status = '<<<  5  >>>';
+			} else {
+				this.name = fixed_str(this.buf1, 0, 10);
+				this.status = '';
+			}
+		} else this.status = `<<< ${hex(disk6_flag,4)}>>>`;
+
+		let entry = 16;
+		if(disk6_flag != 0xffff) return;
+		let ent_itr = 0;
+		let bad_itr = 0;
+		let ent_index = 0;
+		this.ual_sector = vol_ual_sect;
+		let sector = disk_vol_ofs;
+		const self = this;
+		function dir_scan() {
+			while(sector < self.max_sector) {
+				for(; entry < 400; entry+=16) {
+					if(bad_itr > 10) {
+						self.directory[ent_index++] = `<<error limit exceeded>>`;
+						return;
+					}
+					if(ent_itr > 800) return;
+					ent_itr++;
+					if(self.buf1[entry] == 0x84 && self.buf1[entry+1] == 0x8d) {
+						self.directory[ent_index++] = `<<EOL>>`;
+						return;
+					}
+					if(self.buf1[entry] == 0) { continue; }
+					const fe = self.get_dir_ent(entry, vol_ual_sect);
+					if(fe) {
+						self.directory[ent_index++] = fe;
+					}
+				}
+				entry = 0;
+				sector++;
+				self.read_media_sector(sector, self.buf1);
+			}
+		}
+		dir_scan();
+		this.directory.length = ent_index;
+	}
+	fmt_reorg() {
+		if(this.reorg_date == 0) {
+			return '<no reorg>';
+		}
+		return `${fmt_disk_date(this.reorg_date)} ${this.reorg_errors}`;
+	}
+}
+function get_dirent_str(fe: FSDirEntry) {
+	return `${fe.name} ${fe.ft.t} ${fe.t_len}${fe.s_len}${fe.fsi_str} ${
+		hex(fe.cls)}${(fe.loadaddr != 0x8000)? ' ' + hex(fe.loadaddr,4) : ''
+	} <${hex(fe.map_sect,4)}:${hex(fe.map_index)}> ${
+		fmt_disk_date(fe.date)
+	}`;
+}
 class DiskViewer {
-	listing:{n:HTMLDivElement}[] = [];
-	listing_lproxy: HTMLDivElement;
+	images:{n:HTMLDivElement, vol?: DiskVol}[] = [];
+	images_con:HTMLDivElement;
+	listing:{n:HTMLDivElement, file?: number}[] = [];
+	//listing_lproxy: HTMLDivElement;
 	listingc: HTMLDivElement;
-	listing_index = 0;
 	datae:{a:HTMLDivElement, d:HTMLDivElement, t:HTMLDivElement}[] = [];
 	datae_lproxy: HTMLDivElement;
 	datae_con_a: HTMLDivElement;
 	datae_con_d: HTMLDivElement;
 	datae_con_t: HTMLDivElement;
+	image_index = 0;
+	listing_index = 0;
 	datae_index = 0;
+	sel_disk = -1;
+	sel_file = -1;
+	static fsi_s = [
+		0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+	].map(function(x) { return ((x > 3) ? `${1<<(x - 4)}T` : `${1<<x}S`).padStart(4); });
 	constructor() {
-		const listscrollbox = frame_disks.base.children[1] as HTMLDivElement;
+		const left_box = frame_disks.base.children[1] as HTMLDivElement;
+		this.images_con = left_box.children[0].children[0] as HTMLDivElement;
+		const listscrollbox = left_box.children[1] as HTMLDivElement;
 		const datascrollbox = frame_disks.base.children[2] as HTMLDivElement;
-		this.listing_lproxy = listscrollbox.children[0] as HTMLDivElement;
-		this.listingc = listscrollbox.children[1] as HTMLDivElement;
+		//this.listing_lproxy = listscrollbox.children[0] as HTMLDivElement;
+		this.listingc = listscrollbox.children[0] as HTMLDivElement;
 		this.datae_lproxy = datascrollbox.children[0] as HTMLDivElement;
 		this.datae_con_a = datascrollbox.children[1] as HTMLDivElement;
 		this.datae_con_d = datascrollbox.children[2] as HTMLDivElement;
 		this.datae_con_t = datascrollbox.children[3] as HTMLDivElement;
 	}
-	get_list_elem() {
+	on_img_click(index:number, ev:MouseEvent) {
+		if(this.sel_disk == index)
+			return;
+		if(this.sel_disk > -1)
+			style_off(this.images[this.sel_disk].n, 'a');
+		this.sel_disk = index;
+		const ent = this.images[index];
+		style_if(ent.n, 'a', true);
+		this.update();
+	}
+	on_list_click(index:number, ev:MouseEvent) {
+		if(this.sel_file == index) return;
+		if(this.sel_file > -1) {
+			style_off(this.listing[this.sel_file].n, 'a');
+		}
+		const ent = this.listing[index];
+		this.sel_file = index;
+		if(ent.file) {
+			style_if(ent.n, 'a', true);
+			this.sector_list(ent.file);
+		}
+	}
+	get_img_elem() {
+		const self = this;
+		const index = this.image_index;
+		this.image_index++;
+		let li = this.images[index];
+		if(li) return li;
+		li = {
+			n: document.createElement('div')
+		};
+		li.n.addEventListener('click', function(ev) {
+			self.on_img_click(index, ev);
+		});
+		this.images_con.appendChild(li.n);
+		this.images[index] = li;
+		return li;
+	}
+	private get_list_elem() {
 		let li = this.listing[this.listing_index];
 		if(li == null) {
 			li = {
-				n: document.createElement('div')
+				n: document.createElement('div'),
 			};
+			const self = this;
+			const index = this.listing_index;
+			li.n.addEventListener('click', function(ev) {
+				self.on_list_click(index, ev);
+			});
 			this.listingc.appendChild(li.n);
 			this.listing[this.listing_index] = li;
 		}
 		this.listing_index++;
 		return li;
 	}
-	get_datae_elem() {
+	private drop_list_elems() {
+		this.listing.length = this.listing_index;
+		while(this.listingc.childElementCount > this.listing_index) {
+			this.listingc.removeChild(this.listingc.lastChild as ChildNode);
+		}
+	}
+	private drop_datae_elems() {
+		let it_datae = this.datae.length;
+		while(it_datae > this.datae_index) {
+			it_datae -= 1;
+			let li = this.datae[it_datae];
+			this.datae_con_a.removeChild(li.a);
+			this.datae_con_d.removeChild(li.d);
+			this.datae_con_t.removeChild(li.t);
+		}
+		this.datae.length = this.datae_index;
+	}
+	private get_datae_elem() {
 		let li = this.datae[this.datae_index];
 		if(li == null) {
 			li = {
@@ -6175,135 +6853,115 @@ class DiskViewer {
 		this.datae_index++;
 		return li;
 	}
+	private sector_list(file_id: number) {
+		this.datae_index = 0;
+		let im_line = this.images[this.sel_disk];
+		if(im_line == undefined || im_line.vol == undefined) return;
+		const vol = im_line.vol;
+		const dent = vol.directory[file_id];
+		if(dent == undefined) {
+			this.get_datae_elem().d.innerText = 'undef';
+			this.drop_datae_elems();
+			return;
+		} else if(typeof dent == 'string') {
+			this.get_datae_elem().d.innerText = 'error';
+			this.drop_datae_elems();
+			return;
+		}
+		const sec = vol.read_ual_sectors(dent);
+		let addr = 0;
+		const buf = vol.buf1;
+		for(let ali = 0; ali < sec.length; ali++) {
+			for(let fsi = 0; fsi < dent.fsi; fsi++) {
+				vol.read_media_sector(sec[ali] + fsi, buf);
+				let line = '';
+				let txtl = '';
+				for(let i = 0; i < 400; i++) {
+					let c = buf[i];
+					line += hex(c,2);
+					if((c >= 0xa0) && (c < 0xff))
+						txtl += String.fromCharCode(c & 127)
+					else if(c > 0 && c < 0xa0) txtl += '.';
+					else txtl += '?';
+					if((i & 15) == 15) {
+						let dat_line = this.get_datae_elem();
+						dat_line.a.innerText = hex(addr, 5);
+						dat_line.d.innerText = line;
+						dat_line.t.innerText = txtl;
+						line = '';
+						txtl = '';
+						addr += 16;
+					} else {
+						line += ' ';
+					}
+				}
+				if(line.length > 0) {
+					let dat_line = this.get_datae_elem();
+					dat_line.a.innerText = hex(addr, 5);
+					dat_line.d.innerText = line;
+					dat_line.t.innerText = txtl;
+				}
+			}
+		}
+		this.drop_datae_elems();
+	}
+	private list_disk_name(n:string) {
+		let li = this.get_img_elem();
+		li.n.classList.add('disk');
+		li.n.innerText = n;
+		return li;
+	}
+	private list_vol_info(n:string) {
+		let li = this.get_list_elem();
+		li.n.classList.add('vol');
+		li.n.innerText = n;
+	}
+	private list_file_name(n:string) {
+		let li = this.get_list_elem();
+		li.n.classList.add('file');
+		li.n.innerText = n;
+		return li;
+	}
+
 	update() {
+		if(this.sel_file > -1) {
+			style_off(this.listing[this.sel_file].n, 'a');
+			this.sel_file = -1;
+		}
+		disk_view_update = false;
+		this.image_index = 0;
 		this.listing_index = 0;
 		this.datae_index = 0;
-		const self = this;
-		function list_disk_name(n:string) {
-			let li = self.get_list_elem();
-			li.n.innerText = n;
-		}
-		function list_vol_name(n:string) {
-			let li = self.get_list_elem();
-			li.n.innerText = n;
-		}
-		function list_file_name(n:string) {
-			let li = self.get_list_elem();
-			li.n.innerText = n;
-		}
-		function fixed_str(data:Uint8Array, ofs:number, count:number) {
-			let s = '';
-			for(let i = 0; i < count; i++) {
-				let c = data[ofs + i] & 127;
-				if(c == 0) return s;
-				if(c < 32) {
-					switch(c) {
-					case 10: s += '\\n'; break;
-					case 13: s += '\\r'; break;
-					default:
-						s += '^' + hex(data[ofs + i]);
-					}
-				} else s += String.fromCharCode(c);
-			}
-			return s;
-		}
-		function u24(data:Uint8Array, ofs:number) {
-			return (data[ofs] << 16) | (data[ofs + 1] << 8) | data[ofs + 2];
-		}
-		function disk_date(dts:number) {
-			let d = '';
-			if(dts != 0) {
-				let fe_dts = disk_origin_date + (86400000 * dts);
-				d = (new Date(fe_dts)).toISOString().substring(0,10);
-			}
-			return d;
-		}
-		function decode_image(im: DiskImage) {
-			const stride = im.stride;
-			const view = new DataView(im.backing_data);
-			const max_sector_ofs = im.backing_data.byteLength;
-			const max_sector = (max_sector_ofs / stride) | 0;
-			let sector = im.stride * 16;
-			let vol = fixed_str(im.data, sector, 10);
-			const vol_reorg_date = view.getUint16(sector + 10, false);
-			const vol_reorg_errs = view.getUint8(sector + 12);
-			const vol_dir_sect = u24(im.data, sector + 13);
-			if(vol_dir_sect == 0) {
-				vol = '<<< NUL >>>';
-			} else if(vol_dir_sect >= max_sector) {
-				if(im.data[sector] == 0x84) {
-					if(im.data[sector+1] == 0x0c) vol = '<<< INIT >>>';
-					else vol = `<<< ${hex(im.data[sector+1])} >>>`;
+		for(let i = 0; i < disk_images.length; i++) {
+			const disk = disk_images[i];
+			let disk_rec = this.list_disk_name(disk_image_luid(disk));
+			if(this.sel_disk == i) {
+				let vol: DiskVol;
+				if(disk_rec.vol) vol = disk_rec.vol;
+				else {
+					vol = new DiskVol(disk);
+					disk_rec.vol = vol;
 				}
-			}
-			let volx:string;
-			if(vol_reorg_date == 0) {
-				volx = '<no reorg>';
-			} else {
-				volx = `${disk_date(vol_reorg_date)} ${vol_reorg_errs}`;
-			}
-			list_vol_name(vol + ` ${volx} [${hex(vol_dir_sect, 6)}]`);
-			let entry = 16;
-			secloop:do { do {
-				const esect = entry + sector;
-				if(im.data[esect] == 0x84 && im.data[esect+1] == 0x8d) {
-					list_file_name(`<<EOL>>`);
-					break secloop;
-				}
-				const name = fixed_str(im.data, esect, 10);
-				if(name.length == 0) { entry += 16; continue; }
-				const fe_map_idx = im.data[esect + 10] * 3;
-				const fe_map_sec = view.getUint16(esect + 11, false);
-				const fe_type = disk_file_types[im.data[esect + 13] & 0xf].t;
-				const fe_attr = im.data[esect + 13];
-				const fe_date = view.getUint16(esect + 14, false);
-				let fe_day = '';
-				if(fe_date != 0) {
-					let fe_dts = disk_origin_date + (86400000 * fe_date);
-					fe_day = (new Date(fe_dts)).toISOString().substring(0,10);
-				}
-				const fm_sect = vol_dir_sect + fe_map_sec;
-				const fm_base = fm_sect * stride + fe_map_idx;
-				if(fm_sect >= max_sector || fe_map_idx >= 400) {
-					list_file_name(`${name} ${fe_type} <BAD:${hex(fe_map_sec,4)}:${hex(fe_map_idx)}> ${fe_day}`);
-					entry += 16;
-					continue;
-				}
-				const fm_length = view.getUint16(fm_base, false) + 1;
-				const fm_begin_ptr = view.getUint16(fm_base + 2, false);
-				const fm_shift = im.data[fm_base + 4];
-				const fm_cls = im.data[fm_base + 5];
-				const fm_6 = u24(im.data, fm_base + 6);
-				if(fm_shift > 15) {
-					list_file_name(`${name} ${fe_type}:${hex(fe_attr)} <BAD:${hex(fe_map_sec,4)}:${hex(fe_map_idx)}> <${hex(fm_length,4)}:${hex(fm_begin_ptr,4)}:${hex(fm_shift)}:${hex(fm_cls)}:${hex(fm_6,6)}>`);
-				} else {
-					let fm_len_t = fm_length >> 4;
-					let fm_len_s = fm_length & 15;
-					let fm_len_tx = `${fm_len_t}T`.padStart(4);
-					let fm_len_sx = `${fm_len_s}S`.padStart(3);
-					let fm_fsi_t;
-					if(fm_shift > 3) {
-						fm_fsi_t = `${1<<(fm_shift - 4)}T`.padStart(4);
+				vol.decode_image();
+				this.list_vol_info(`k=${vol.key} SYSDATE:${fmt_disk_date(vol.sys_date)} ${vol.guarded ? 'GUARDED':''} o=${hex(vol.dir_offset,4)} [${vol.vrec_extra}]`);
+				this.list_vol_info(`vol=${vol.name} ${vol.fmt_reorg()} [${hex(vol.ual_sector, 6)}]`);
+				for(let i = 0; i < vol.directory.length; i++) {
+					const fe = vol.directory[i];
+					if(typeof fe == 'string') {
+						this.list_vol_info(fe);
 					} else {
-						fm_fsi_t = `${1<<fm_shift}S`.padStart(4);
+						this.list_file_name(get_dirent_str(fe)).file = i;
+						if(fe.ft.i == 5) {
+							// libs
+						}
 					}
-					let fm_bbp_t = '';
-					if(fm_begin_ptr != 0x8000) fm_bbp_t = ' ' + hex(fm_begin_ptr);
-					list_file_name(`${name} ${fe_type} ${fm_len_tx}${fm_len_sx}${fm_fsi_t} ${hex(fm_cls)}${fm_bbp_t} <${hex(fe_map_sec,4)}:${hex(fe_map_idx)}> ${fe_day}`);
 				}
-				entry += 16;
-			} while(entry < 400);
-				entry = 0;
-				sector += stride;
-			} while(sector < max_sector_ofs);
+			}
 		}
-		for(let name in disk_images) {
-			list_disk_name(name);
-			decode_image(disk_images[name]);
-		}
+		this.drop_list_elems();
 	}
 }
-const disk_view = new DiskViewer();
+disk_view = new DiskViewer();
 
 const enum MEMSTAT {
 	IO = 0x200,
@@ -6416,15 +7074,9 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 	dma_op = 0;
 	dma_selected = false;
 	verify_fail = false;
-	is_interrupt(): boolean {
-		return false;
-	}
-	getlevel():number {
-		return 2; // not used, but seems like a good number :)
-	}
-	acknowledge():boolean {
-		return false;
-	}
+	is_interrupt(): boolean { return false; }
+	getlevel():number { return 2; } // not used, but seems like a good number :)
+	acknowledge():boolean { return false; }
 	reset(): void {
 		this.command = -1;
 		this.format_permit = false;
@@ -6564,11 +7216,13 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 		if (mcsim.dma_end) {
 			ctrl.end();
 			this.busy_time = 10;
+			if(this.dma_op == 2 && frame_disks.show) disk_view_update = true;
 		} else {
 			if (this.sect_remain <= 0) {
 				this.sect_remain = 400;
 				let sela = (this.sel_address + 1) & 255;
 				this.sel_address = (this.sel_address & 0xff00) | sela;
+				if(this.dma_op == 2 && frame_disks.show) disk_view_update = true;
 			}
 			if (this.sect_remain == 400) {
 				if((this.sel_address & 0xffe0) != (unit.sel_address & 0xffe0)) {
@@ -6770,6 +7424,7 @@ class DSK2 implements MemAccess, IOAccess, DMADevice {
 class MockPrinter implements MemAccess, CharDevice {
 	readmeta(address: number):number { return MEMSTAT.IO; }
 	writemeta(address: number, value: number): void {}
+	rts = true;
 	readbyte(address: number): number {
 		let value = 0;
 		if(address == 1) {
@@ -6779,10 +7434,14 @@ class MockPrinter implements MemAccess, CharDevice {
 	}
 	writebyte(address: number, value: number): void {
 		if (address == 0) {
-			this.write(value);
+			this.receive(value);
 		}
 	}
-	write(v: number): void {
+	// the printer never sends anything
+	get_dev(): CharDevice | undefined { return undefined; }
+	bind_dev(dev: CharDevice | undefined): void {}
+	can_receive(): boolean { return true; }
+	receive(v: number): void {
 		let c;
 		v &= 127;
 		if (v == 12) {
@@ -6793,8 +7452,7 @@ class MockPrinter implements MemAccess, CharDevice {
 		txt_anno.value += c;
 	}
 	set_cts(value: boolean): void {}
-	check_read(): void {}
-	clear_buffer(): void {}
+	check_send(): void {}
 }
 
 const ccitt = new Uint16Array(256);
@@ -7798,58 +8456,131 @@ class MMIOMulti implements MemAccess {
 		}
 	}
 }
-class MUXPort {
+const RUN_INTERVAL = 50; // (1000ms / 20ms [tick interval]) * (10 bits/byte)
+const MUX_BAUDS = [0, 75, 300, 1200, 2400, 4800, 9600, 19200];
+const MUX_MASKS = [0x1f, 0x3f, 0x7f, 0xff];
+class MUXPort implements CharDevice {
+	emu_linked = true;
 	write_busy = false;
 	write_full = false;
 	read_busy = false;
 	read_full = false;
 	read_buffer = 0;
+	overrun = false;
+	_rts = true;
 	_cts = true;
 	buf_write = 0;
+	_bit_len = 0;
+	_frame_cost = 0;
+	_parity = 0;
+	_baud_field = 0;
+	_baud = 0;
+	_tx_div = 0;
 	card:MMIOMux;
-	line:CharDevice | null = null;
-	constructor(card:MMIOMux) {
+	tx_flag:number;
+	line:CharDevice | undefined;
+	constructor(card:MMIOMux, id:number) {
 		this.card = card;
+		this.tx_flag = 1 << id;
+		this.reset();
+		mux_hw.push(this);
 	}
-	get cts() { return this._cts; }
-	set cts(value:boolean) {
+	get rts() { return this._rts; }
+	set_cts(value:boolean) {
 		this._cts = value;
+	}
+	set_rts(value:boolean) {
+		this._rts = value;
 		if(this.line != null) {
 			this.line.set_cts(value);
-			this.line.check_read();
+			this.line.check_send();
 		}
 	}
 	reset():void {
 		this.write_busy = false;
 		this.read_busy = false;
-		this._cts = true;
-		if(this.line) {
-			this.line.clear_buffer();
-		}
+		this.set_rts(true);
+		this._bit_len = 5;
+		this._parity = 1;
+		this._frame_cost = 8 * RUN_INTERVAL;
+		this._baud_field = 0;
+		this._baud = 0;
+		this.overrun = false;
 	}
 	read_status():number {
-		return (this.write_busy ? 0 : 2) | (this.read_busy ? 1 : 0) | 0x20;
+		return (this.write_busy ? 0 : 2) |
+			(this.read_busy ? 1 : 0) |
+			(this.overrun ? 16 : 0) |
+			(this._cts ? 0x20 : 0);
+	}
+	get_dev(): CharDevice | undefined {
+		return this.line;
+	}
+	bind_dev(dev: CharDevice | undefined): void {
+		this.line = dev;
+		if(dev) {
+			this.set_cts(dev.rts);
+		} else {
+			this.set_cts(false);
+		}
 	}
 	read_data():number {
 		let vcc = this.read_buffer;
 		this.read_buffer = 0;
 		this.read_busy = false;
-		if(this.line != null) this.line.check_read();
+		this.overrun = false;
+		if(this.line != null) this.line.check_send();
 		return vcc;
 	}
+	run_tx(): void {
+		if(this._tx_div < this._baud) {
+			this._tx_div += this._baud;
+		}
+		if(this._tx_div > this._baud) {
+			this._tx_div = this._baud;
+		}
+		this.check_send();
+	}
+	check_send(): void {
+		if(this.write_busy && this._tx_div > 0) {
+			this._tx_div -= this._frame_cost;
+			if(this.line) {
+				this.line.receive(this.buf_write & MUX_MASKS[this._bit_len]);
+				this.write_complete();
+			} else this.write_complete();
+		}
+	}
 	write_control(value:number):void {
+		this._baud_field = (value >> 5) & 7;
+		this._baud = MUX_BAUDS[this._baud_field];
+		this._bit_len = (value >> 1) & 3;
+		let stop = (value >> 3) & 1;
+		let p_dis = (value >> 4) & 1;
+		if(p_dis == 0) {
+			this._parity = 2 | (value & 1);
+			this._frame_cost = (3 + stop + 5 + this._bit_len) * RUN_INTERVAL;
+		} else {
+			this._parity = 0;
+			this._frame_cost = (2 + stop + 5 + this._bit_len) * RUN_INTERVAL;
+		}
+	}
+	write_complete():void {
+		this.write_busy = false;
+		this.card.tx_int |= this.tx_flag;
+		this.card.interrupt_pend = true;
+		this.card.mux_cause = true;
 	}
 	write_data(value:number):void {
 		this.write_busy = true;
 		this.buf_write = value;
-		this.write_busy = false;
-		this.line?.write(this.buf_write & 0x7f);
+		this.check_send();
 	}
 	can_receive():boolean {
-		return this._cts && !this.read_busy;
+		return !this.read_busy;
 	}
 	receive(data:number):void {
-		this.read_buffer = data;
+		if(this.read_busy) this.overrun = true;
+		this.read_buffer = data & MUX_MASKS[this._bit_len];
 		this.read_busy = true;
 		this.card.interrupt_pend = true;
 		this.card.mux_cause = true;
@@ -7883,8 +8614,8 @@ class MMIOMux implements MemAccess, IOAccess {
 		this.muxports[3].reset();
 	}
 	muxports:MUXPort[] = [
-		new MUXPort(this), new MUXPort(this),
-		new MUXPort(this), new MUXPort(this)
+		new MUXPort(this, 0), new MUXPort(this, 1),
+		new MUXPort(this, 2), new MUXPort(this, 3)
 	];
 	interrupt_level = 0;
 	interrupt_en = false;
@@ -7939,9 +8670,6 @@ class MMIOMux implements MemAccess, IOAccess {
 			if (selmux) {
 				if ((address & 1) != 0) {
 					selmux.write_data(value);
-					this.tx_int |= 1 << port;
-					this.interrupt_pend = true;
-					this.mux_cause = true;
 				} else {
 					selmux.write_control(value);
 				}
@@ -7951,7 +8679,7 @@ class MMIOMux implements MemAccess, IOAccess {
 			let port = (value >> 1) & 3;
 			let selmux = this.muxports[port];
 			if (selmux) {
-				selmux.cts = (onoff == 0);
+				selmux.set_rts(onoff == 0);
 			}
 		} else if (address == 10) {
 			this.interrupt_level = value & 0xf;
@@ -8144,7 +8872,11 @@ interface OPL_EXT_RII {
 interface OPL_EXT_XIO {
 	x:OPL_EXT.XIO,
 }
-
+const enum AOP {
+	ADD=0, SUB=1, XFR=2,
+	AND=3, ORI=4, XOR=5,
+	NOT=6, CLR=7,
+}
 interface OPLBase {
 	n:string|(string[]),
 	nm?:string|(string[]),
@@ -8156,7 +8888,7 @@ interface OPLBase {
 	sr?:REG,
 	dr?:REG,
 	fl:FLAGS,
-	aop?:0|1|2,
+	aop?:AOP,
 	opf?:(this:SoftCPU, ctx:rrscdata)=>number,
 	opc?:(this:SoftCPU, ctx:rrscdata)=>void,
 }
@@ -8171,6 +8903,9 @@ interface rrscdata {
 	srcval:number;
 	cdval:number;
 	addr:number;
+	fault:number;
+	link:number;
+	is_addr:boolean;
 }
 interface SoftCPU {
 	cc:number;
@@ -8179,6 +8914,10 @@ interface SoftCPU {
 	writew(address:number, v16:number):void;
 	stackb(v8:number):void;
 	stackw(v16:number):void;
+	get_rw(n:number):number;
+	set_rw(n:number, v16:number):void;
+	get_rb(n:number):number;
+	set_rb(n:number, v8:number):void;
 	popb():number;
 	popw():number;
 	fetch(address:number):number;
@@ -8187,12 +8926,22 @@ interface SoftCPU {
 	pcfetchw():number;
 	f_jsr(ea:number):void;
 	f_branch(cm:number, cn:string, z:boolean):void;
+	handle_svc(sc:number):void;
+	flags_8vm(v:number):number;
+	flags_8vmfl(v:number, fault:number, link:number):number;
+	flags_a8vml(lh:number, rh:number, cin?:number):number;
+	flags_a8vmfl(lh:number, rh:number, cin:number):number;
+	flags_a8vmf(lh:number, rh:number, cin?:number):number;
+	flags_a16vmfl(lh:number, rh:number, cin?:number):number;
+	flags_a16vmf(lh:number, rh:number, cin:number):number;
+	flags_16vm(v:number):number;
+	flags_16vmfl(v:number, fault:number, link:number):number;
 }
 
 const enum FLAGS {
 	None,
 	F, L,
-	MV, LMV, FLMV, ArithLMV, ArithFMV, ArithFLMV
+	MV, FLMV, ArithFMV, ArithFLMV
 }
 const enum REG {
 	A, AL, B, BL, X, XL, Y, YL,
@@ -8201,8 +8950,8 @@ const enum REG {
 const regname = [[
 	['AU','AL','BU','BL','XU','XL','YU','YL',
 	'ZU','ZL','SU','SL','CU','CL','PU','PL'],
-	['A','A','B','B','X','X','Y','Y',
-	'Z','Z','S','S','C','C','P','P','PC','PC'],
+	['A','AL','B','BL','X','XL','Y','YL',
+	'Z','ZL','S','SL','C','CL','P','PL','PC','PCL'],
 ],[
 	['AH','AL','BH','BL','XH','XL','YH','YL',
 	'ZH','ZL','SH','SL','CH','CL','PH','PL'],
@@ -8215,32 +8964,17 @@ const mmiolist = new Map([
 	[0x00fe,'cpu_reg_ph15'],
 	[0xf106,'diag_unblank'],
 	[0xf107,'diag_blankhex'],
-	[0xf108,'dp1_set'],
-	[0xf109,'dp1_clear'],
-	[0xf10a,'dp2_set'],
-	[0xf10b,'dp2_clear'],
-	[0xf10c,'dp3_set'],
-	[0xf10d,'dp3_clear'],
-	[0xf10e,'dp4_set'],
-	[0xf10f,'dp4_clear'],
+	[0xf108,'dp1_set'],[0xf109,'dp1_clear'],
+	[0xf10a,'dp2_set'],[0xf10b,'dp2_clear'],
+	[0xf10c,'dp3_set'],[0xf10d,'dp3_clear'],
+	[0xf10e,'dp4_set'],[0xf10f,'dp4_clear'],
 	[0xf110,'diag_dip_hex'],
-	[0xf201,'mux0_rx_tx'],
-	[0xf200,'mux0_stat_ctl'],
-	// TODO these correct?
-	[0xf203,'mux1_rx_tx'],
-	[0xf202,'mux1_stat_ctl'],
-	[0xf205,'mux2_rx_tx'],
-	[0xf204,'mux2_stat_ctl'],
-	[0xf207,'mux3_rx_tx'],
-	[0xf206,'mux3_stat_ctl'],
-	[0xf208,'mux_mmio_08'],
-	[0xf209,'mux_mmio_09'],
-	[0xf20a,'mux_mmio_0a'],
-	[0xf20b,'mux_mmio_0b'],
-	[0xf20c,'mux_mmio_0c'],
-	[0xf20d,'mux_mmio_0d'],
-	[0xf20e,'mux_mmio_0e'],
-	[0xf20f,'mux_mmio_0f'],
+	[0xf201,'mux0_rx_tx'],[0xf200,'mux0_stat_ctl'],
+	[0xf203,'mux1_rx_tx'],[0xf202,'mux1_stat_ctl'],
+	[0xf205,'mux2_rx_tx'],[0xf204,'mux2_stat_ctl'],
+	[0xf207,'mux3_rx_tx'],[0xf206,'mux3_stat_ctl'],
+	[0xf208,'mux_mmio_08'],[0xf209,'mux_mmio_09'],[0xf20a,'mux_mmio_0a'],[0xf20b,'mux_mmio_0b'],
+	[0xf20c,'mux_mmio_0c'],[0xf20d,'mux_mmio_0d'],[0xf20e,'mux_mmio_0e'],[0xf20f,'mux_mmio_0f'],
 ]);
 
 if(true) {
@@ -8256,27 +8990,20 @@ const oplist:OPLEntry[] = [
 	// 0x0H
 	{n:['HLT','HALT'],md:OPM.IMPL,fl:FLAGS.None,opc:function(){throw 0;}},
 	{n:'NOP',md:OPM.IMPL,opc:function(){},fl:FLAGS.None},
-	{n:'SF',md:OPM.IMPL,fl:FLAGS.F,
-		opc:function(){ this.cc |= CC_F; }},
-	{n:'RF',md:OPM.IMPL,fl:FLAGS.F,
-		opc:function(){ this.cc &= CC_NF; }},
+	{n:'SF',md:OPM.IMPL,fl:FLAGS.F, opc:function(){ this.cc |= CC_F; }},
+	{n:'RF',md:OPM.IMPL,fl:FLAGS.F, opc:function(){ this.cc &= CC_NF; }},
 	{n:'EI',md:OPM.IMPL,fl:FLAGS.None},
 	{n:'DI',md:OPM.IMPL,fl:FLAGS.None},
-	{n:'SL',md:OPM.IMPL,fl:FLAGS.L,
-		opc:function(){ this.cc |= CC_L; }},
-	{n:'RL',md:OPM.IMPL,fl:FLAGS.L,
-		opc:function(){ this.cc &= CC_NL; }},
-	{n:['CL','COML'],md:OPM.IMPL,fl:FLAGS.L,
-		opc:function(){ this.cc ^= CC_L; }}, // 8
+	{n:'SL',md:OPM.IMPL,fl:FLAGS.L, opc:function(){ this.cc |= CC_L; }},
+	{n:'RL',md:OPM.IMPL,fl:FLAGS.L, opc:function(){ this.cc &= CC_NL; }},
+	{n:['CL','COML'],md:OPM.IMPL,fl:FLAGS.L, opc:function(){ this.cc ^= CC_L; }}, // 8
 	{n:['RSR','RET'],md:OPM.IMPL,fl:FLAGS.None,
 		opc:function(ctx) {
 			this.pc = ctx.reg.x;
-			ctx.reg.x = this.popw();
-		}},
+			this.set_rw(REG.X, this.popw()); }},
 	{n:['RI','RETI'],md:OPM.IMPL,fl:FLAGS.FLMV},
 	{n:'!ill0B',md:OPM.IMPL,fl:FLAGS.None},
-	{n:'SYN',md:OPM.IMPL,fl:FLAGS.None, // dis-ok TODO: micro trace?
-		opc:function() {console.log('SYN');}},
+	{n:['SYN','SYNC'],md:OPM.IMPL,fl:FLAGS.None,opc:function(){console.log('SYN');}},
 	{n:['PCX','MOV'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.PC,dr:REG.X,fl:FLAGS.None},
 	{n:['DLY','DELAY'],md:OPM.IMPL,fl:FLAGS.None,opc:function(){}},
 	{n:['RSV','SVRET'],md:OPM.IMPL,fl:FLAGS.None},
@@ -8298,21 +9025,36 @@ const oplist:OPLEntry[] = [
 	{n:'BI',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
 	{n:'BCK',md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
 	// 0x2H
-	{n:['INRB','INC'],md:OPM.RC,w:TXS.B,i:1,aop:0,fl:FLAGS.ArithFMV},
-	{n:['DCRB','DEC'],md:OPM.RC,w:TXS.B,i:1,aop:1,fl:FLAGS.ArithFMV},
-	{n:'CLRB',md:OPM.RC,w:TXS.B,i:0,aop:0,fl:FLAGS.ArithFLMV,
-		opf:function(rc){ rc.srcval = 0; return rc.cdval; }},
-	{n:['IVRB','NOT'],md:OPM.RC,w:TXS.B,fl:FLAGS.ArithFLMV},
-	{n:['SRRB','SHR'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
-	{n:['SLRB','SHL'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
+	{n:['INRB','INC'],md:OPM.RC,w:TXS.B,i:1,aop:AOP.ADD,fl:FLAGS.ArithFMV},
+	{n:['DCRB','DEC'],md:OPM.RC,w:TXS.B,i:1,aop:AOP.SUB,fl:FLAGS.ArithFMV},
+	{n:'CLRB',md:OPM.RC,w:TXS.B,i:0,aop:AOP.CLR,fl:FLAGS.FLMV},
+	{n:['IVRB','NOT'],md:OPM.RC,w:TXS.B,aop:AOP.NOT,fl:FLAGS.MV},
+	{n:['SRRB','SHR'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV,
+		opf:function(ctx) { ctx.fault = 0;
+			ctx.link = (ctx.srcval >> (8 - ctx.cdval)) & 1;
+			return ctx.srcval << ctx.cdval; }},
+	{n:['SLRB','SHL'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV,
+		opf:function(ctx) {
+			const s = ctx.srcval;
+			const mshift = (ctx.cdval>7)? 7 : ctx.cdval;
+			const mask = (-1 << (7-mshift)) & 0x7f;
+			const si = (s > 0x7f) ? 0xff : 0;
+			ctx.fault = (((si ^ s) & mask) != 0)? 1:0;
+			ctx.link = (s >> (8 - ctx.cdval)) & 1;
+			return s << ctx.cdval; }},
 	{n:['RRRB','RORC'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
 	{n:['RLRB','ROLC'],md:OPM.RC,w:TXS.B,i:1,fl:FLAGS.FLMV},
-	{n:['INAB','INC'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.ArithFMV},
-	{n:['DCAB','DEC'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.ArithFMV},
-	{n:['CLAB','CLR'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,fl:FLAGS.ArithFLMV},
-	{n:['IVAB','NOT'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,fl:FLAGS.MV},
-	{n:['SRAB','SHR'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.FLMV},
-	{n:['SLAB','SHL'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,fl:FLAGS.FLMV},
+	{n:['INAB','INC'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,aop:AOP.ADD,fl:FLAGS.ArithFMV},
+	{n:['DCAB','DEC'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:1,aop:AOP.SUB,fl:FLAGS.ArithFMV},
+	{n:['CLAB','CLR'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,i:0,aop:AOP.CLR,fl:FLAGS.FLMV},
+	{n:['IVAB','NOT'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:AOP.NOT,fl:FLAGS.MV},
+	{n:['SRAB','SHR'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,fl:FLAGS.FLMV,
+		opf:function(ctx) { ctx.fault = 0; ctx.link = ctx.srcval & 1;
+			return (ctx.srcval >> 1) | (ctx.srcval & 128); }},
+	{n:['SLAB','SHL'],md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,fl:FLAGS.FLMV,
+		opf:function(ctx) { ctx.link = ctx.srcval >> 7;
+			ctx.fault = (ctx.link ^ (ctx.srcval >> 6)) & 1;
+			return ctx.srcval << 1; }},
 	{n:['','page.'],md:OPM.IMPL,fl:FLAGS.None,x:OPL_EXT.PAGE,xd:[ // 2E
 		['c','c','i','i','i','i'],
 		["LDM","STM","LSM","SSM","FLM","MFM"],
@@ -8324,29 +9066,45 @@ const oplist:OPLEntry[] = [
 		['LDDMAA','STDMAA','LDDMAC','STDMAC','SETDMAM','SETDMAMR','EDMA','DDMA','LDISR','STISR'],
 	]},
 	// 0x3H
-	{n:['INR','INC'],nm:'INC',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.ArithFMV},
-	{n:['DCR','DEC'],nm:'DEC',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.ArithFMV},
-	{n:'CLR',nm:'CAD',md:OPM.RC,w:TXS.W,i:0,fl:FLAGS.ArithFLMV},
-	{n:['IVR','NOT'],nm:['IAD','NOT'],md:OPM.RC,w:TXS.W,fl:FLAGS.ArithFLMV},
-	{n:['SRR','SHR'],nm:'SHR',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
-	{n:['SLR','SHL'],nm:'SHL',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
+	{n:['INR','INC'],nm:'INC',md:OPM.RC,w:TXS.W,i:1,aop:AOP.ADD,fl:FLAGS.ArithFMV},
+	{n:['DCR','DEC'],nm:'DEC',md:OPM.RC,w:TXS.W,i:1,aop:AOP.SUB,fl:FLAGS.ArithFMV},
+	{n:'CLR',nm:'CAD',md:OPM.RC,w:TXS.W,aop:AOP.CLR,fl:FLAGS.FLMV},
+	{n:['IVR','NOT'],nm:['IAD','NOT'],md:OPM.RC,w:TXS.W,aop:AOP.NOT,fl:FLAGS.MV},
+	{n:['SRR','SHR'],nm:'SHR',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV,
+		opf:function(ctx) { ctx.fault = 0;
+			ctx.link = (ctx.srcval >> (16 - ctx.cdval)) & 1;
+			return ctx.srcval << ctx.cdval; }},
+	{n:['SLR','SHL'],nm:'SHL',md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV,
+		opf:function(ctx) {
+			const s = ctx.srcval;
+			const mshift = (ctx.cdval>15)? 15 : ctx.cdval;
+			const mask = (-1 << (15-mshift)) & 0x7fff;
+			const si = (s > 0x7fff) ? 0xffff : 0;
+			ctx.fault = (((si ^ s) & mask) != 0)? 1:0;
+			ctx.link = (s >> (16 - ctx.cdval)) & 1;
+			return s << ctx.cdval; }},
 	{n:['RRR','RORC'],nm:['RTR','RORC'],md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
 	{n:['RLR','ROLC'],nm:['RTL','ROLC'],md:OPM.RC,w:TXS.W,i:1,fl:FLAGS.FLMV},
-	{n:['INA','INC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.ArithFMV},
-	{n:['DCA','DEC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.ArithFMV},
-	{n:['CLA','CLR'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,fl:FLAGS.ArithFLMV},
-	{n:['IVA','NOT'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,fl:FLAGS.MV},
-	{n:['SRA','SHR'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.FLMV},
-	{n:['SLA','SHL'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,fl:FLAGS.FLMV},
-	{n:['INX','INC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.X,i:1,fl:FLAGS.ArithFMV},
-	{n:['DCX','DEC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.X,i:1,fl:FLAGS.ArithFMV},
+	{n:['INA','INC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,aop:AOP.ADD,fl:FLAGS.ArithFMV},
+	{n:['DCA','DEC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:1,aop:AOP.SUB,fl:FLAGS.ArithFMV},
+	{n:['CLA','CLR'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,i:0,aop:AOP.CLR,fl:FLAGS.FLMV},
+	{n:['IVA','NOT'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:AOP.NOT,fl:FLAGS.MV},
+	{n:['SRA','SHR'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,fl:FLAGS.FLMV,
+		opf:function(ctx) { ctx.fault = 0; ctx.link = ctx.srcval & 1;
+			return (ctx.srcval >> 1) | (ctx.srcval & 0x8000); }},
+	{n:['SLA','SHL'],md:OPM.IMPL_R,w:TXS.W,dr:REG.A,fl:FLAGS.FLMV,
+		opf:function(ctx) { ctx.link = ctx.srcval >> 15;
+			ctx.fault = (ctx.link ^ (ctx.srcval >> 14)) & 1;
+			return ctx.srcval << 1; }},
+	{n:['INX','INC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.X,i:1,aop:AOP.ADD,fl:FLAGS.ArithFMV},
+	{n:['DCX','DEC'],md:OPM.IMPL_R,w:TXS.W,dr:REG.X,i:1,aop:AOP.SUB,fl:FLAGS.ArithFMV},
 	// 0x4H
-	{n:'ADDB',md:OPM.RR,w:TXS.B,fl:FLAGS.ArithFLMV},
-	{n:'SUBB',md:OPM.RR,w:TXS.B,fl:FLAGS.ArithFLMV},
-	{n:'ANDB',md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
-	{n:['ORIB','OR'],md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
-	{n:['OREB','XOR'],md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
-	{n:['XFRB','XFR'],md:OPM.RR,w:TXS.B,fl:FLAGS.MV},
+	{n:'ADDB',md:OPM.RR,w:TXS.B,aop:AOP.ADD,fl:FLAGS.ArithFLMV},
+	{n:'SUBB',md:OPM.RR,w:TXS.B,aop:AOP.SUB,fl:FLAGS.ArithFLMV},
+	{n:'ANDB',md:OPM.RR,w:TXS.B,aop:AOP.AND,fl:FLAGS.MV},
+	{n:['ORIB','OR'],md:OPM.RR,w:TXS.B,aop:AOP.ORI,fl:FLAGS.MV},
+	{n:['OREB','XOR'],md:OPM.RR,w:TXS.B,aop:AOP.XOR,fl:FLAGS.MV},
+	{n:['XFRB','XFR'],md:OPM.RR,w:TXS.B,fl:FLAGS.MV,aop:AOP.XFR},
 	{n:['','BIG.'],md:OPM.IMPL,fl:FLAGS.FLMV,x:OPL_EXT.BIG,xd:[ // 46
 		['A','S','C','ZAD','ZSU','M','D','DRM','CTB','CFB'],
 		['ADD','SUB','CMP','MOV','NEG','SMUL','DIV','DIVMOD','TOBIN','FMBIN'],
@@ -8356,210 +9114,225 @@ const oplist:OPLEntry[] = [
 		['CVX','CPV','MVV','SCN','MVF','ANC','ORC','XRC','CPF','FIL'],//1
 		['XREC','CMPC','MOVEC','SCANC','MOVEF','ANDC','ORC','XORC','CMPF','FILL'],//2
 	]},
-	{n:['AABB','ADD'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,fl:FLAGS.ArithFLMV},
-	{n:['SABB','SUB'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,fl:FLAGS.ArithFLMV},
-	{n:['NABB','AND'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,fl:FLAGS.MV},
-	{n:['XAXB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.XL,aop:2,fl:FLAGS.MV},
-	{n:['XAYB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.YL,aop:2,fl:FLAGS.MV},
-	{n:['XABB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,aop:2,fl:FLAGS.MV},
-	{n:['XAZB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.ZL,aop:2,fl:FLAGS.MV},
-	{n:['XASB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.SL,aop:2,fl:FLAGS.MV},
+	{n:['AABB','ADD'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,aop:AOP.ADD,fl:FLAGS.ArithFLMV},
+	{n:['SABB','SUB'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,aop:AOP.SUB,fl:FLAGS.ArithFLMV},
+	{n:['NABB','AND'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,aop:AOP.AND,fl:FLAGS.MV},
+	{n:['XAXB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.XL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XAYB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.YL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XABB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XAZB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.ZL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XASB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.B,sr:REG.AL,dr:REG.SL,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0x5H
-	{n:'ADD',md:OPM.RR,w:TXS.W,fl:FLAGS.ArithFLMV},
-	{n:'SUB',md:OPM.RR,w:TXS.W,fl:FLAGS.ArithFLMV},
-	{n:'AND',md:OPM.RR,w:TXS.W,fl:FLAGS.MV},
-	{n:['ORI','OR'],md:OPM.RR,w:TXS.W,fl:FLAGS.MV},
-	{n:['ORE','XOR'],md:OPM.RR,w:TXS.W,fl:FLAGS.MV},
-	{n:'XFR',md:OPM.RRS,w:TXS.W,fl:FLAGS.MV,aop:2}, // 55
+	{n:'ADD',md:OPM.RR,w:TXS.W,aop:AOP.ADD,fl:FLAGS.ArithFLMV},
+	{n:'SUB',md:OPM.RR,w:TXS.W,aop:AOP.SUB,fl:FLAGS.ArithFLMV},
+	{n:'AND',md:OPM.RR,w:TXS.W,aop:AOP.AND,fl:FLAGS.MV},
+	{n:['ORI','OR'],md:OPM.RR,w:TXS.W,aop:AOP.ORI,fl:FLAGS.MV},
+	{n:['ORE','XOR'],md:OPM.RR,w:TXS.W,aop:AOP.XOR,fl:FLAGS.MV},
+	{n:'XFR',md:OPM.RRS,w:TXS.W,aop:AOP.XFR,fl:FLAGS.MV}, // 55
 	{n:'EAO',md:OPM.IMPL,fl:FLAGS.None}, // 56
 	{n:'DAO',md:OPM.IMPL,fl:FLAGS.None}, // 57
-	{n:['AAB','ADD'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,fl:FLAGS.ArithFLMV},
-	{n:['SAB','SUB'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,fl:FLAGS.ArithFLMV},
-	{n:['NAB','AND'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,fl:FLAGS.MV},
-	{n:['XAX','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.X,aop:2,fl:FLAGS.MV},
-	{n:['XAY','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Y,aop:2,fl:FLAGS.MV},
-	{n:['XAB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:2,fl:FLAGS.MV},
-	{n:['XAZ','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Z,aop:2,fl:FLAGS.MV},
-	{n:['XAS','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.S,aop:2,fl:FLAGS.MV},
+	{n:['AAB','ADD'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:AOP.ADD,fl:FLAGS.ArithFLMV},
+	{n:['SAB','SUB'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:AOP.SUB,fl:FLAGS.ArithFLMV},
+	{n:['NAB','AND'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:AOP.AND,fl:FLAGS.MV},
+	{n:['XAX','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XAY','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Y,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XAB','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XAZ','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.Z,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['XAS','XFR'],ms:OPM.IMPL_R,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.S,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0x6H
-	{n:['LDX','LD'],ms:OPM.IMM,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDX','LD'],ms:OPM.DIR,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDX','LD'],ms:OPM.IND,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDX','LD'],ms:OPM.PCO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDX','LD'],ms:OPM.IPO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDX','LD'],ms:OPM.MOD,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['SVC','SVCALL'],ms:OPM.IMM,w:TXS.B,fl:FLAGS.None,md:OPM.IMPL},
+	{n:['LDX','LD'],ms:OPM.IMM,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDX','LD'],ms:OPM.DIR,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDX','LD'],ms:OPM.IND,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDX','LD'],ms:OPM.PCO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDX','LD'],ms:OPM.IPO,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDX','LD'],ms:OPM.MOD,w:TXS.W,md:OPM.IMPL_R,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['SVC','SVCALL'],ms:OPM.IMM,w:TXS.B,fl:FLAGS.None,md:OPM.IMPL,
+		opc:function(ctx) { this.handle_svc(ctx.srcval); }},
 	{n:['','MEM.'],md:OPM.IMPL,fl:FLAGS.FLMV,x:OPL_EXT.MEM,sr:REG.A,xd:[ // 67
 		[0,1,3,2,6,6,6,6,6,6],
 		['CVXR','CPVR','MVVR','SCNR','MVFR','ANCR','ORCR','XRCR','CPFR','FILR'],//1
 		['XREC','CMPC','MOVEC','SCANC','MOVEF','ANDC','ORC','XORC','CMPF','FILL'],//2
 	]},
-	{n:['STX','ST'],md:OPM.IMM,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STX','ST'],md:OPM.DIR,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STX','ST'],md:OPM.IND,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STX','ST'],md:OPM.PCO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STX','ST'],md:OPM.IPO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STX','ST'],md:OPM.MOD,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STX','ST'],md:OPM.IMM,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STX','ST'],md:OPM.DIR,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STX','ST'],md:OPM.IND,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STX','ST'],md:OPM.PCO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STX','ST'],md:OPM.IPO,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STX','ST'],md:OPM.MOD,ms:OPM.IMPL_R,w:TXS.W,sr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:['LST','LDST'],md:OPM.DIR,w:TXS.B,fl:FLAGS.ArithFLMV}, // 6E
 	{n:['SST','STST'],md:OPM.IMPL,ms:OPM.DIR,w:TXS.B,fl:FLAGS.ArithFLMV}, // 6F
 	// 0x7H
 	{n:'!ill70',md:OPM.IMM,w:TXS.F,fl:FLAGS.None},//0
-	{n:'JMP',md:OPM.DIR,w:TXS.F,fl:FLAGS.None, //1
-		opc:function(ctx){ this.pc = ctx.addr; }},
-	{n:'JMP',md:OPM.IND,w:TXS.F,fl:FLAGS.None, //2
-		opc:function(ctx){ this.pc = ctx.addr; }},
-	{n:'JMP',md:OPM.PCO,w:TXS.F,fl:FLAGS.None, //3
-		opc:function(ctx){ this.pc = ctx.addr; }},
-	{n:'JMP',md:OPM.IPO,w:TXS.F,fl:FLAGS.None, //4
-		opc:function(ctx){ this.pc = ctx.addr; }},
-	{n:'JMP',md:OPM.MOD,w:TXS.F,fl:FLAGS.None, //5
-		opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.DIR,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.IND,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.PCO,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.IPO,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.pc = ctx.addr; }},
+	{n:'JMP',md:OPM.MOD,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.pc = ctx.addr; }},
 	{n:['EPE','EN.PEF'],md:OPM.IMPL,fl:FLAGS.None}, //6
 	{n:'MUL',md:OPM.RRX,w:TXS.W,fl:FLAGS.ArithFLMV}, //7
 	{n:'DIV',md:OPM.RRX,w:TXS.W,fl:FLAGS.ArithFLMV}, //8
-	{n:['JSR','CALL'],md:OPM.DIR,w:TXS.F,fl:FLAGS.None},
-	{n:['JSR','CALL'],md:OPM.IND,w:TXS.F,fl:FLAGS.None},
-	{n:['JSR','CALL'],md:OPM.PCO,w:TXS.F,fl:FLAGS.None},
-	{n:['JSR','CALL'],md:OPM.IPO,w:TXS.F,fl:FLAGS.None},
-	{n:['JSR','CALL'],md:OPM.MOD,w:TXS.F,fl:FLAGS.None},
-	{n:['STK','MPUSH'],md:OPM.IMPL,x:OPL_EXT.MPUSH,fl:FLAGS.None},
-	{n:['POP','MPOP'],md:OPM.IMPL,x:OPL_EXT.MPOP,fl:FLAGS.None},
+	{n:['JSR','CALL'],md:OPM.DIR,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.f_jsr(ctx.addr); }},//9
+	{n:['JSR','CALL'],md:OPM.IND,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.f_jsr(ctx.addr); }},//A
+	{n:['JSR','CALL'],md:OPM.PCO,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.f_jsr(ctx.addr); }},//B
+	{n:['JSR','CALL'],md:OPM.IPO,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.f_jsr(ctx.addr); }},//C
+	{n:['JSR','CALL'],md:OPM.MOD,w:TXS.F,fl:FLAGS.None, opc:function(ctx){ this.f_jsr(ctx.addr); }},//D
+	{n:['STK','MPUSH'],md:OPM.RC,w:TXS.F,i:1,x:OPL_EXT.MPUSH,fl:FLAGS.None, opc:function(ctx) {
+		let s = this.get_rw(REG.S);
+		ctx.srcreg += ctx.cdval;
+		while(ctx.cdval > 0) {
+			s--;
+			ctx.srcreg--;
+			ctx.cdval--;
+			this.write(s, this.get_rb(ctx.srcreg & 15));
+		}
+		this.set_rw(REG.S, s & 65535);
+	}},
+	{n:['POP','MPOP'],md:OPM.RC,w:TXS.F,i:1,x:OPL_EXT.MPOP,fl:FLAGS.None, opc:function(ctx) {
+		let s = this.get_rw(REG.S);
+		while(ctx.cdval > 0) {
+			this.set_rb(ctx.srcreg, this.fetch(s));
+			s++;
+			ctx.srcreg = (ctx.srcreg + 1) & 15;
+			ctx.cdval--;
+		}
+		this.set_rw(REG.S, s & 65535);
+	}},
 	// 0x8H
-	{n:['LDAB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:['DPE','DIS.PEF'],md:OPM.IMPL,fl:FLAGS.None}, // 86
 	{n:'!ill87',md:OPM.IMPL,fl:FLAGS.None},
-	{n:['LDAB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDAB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.P,dr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDAB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDAB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.P,dr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0x9H
-	{n:['LDA','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:['SOP','SET.PO'],md:OPM.IMPL,fl:FLAGS.None},
 	{n:'!ill97',md:OPM.IMPL,fl:FLAGS.None},
-	{n:['LDA+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDA+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.P,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDA+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDA+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.P,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0xAH
-	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.AL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.AL,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:['SEP','SET.PE'],md:OPM.IMPL,fl:FLAGS.None}, // A6
 	{n:'!illA7',md:OPM.IMPL,fl:FLAGS.None},
-	{n:['STAB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STAB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STAB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Y,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.Z,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.S,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.C,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STAB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.AL,dr:REG.P,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0xBH
-	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:['ECK','EN.CLK'],md:OPM.IMPL,fl:FLAGS.None}, // B6
 	{n:'!illB7',md:OPM.IMPL,fl:FLAGS.None},
-	{n:['STA+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STA+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STA+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Y,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.Z,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.S,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.C,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STA+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.A,dr:REG.P,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0xCH
-	{n:['LDBB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.B,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:['DCK','DIS.CLK'],md:OPM.IMPL,fl:FLAGS.None}, // C6
 	{n:'!illC7',md:OPM.IMPL,fl:FLAGS.None},
-	{n:['LDBB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDBB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.P,dr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDBB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.A,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.B,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.X,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Y,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.Z,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.S,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.C,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDBB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.B,sr:REG.P,dr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0xDH
-	{n:['LDB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:'STR',w:TXS.W,md:OPM.RRSR,fl:FLAGS.ArithFLMV}, // D6
+	{n:['LDB','LD'],ms:OPM.IMM,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB','LD'],ms:OPM.DIR,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB','LD'],ms:OPM.IND,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB','LD'],ms:OPM.PCO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB','LD'],ms:OPM.IPO,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB','LD'],ms:OPM.MOD,md:OPM.IMPL_R,w:TXS.W,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:'STR',w:TXS.W,md:OPM.RRSR,aop:AOP.XFR,fl:FLAGS.MV}, // D6
 	{n:'SAR',ms:OPM.IMPL_R,sr:REG.A,w:TXS.W,md:OPM.IMPL,x:OPL_EXT.RII,fl:FLAGS.ArithFLMV}, // D7
-	{n:['LDB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['LDB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.P,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['LDB+ A','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.A,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB+ B','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.B,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB+ X','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.X,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB+ Y','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Y,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB+ Z','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.Z,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB+ S','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.S,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB+ C','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.C,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['LDB+ P','LD'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R,w:TXS.W,sr:REG.P,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0xEH
-	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.BL,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.B,sr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.B,sr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.B,sr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.B,sr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.B,sr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.B,sr:REG.BL,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:'LAR',w:TXS.W,md:OPM.IMPL_R,dr:REG.A,i:1,x:OPL_EXT.RII,fl:FLAGS.ArithFLMV}, // E6
 	{n:'!illE7',md:OPM.IMPL,fl:FLAGS.None},
-	{n:['STBB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STBB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STBB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Y,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.Z,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.S,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.C,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STBB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.B,sr:REG.BL,dr:REG.P,aop:AOP.XFR,fl:FLAGS.MV},
 	// 0xFH
-	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IMM,w:TXS.W,sr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.DIR,w:TXS.W,sr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IND,w:TXS.W,sr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.PCO,w:TXS.W,sr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.IPO,w:TXS.W,sr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB','ST'],ms:OPM.IMPL_R,md:OPM.MOD,w:TXS.W,sr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
 	{n:'LIO',md:OPM.IMPL,x:OPL_EXT.XIO,fl:FLAGS.None}, // F6 LIO/SIO
-	{n:['MVL','MOVML'],ms:OPM.IMPL_R_DIR,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y,fl:FLAGS.None}, // F7
-	{n:['STB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.A,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.B,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.X,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Z,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.S,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.C,aop:2,fl:FLAGS.ArithFLMV},
-	{n:['STB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.P,aop:2,fl:FLAGS.ArithFLMV},
+	{n:['MVL','MOVML'],md:OPM.IMPL,w:TXS.W,sr:REG.B,dr:REG.Y,fl:FLAGS.None}, // F7
+	{n:['STB+ A','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.A,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB+ B','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.B,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB+ X','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.X,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB+ Y','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Y,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB+ Z','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.Z,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB+ S','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.S,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB+ C','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.C,aop:AOP.XFR,fl:FLAGS.MV},
+	{n:['STB+ P','ST'],ms:OPM.IMPL_R,md:OPM.IMPL_R_DIR,w:TXS.W,sr:REG.B,dr:REG.P,aop:AOP.XFR,fl:FLAGS.MV},
 ];
 
 interface AnnotationLine {
@@ -8777,6 +9550,7 @@ function softlog(text:string) {
 			text: text.replace('\r','\\r')+'\n'
 		}
 	]);
+	editors.output1?.revealLineInCenter(line);
 }
 
 let um_enable_sync = false;
@@ -8857,7 +9631,8 @@ class UMCPU6 implements SoftCPU {
 		];
 		this.rref = {
 			reg: this.registers[0],
-			srcreg:0, dstreg:0, cdval:0, srcval:0, addr:0
+			srcreg:0, dstreg:0, cdval:0, srcval:0, addr:0,
+			fault:0, link:0, is_addr:false,
 		};
 		this.reset();
 	}
@@ -8865,6 +9640,7 @@ class UMCPU6 implements SoftCPU {
 		for(let r = 0; r < 32; r++) {
 			this.page[r] = r;
 		}
+		this.src_pointer = 0;
 	}
 	loadxrec(xrec:Uint8Array, base:number) {
 		let ofs = 0;
@@ -8949,12 +9725,14 @@ class UMCPU6 implements SoftCPU {
 		return this.regview.getUint16((n & 14) | this.registers[this.level].base);
 	}
 	set_rw(n:number, v16:number):void {
+		softlog(`${this.level}/${regname[0][1][n & 14]}=${hex(v16,4)}`);
 		this.regview.setUint16((n & 14) | this.registers[this.level].base, v16);
 	}
 	get_rb(n:number):number {
 		return this.regview.getUint8((n & 15) | this.registers[this.level].base);
 	}
 	set_rb(n:number, v8:number):void {
+		softlog(`${this.level}/${regname[0][0][n & 15]}=${hex(v8,2)}`);
 		this.regview.setUint8((n & 15) | this.registers[this.level].base, v8);
 	}
 	mk_reasonb(lh:number, rh:number, opr:ARITH_OP) {
@@ -9009,11 +9787,11 @@ class UMCPU6 implements SoftCPU {
 		(v > 127 ? CC_M : 0);
 		return v;
 	}
-	flags_8vml(v:number, link:number):number {
+	flags_8vmfl(v:number, fault:number, link:number):number {
 		v &= 255;
 		this.mk_reasonb(v, 0, ARITH_OP.SET);
-		this.cc = (this.cc & 0x2F) | (v == 0 ? CC_V : 0) |
-			(v > 127 ? CC_M : 0) | (link << 4);
+		this.cc = (this.cc & 0x0F) | (v == 0 ? CC_V : 0) |
+			(v > 127 ? CC_M : 0) | (link << 4) | (fault << 5);
 		return v;
 	}
 	flags_a8vml(lh:number, rh:number, cin=0):number {
@@ -9049,6 +9827,15 @@ class UMCPU6 implements SoftCPU {
 		this.cc = (this.cc & 0x0F) | c;
 		return v;
 	}
+	flags_n8vmfl(old:number, res:number):number {
+		old &= 255; res &= 255;
+		this.mk_reasonb(0, res, ARITH_OP.ADD);
+		let c = ((res ^ old) > 127) ? CC_F : 0;
+		if(res == 0) c |= CC_V;
+		if(res > 127) c |= CC_M;
+		this.cc = (this.cc & 0x0F) | c;
+		return res;
+	}
 	flags_a8vmf(lh:number, rh:number, cin=0):number {
 		lh &= 255; rh = (cin!=0?rh^255:rh) & 255;
 		let v = lh + rh + cin;
@@ -9080,6 +9867,15 @@ class UMCPU6 implements SoftCPU {
 		this.cc = (this.cc & 0x0F) | c;
 		return v;
 	}
+	flags_n16vmfl(old:number, res:number):number {
+		old &= 65535; res &= 65535;
+		this.mk_reasonw(0, res, ARITH_OP.ADD);
+		let c = ((res ^ old) > 32767) ? CC_F : 0;
+		if(res == 0) c |= CC_V;
+		if(res > 32767) c |= CC_M;
+		this.cc = (this.cc & 0x0F) | c;
+		return res;
+	}
 	flags_a16vmf(lh:number, rh:number, cin:number):number {
 		lh &= 65535; rh &= 65535;
 		if(cin != 0) {
@@ -9105,11 +9901,11 @@ class UMCPU6 implements SoftCPU {
 		(v > 32767 ? 0x40 : 0);
 		return v;
 	}
-	flags_16vml(v:number, link:number):number {
+	flags_16vmfl(v:number, fault:number, link:number):number {
 		v &= 65535;
 		this.mk_reasonw(v, 0, ARITH_OP.SET);
-		this.cc = (this.cc & 0x2F) | (v == 0 ? 0x80 : 0) |
-			(v > 32767 ? 0x40 : 0) | (link << 4);
+		this.cc = (this.cc & 0x0F) | (v == 0 ? 0x80 : 0) |
+			(v > 32767 ? 0x40 : 0) | (link << 4) | (fault << 5);
 		return v;
 	}
 	restore() {
@@ -9158,7 +9954,11 @@ class UMCPU6 implements SoftCPU {
 	m_write(address:number, v8:number):void {
 		address &= 65535;
 		if(um_enable_sync) bpl.writemeta(address, v8 & 255);
-		this.write(address, v8);
+		if(address < 0x100) {
+			this.reg[address] = v8 & 255;
+		} else {
+			this.mem.writemeta(address | 0x10000, (v8 & 255) | 0x400);
+		}
 	}
 	m_writew(address:number, v16:number):void {
 		this.m_write(address, v16 >> 8);
@@ -9178,8 +9978,10 @@ class UMCPU6 implements SoftCPU {
 			let t = this.trace.add('ST', address);
 		}
 		if(address < 0x100) {
+			softlog(`r[${hex(address,2)}]=${hex(v8&255,2)}`);
 			this.reg[address] = v8 & 255;
 		} else {
+			softlog(`[${hex(address,4)}]=${hex(v8&255,2)}`);
 			this.mem.writemeta(address | 0x10000, (v8 & 255) | 0x400);
 		}
 	}
@@ -9197,6 +9999,7 @@ class UMCPU6 implements SoftCPU {
 		this.write(--stk, v16);
 		this.write(--stk, v16 >> 8);
 		this.registers[this.level].s = stk;
+		softlog(`${this.level}/S=${hex(this.registers[this.level].s,4)} (PUSH ${hex(v16,4)})`);
 	}
 	popb():number {
 		let stk = this.registers[this.level].s;
@@ -9209,6 +10012,7 @@ class UMCPU6 implements SoftCPU {
 		let v = this.fetch(stk++) << 8;
 		v |= this.fetch(stk++);
 		this.registers[this.level].s = stk;
+		softlog(`${this.level}/S=${hex(this.registers[this.level].s,4)} (POP ${hex(v,4)})`);
 		return v;
 	}
 	fetch_hex(where:number, count:number):string {
@@ -9312,7 +10116,7 @@ class UMCPU6 implements SoftCPU {
 		}
 		return ex;
 	}
-	rrsfetchw():rrscdata {
+	rrsrfetchw():rrscdata {
 		let rvc = this.pcfetch();
 		const rref = this.rref;
 		rref.srcreg = (rvc >> 4);
@@ -9322,8 +10126,10 @@ class UMCPU6 implements SoftCPU {
 		rref.cdval = 0;
 		if (rrmode == 0) {
 			rref.cdval = this.get_rw(rref.srcreg);
+			rref.is_addr = false;
 		} else {
 			this.lea_immw();
+			rref.is_addr = true;
 			//if (rrmode == 16) //MSN odd: r(dst) -> #adr
 			if ((rrmode & 1) != 0) {
 				//MSN even: r(dst) -> w[ adr ]
@@ -9343,6 +10149,7 @@ class UMCPU6 implements SoftCPU {
 		rref.dstreg = rvc & 15;
 		rref.srcval = this.get_rb(rref.srcreg);
 		rref.cdval = this.get_rb(rref.dstreg);
+		rref.is_addr = false;
 		return rref;
 	}
 	rrfetchw():rrscdata {
@@ -9351,6 +10158,7 @@ class UMCPU6 implements SoftCPU {
 		const rref = this.rref;
 		rref.srcreg = rvc >> 4;
 		rref.dstreg = rvc & 15;
+		rref.is_addr = false;
 		if (rrmode == 0) {
 			rref.srcval = this.get_rw(rref.srcreg);
 			rref.cdval = this.get_rw(rref.dstreg);
@@ -9380,6 +10188,7 @@ class UMCPU6 implements SoftCPU {
 		rref.dstreg = rref.srcreg = rvc >> 4;
 		rref.cdval = rvc & 15;
 		rref.srcval = this.get_rb(rref.srcreg);
+		rref.is_addr = false;
 		return rref;
 	}
 	rcfetchw():rrscdata {
@@ -9387,6 +10196,7 @@ class UMCPU6 implements SoftCPU {
 		const rcref = this.rref;
 		rcref.dstreg = rcref.srcreg = rvc >> 4;
 		rcref.cdval = rvc & 15;
+		rcref.is_addr = false;
 		if((rcref.srcreg & 1) != 0) {
 			throw {rc:rcref.srcreg};
 		} else {
@@ -9423,7 +10233,7 @@ class UMCPU6 implements SoftCPU {
 			throw {mod:modv};
 		}
 		let reg = this.get_rw(modv >> 4);
-		if ((modv & 4) != 0) sz = 2;
+		if ((modv & 4) != 0) sz = 2; // indirection always points at words
 		if ((modv & 3) == 2) {
 			// reg predec
 			reg = (reg - sz) & 65535;
@@ -9757,16 +10567,11 @@ class UMCPU6 implements SoftCPU {
 		}
 		throw {svc:svc};
 	}
-	f_ldab(ea:number):void {
-		this.levelreg.al = this.flags_8vm(this.fetch(ea));
-	}
-	f_lda(ea:number):void {
-		this.levelreg.a = this.flags_16vm(this.fetchw(ea));
-	}
 	f_jsr(ea:number):void {
 		const levelreg = this.levelreg;
 		this.stackw(levelreg.x);
-		levelreg.x = this.pc;
+		this.set_rw(REG.X, this._pc);
+		//levelreg.x = this.pc;
 		//this.trace.add('JSR', ea);
 		this.pc = ea;
 	}
@@ -9800,41 +10605,38 @@ class UMCPU6 implements SoftCPU {
 		case OPM.DIR: this.lea_dir(); break;
 		case OPM.IND: this.lea_ind(); break;
 		case OPM.PCO: this.lea_pco(); break;
-		case OPM.MOD: this.lea_mod(); break;
+		case OPM.IPO: this.lea_ipo(); break;
+		case OPM.MOD: this.lea_mod((opl.w == TXS.B) ? 1 : 2); break;
 		case OPM.RR: if(opl.w == TXS.B) this.rrfetchb(); else this.rrfetchw(); break;
 		case OPM.RRX: throw 0;
-		case OPM.RRSR: throw 0;
-		case OPM.RRS: this.rrsfetchw(); break;
-		case OPM.RC: if(opl.w == TXS.B) this.rcfetchb(); else this.rcfetchw(); break;
+		case OPM.RRSR: this.rrsrfetchw(); break;
+		case OPM.RRS: if(opl.w == TXS.B) this.rrfetchb(); else this.rrfetchw(); break;
+		case OPM.RC:
+			if(opl.w == TXS.B) this.rcfetchb(); else this.rcfetchw();
+			if(opl.i !== undefined) rref.cdval += opl.i;
+			break;
 		case OPM.IMPL_R:
-			if(opl.dr == undefined) {
+			if(opl.dr == undefined)
 				throw new Error(`(${hex(op)}) opcode table error, no destination register`);
-			} else {
-				rref.dstreg = opl.dr;
-				if(opl.ms == undefined) {
-					rref.srcreg = rref.dstreg;
-					if(opl.w == TXS.B) {
-						rref.srcval = rref.cdval = this.get_rb(rref.dstreg);
-					} else {
-						rref.srcval = rref.cdval = this.get_rw(rref.dstreg);
-					}
-				} else if(opl.ms == OPM.IMPL_R) {
-					if(opl.w == TXS.B) {
-						rref.cdval = this.get_rb(rref.dstreg);
-					} else {
-						rref.cdval = this.get_rw(rref.dstreg);
-					}
-				} // else ... pure destination
-			}
+			rref.dstreg = opl.dr;
+			if(opl.ms == undefined) {
+				rref.srcreg = rref.dstreg;
+				rref.cdval = 0;
+				if(opl.i !== undefined) rref.cdval += opl.i;
+				if(opl.w == TXS.B) rref.srcval = this.get_rb(rref.dstreg);
+				else rref.srcval = this.get_rw(rref.dstreg);
+			} else if(opl.ms == OPM.IMPL_R) {
+				if(opl.w == TXS.B) rref.cdval = this.get_rb(rref.dstreg);
+				else rref.cdval = this.get_rw(rref.dstreg);
+			} // else ... pure destination
 			break;
 		case OPM.IMPL_R_DIR:
-			if(opl.dr == undefined) {
+			if(opl.dr == undefined)
 				throw new Error(`(${hex(op)}) opcode table error, no destination register`);
-			} else {
-				rref.dstreg = opl.dr;
-				rref.addr = this.get_rb(rref.dstreg);
-			}
+			rref.dstreg = opl.dr;
+			rref.addr = this.get_rw(rref.dstreg);
 			break;
+		default: throw new Error(`(${hex(op)}) opcode md unhandled: ${opl.md}`);
 		}
 		switch(opl.ms) {
 		case undefined:
@@ -9860,199 +10662,187 @@ class UMCPU6 implements SoftCPU {
 			if(opl.w == TXS.B) rref.srcval = this.fetch(rref.addr);
 			else rref.srcval = this.fetchw(rref.addr);
 			break;
-		case OPM.MOD: this.lea_mod();
+		case OPM.MOD: this.lea_mod((opl.w == TXS.B) ? 1 : 2);
 			if(opl.w == TXS.B) rref.srcval = this.fetch(rref.addr);
 			else rref.srcval = this.fetchw(rref.addr);
 			break;
 		case OPM.IMPL_R:
-			if(opl.sr == undefined) {
+			if(opl.sr == undefined)
 				throw new Error(`(${hex(op)}) opcode table error, no source register`);
-			} else {
-				rref.srcreg = opl.sr;
-				if(opl.w == TXS.B) {
-					rref.srcval = this.get_rb(rref.srcreg);
-				} else {
-					rref.srcval = this.get_rw(rref.srcreg);
-				}
-			}
+			rref.srcreg = opl.sr;
+			if(opl.w == TXS.B) rref.srcval = this.get_rb(rref.srcreg);
+			else rref.srcval = this.get_rw(rref.srcreg);
 			break;
 		case OPM.IMPL_R_DIR:
-			if(opl.sr == undefined) {
+			if(opl.sr == undefined)
 				throw new Error(`(${hex(op)}) opcode table error, no source register`);
-			} else {
-				rref.srcreg = opl.sr;
-				rref.addr = this.get_rw(rref.srcreg);
-				if(opl.w == TXS.B) {
-					rref.srcval = this.fetch(rref.addr);
-				} else {
-					rref.srcval = this.fetchw(rref.addr);
-				}
-			}
+			rref.srcreg = opl.sr;
+			rref.addr = this.get_rw(rref.srcreg);
+			if(opl.w == TXS.B) rref.srcval = this.fetch(rref.addr);
+			else rref.srcval = this.fetchw(rref.addr);
 			break;
-		default:
-			throw new Error(`(${hex(op)}) unsupported source mode`);
+		default: throw new Error(`(${hex(op)}) unsupported source mode`);
 		}
-		if(opl.aop == undefined) {
-			if(opl.opc != undefined) {
-				opl.opc.call(this, rref);
-				return;
-			} else if(opl.opf != undefined) {
-				let fr = opl.opf.call(this, rref);
-				softlog(`(${hex(op)}) is OPF (${fr})`);
-			} else {
-				softlog(`(${hex(op)}) is TODO`);
-			}
-		} else {
-			if(opl.opc != undefined) {
-				opl.opc.call(this, rref);
-				return;
-			} else if(opl.opf != undefined) {
-				let fr = opl.opf.call(this, rref);
-				softlog(`(${hex(op)}) is OPF (${fr})`);
-			} else {
-				softlog(`(${hex(op)}) is AOP only`);
-			}
-		}
-		throw {soi: soi};
-		switch(op) {
-		case 0: console.log('HALT'); throw 0;
-		case 1: return; // NOP
-
-		case 4: break; /*EI*/
-		case 5: break; /*DI*/
-
-		case 0x0a:/*RI*/break;
-		case 0x0b: throw 1; // illegal
-		case 0x0c: console.log('SYN'); return; // SYN
-		case 0x0d:/*PCX*/break;
-		case 0x0e: return; // DLY (softstep NOP)
-		case 0x0f:/*RSV*/break;
-		// 1X
-
-		// 2X
-		case 0x20:/*INRB*/{
-			const rc = this.rcfetchb();
-			this.set_rb(rc.srcreg, this.flags_a8vmf(rc.srcval, rc.cdval+1, 0));
+		if(opl.opc != undefined) {
+			opl.opc.call(this, rref);
 			return;
 		}
-		case 0x21:/*DCRB*/{
-			const rc = this.rcfetchb();
-			this.set_rb(rc.srcreg, this.flags_a8vmf(rc.srcval, rc.cdval+1, 1));
-			return;
-		}
-		case 0x22:/*CLRB*/{
-			const rc = this.rcfetchb();
-			this.set_rb(rc.srcreg, this.flags_a8vmfl(0, rc.cdval, 0));
-			return;
-		}
-		case 0x23:/*IVRB*/{
-			const rc = this.rcfetchb();
-			this.set_rw(rc.srcreg, this.flags_8vm(rc.srcval ^ 255));
-			return;
-		}
-		case 0x24:/*SRRB*/{
-			const rc = this.rcfetchb();
-			rc.srcval = sbyte(rc.srcval);
-			this.set_rb(rc.srcreg, this.flags_8vml(rc.srcval >> (rc.cdval+1), (rc.srcval & (1 << rc.cdval)) != 0 ?1:0));
-			return;
-		}
-		case 0x25:/*SLRB*/{
-			const rc = this.rcfetchb();
-			let v = rc.srcval;
-			let link = 0;
-			v = (v << (rc.cdval + 1)) & 255;
-			link = (v & 0x100) >> 8;
-			this.set_rb(rc.srcreg, this.flags_8vml(v, link));
-			return;
-		}
-		case 0x26:/*RRRB*/{
-			const rc = this.rcfetchb();
-			let v = rc.srcval;
-			let link = 0;
-			while(rc.cdval > -1) {
-				link = v & 1;
-				v = (v >> 1) | ((this.cc & 0x10) << 3);
-				rc.cdval -= 1;
-			}
-			this.set_rb(rc.srcreg, this.flags_8vml(v, link));
-			return;
-		}
-		case 0x27:/*RLRB*/ break;
-		//case 0x28:/*INAB*/levelreg.al = this.flags_a8vmf(levelreg.al, 1); return;
-		//case 0x29:/*DCAB*/levelreg.al = this.flags_a8vmf(levelreg.al, 254, 1); return;
-		//case 0x2a:/*CLAB*/levelreg.al = this.flags_a8vmfl(0, 0, 0); return;
-		//case 0x2b:/*IVAB*/levelreg.al = this.flags_8vm(levelreg.al ^ 255); return;
-		//case 0x2c:/*SRAB*/levelreg.al = this.flags_8vml((levelreg.al >> 1) | (levelreg.al & 128), levelreg.al & 1); return;
-		//case 0x2d:/*SLAB*/levelreg.al = this.flags_8vml((levelreg.al << 1) & 255, (levelreg.al & 128)!=0?1:0); return;
-		case 0x2e: // page
-			//"LDM","STM","LSM","SSM","FLM","MFM"
-			break;
-		case 0x2f: // DMA
-			// 'SAD','RAD','SCT','RCT','SDV','RDV'
-			// 'EAB','DAB','SMN','RMN'
-			break;
-		// 3X
-		case 0x30:/*INR*/{
-			const rc = this.rcfetchw();
-			this.set_rw(rc.srcreg, this.flags_a16vmf(rc.srcval, rc.cdval+1, 0));
-			return;
-		}
-		case 0x31:/*DCR*/{
-			const rc = this.rcfetchw();
-			this.set_rw(rc.srcreg, this.flags_a16vmf(rc.srcval, rc.cdval+1, 1));
-			return;
-		}
-		case 0x32:/*CLR*/{
-			const rc = this.rcfetchw();
-			this.set_rw(rc.srcreg, this.flags_a16vmfl(0, rc.cdval, 0));
-			return;
-		}
-		case 0x33:/*IVR*/{
-			const rc = this.rcfetchw();
-			this.set_rw(rc.srcreg, this.flags_16vm(rc.srcval ^ 65535));
-			return;
-		}
-		case 0x34:/*SRR*/{
-			const rc = this.rcfetchw();
-			rc.srcval = sword(rc.srcval);
-			this.set_rw(rc.srcreg, this.flags_16vml(rc.srcval >> (rc.cdval+1), (rc.srcval & (1 << rc.cdval)) != 0 ?1:0));
-			return;
-		}
-		case 0x35:/*SLR*/{
-			const rc = this.rcfetchw();
-			this.set_rw(rc.srcreg, this.flags_16vml(rc.srcval << (rc.cdval+1), (rc.srcval & (0x8000 >> rc.cdval)) != 0 ?1:0));
-			return;
-		}
-		case 0x36:/*RRR*/ {
-			const rc = this.rcfetchw();
-			if(rc.cdval!=0) break;
-			if((rc.srcreg & 1) != 0) {
+		softlog(`${hex(rref.addr)},${hex(rref.srcval)},${hex(rref.cdval)} ${hex(rref.srcreg)}>${hex(rref.dstreg)} ${hex(rref.reg.level)}`);
+		if(opl.opf != undefined) {
+			rref.link = (this.cc >> 4) & 1;
+			rref.fault = (this.cc >> 5) & 1;
+			const fr = opl.opf.call(this, rref);
+			switch(opl.fl) {
+			case FLAGS.F:
+				this.cc = (this.cc & CC_NF) | ((rref.fault & 1) << 5);
+				rref.cdval = fr;
 				break;
-			} else {
-				let v = rc.srcval;
-				let link = v & 1;
-				v = (v >> 1) | ((this.cc & 0x10) << 11);
-				this.set_rw(rc.srcreg, this.flags_16vml(v, link));
+			case FLAGS.L:
+				this.cc = (this.cc & CC_NL) | ((rref.link & 1) << 4);
+				rref.cdval = fr;
+				break;
+			case FLAGS.MV:
+				if(opl.w == TXS.B) rref.cdval = this.flags_8vm(fr);
+				else rref.cdval = this.flags_16vm(fr);
+				break;
+			case FLAGS.FLMV:
+				if(opl.w == TXS.B) rref.cdval = this.flags_8vmfl(fr, rref.fault, rref.link);
+				else rref.cdval = this.flags_16vmfl(fr, rref.fault, rref.link);
+				break;
+			case FLAGS.ArithFMV:
+			case FLAGS.ArithFLMV:
+				if(opl.w == TXS.B)
+					rref.cdval = this.flags_a8vmfl(rref.srcval, fr, 0);
+				else
+					rref.cdval = this.flags_a16vmfl(rref.srcval, fr, 0);
+				break;
+			case FLAGS.None:
+			default: rref.cdval = fr; break;
+			}
+			if(opl.w == TXS.B)
+				softlog(`${hex(op)}: OPF(${hex(fr)})->(${hex(rref.cdval)})`);
+			else softlog(`${hex(op)}: OPF(${hex(fr,4)})->(${hex(rref.cdval,4)})`);
+			if(opl.md == OPM.IMPL) softlog(`warn: (${hex(op)}) OPM.IMPL with OPF`);
+		} else if(opl.aop !== undefined) {// Core operations
+			let ocd = rref.cdval;
+			switch(opl.aop) {
+			case AOP.ADD:
+				if(opl.w == TXS.B) {
+					rref.cdval = this.flags_a8vmfl(rref.srcval, rref.cdval, 0);
+					softlog(`AOP:ADD ${hex(rref.srcval)}+${hex(ocd)}->${hex(rref.cdval)}`);
+				} else {
+					rref.cdval = this.flags_a16vmfl(rref.srcval, rref.cdval, 0);
+					softlog(`AOP:ADD ${hex(rref.srcval,4)}+${hex(ocd,4)}->${hex(rref.cdval,4)}`);
+				}
+				break;
+			case AOP.SUB:
+				if(opl.w == TXS.B) {
+					rref.cdval = this.flags_a8vmfl(rref.srcval, rref.cdval, 1);
+					softlog(`AOP:SUB ${hex(rref.srcval)}+${hex(ocd)}->${hex(rref.cdval)}`);
+				} else {
+					rref.cdval = this.flags_a16vmfl(rref.srcval, rref.cdval, 1);
+					softlog(`AOP:SUB ${hex(rref.srcval,4)}+${hex(ocd,4)}->${hex(rref.cdval,4)}`);
+				}
+				break;
+			case AOP.XFR:
+				if(opl.w == TXS.B) rref.cdval = this.flags_8vm(rref.srcval);
+				else rref.cdval = this.flags_16vm(rref.srcval);
+				softlog(`AOP:XFR ${hex(rref.srcval)}->${hex(rref.cdval)}`);
+				break;
+			case AOP.AND:
+				if(opl.w == TXS.B)
+					rref.cdval = this.flags_n8vmfl(rref.cdval, rref.srcval & rref.cdval);
+				else rref.cdval = this.flags_n16vmfl(rref.cdval, rref.srcval & rref.cdval);
+				break;
+			case AOP.ORI:
+				if(opl.w == TXS.B)
+					rref.cdval = this.flags_n8vmfl(rref.cdval, rref.srcval | rref.cdval);
+				else rref.cdval = this.flags_n16vmfl(rref.cdval, rref.srcval | rref.cdval);
+				break;
+			case AOP.XOR:
+				if(opl.w == TXS.B)
+					rref.cdval = this.flags_n8vmfl(rref.cdval, rref.srcval ^ rref.cdval);
+				else rref.cdval = this.flags_n16vmfl(rref.cdval, rref.srcval ^ rref.cdval);
+				break;
+			case AOP.NOT:
+				if(opl.w == TXS.B)
+					rref.cdval = this.flags_8vm(rref.srcval ^ 255);
+				else rref.cdval = this.flags_16vm(rref.srcval ^ 65535);
+				break;
+			case AOP.CLR:
+				if(opl.w == TXS.B)
+					rref.cdval = this.flags_8vmfl(rref.cdval, 0, 0);
+				else rref.cdval = this.flags_16vmfl(rref.cdval, 0, 0);
+				break;
+			}
+		} else if(opl.x == OPL_EXT.MEM) {// MEM.
+			const ib = this.pcfetch();
+			const sel = ib >> 4;
+			let iml:number;
+			if(opl.sr != undefined) iml = this.levelreg.al;
+			else iml = this.pcfetch();
+			switch(sel) {
+			case 0:/*CVX*/break;
+			case 1:/*CPV*/break;
+			case 2:/*MVV*/break;
+			case 3:/*SCN*/break;
+			case 4:/*MVF*/{
+				const ex = this.ex_decode(ib, iml+1);
+				let z = 0;
+				this.cc &= CC_NV & CC_NM;
+				let c = this.fetch(ex.srcval);
+				z |= c;
+				this.write(ex.addr, c);
+				if((c & 128) != 0) this.cc |= CC_M;
+				while(iml > 0) {
+					ex.srcval = (ex.srcval + 1) & 65535;
+					ex.addr = (ex.addr + 1) & 65535;
+					let c = this.fetch(ex.srcval);
+					z |= c;
+					this.write(ex.addr, c);
+					iml -= 1;
+				}
+				this.cc &= CC_NV;
+				if(z == 0) this.cc |= CC_V;
+				//this.levelreg.y = ex.sv;
+				//this.levelreg.z = ex.ea;
 				return;
 			}
-		}
-		case 0x37:/*RLR*/ break;
-		//case 0x38:/*INA*/levelreg.a = this.flags_a16vmf(levelreg.a, 1, 0); return;
-		//case 0x39:/*DCA*/levelreg.a = this.flags_a16vmf(levelreg.a, 1, 1); return;
-		//case 0x3a:/*CLA*/levelreg.a = this.flags_a16vmfl(0, 0); return;
-		//case 0x3b:/*IVA*/levelreg.a = this.flags_16vm(levelreg.a ^ 65535); return;
-		//case 0x3c:/*SRA*/levelreg.a = this.flags_16vml(levelreg.a >> 1, levelreg.a & 1); return;
-		//case 0x3d:/*SLA*/levelreg.a = this.flags_16vml((levelreg.a << 1) & 65535, (levelreg.a & 32768)!=0?1:0); return;
-		//case 0x3e:/*INX*/levelreg.x = this.flags_a16vmf(levelreg.x, 1, 0); return;
-		//case 0x3f:/*DCX*/levelreg.x = this.flags_a16vmf(levelreg.x, 1, 1); return;
-		// 4X
-		case 0x40:/*ADD.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_a8vmfl(rr.srcval, rr.cdval, 0)); return; }
-		case 0x41:/*SUB.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_a8vmfl(rr.srcval, rr.cdval, 1)); return; }
-		case 0x42:/*AND.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval & rr.cdval)); return; }
-		case 0x43:/*OR.B */{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval | rr.cdval)); return; }
-		case 0x44:/*XOR.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval ^ rr.cdval)); return; }
-		case 0x45:/*XFR.B*/{let rr = this.rrfetchb(); this.set_rb(rr.dstreg, this.flags_8vm(rr.srcval)); return; }
-		case 0x46: {// BIG.
+			case 5:/*ANC*/break;
+			case 6:/*ORC*/break;
+			case 7:/*XRC*/break;
+			case 8:/*CPF*/{
+				const ex = this.ex_decode(ib, iml+1);
+				let c, d;
+				while(iml > -1) {
+					c = this.fetch(ex.srcval);
+					d = this.fetch(ex.addr);
+					this.flags_a8vml(d, c, 1);
+					if((this.cc & CC_V) == 0) break;
+					ex.srcval = (ex.srcval + 1) & 65535;
+					ex.addr = (ex.addr + 1) & 65535;
+					iml -= 1;
+				}
+				this.cc &= CC_NF;
+				if(iml == -1) this.cc |= CC_F;
+				return;
+			}
+			case 9:{/*FIL*/
+				const ex = this.ex_decode(ib, 1);
+				let c = this.fetch(ex.srcval);
+				while(true) {
+					this.write(ex.addr, c);
+					if(iml == 0) break;
+					ex.addr = (ex.addr + 1) & 65535;
+					iml -= 1;
+				}
+				return;
+			}
+			default: break;
+			}
+			softlog(`(${hex(op)}) is TODO`);
+			throw {soi: soi};
+		} else if(opl.x == OPL_EXT.BIG) {
 			const lenb = this.pcfetch();
 			const ib = this.pcfetch();
 			const sel = ib >> 4;
@@ -10134,371 +10924,123 @@ class UMCPU6 implements SoftCPU {
 			}
 			case 9:/*CFB*/ break;
 			}
-			break;
+		} else {
+			softlog(`(${hex(op)}) is TODO`);
+			throw {soi: soi};
 		}
-		case 0x47: {// MEM.
-			const ib = this.pcfetch();
-			let iml = this.pcfetch();
-			const sel = ib >> 4;
-			switch(sel) {
-				case 0:/*CVX*/break;
-				case 1:/*CPV*/break;
-				case 2:/*MVV*/break;
-				case 3:/*SCN*/break;
-				case 4:/*MVF*/{
-					const ex = this.ex_decode(ib, iml+1);
-					let z = 0;
-					let c = this.fetch(ex.srcval);
-					z |= c;
-					this.write(ex.addr, c);
-					while(iml > 0) {
-						ex.srcval = (ex.srcval + 1) & 65535;
-						ex.addr = (ex.addr + 1) & 65535;
-						let c = this.fetch(ex.srcval);
-						z |= c;
-						this.write(ex.addr, c);
-						iml -= 1;
-					}
-					this.cc &= (CC_V ^ 255);
-					if(z == 0) this.cc |= CC_V;
-					//this.levelreg.y = ex.sv;
-					//this.levelreg.z = ex.ea;
-					return;
-				}
-				case 5:/*ANC*/break;
-				case 6:/*ORC*/break;
-				case 7:/*XRC*/break;
-				case 8:/*CPF*/{
-					const ex = this.ex_decode(ib, iml+1);
-					break;
-				}
-				case 9:{/*FIL*/
-					const ex = this.ex_decode(ib, 1);
-					let c = this.fetch(ex.srcval);
-					while(true) {
-						this.write(ex.addr, c);
-						if(iml == 0) break;
-						ex.addr = (ex.addr + 1) & 65535;
-						iml -= 1;
-					}
-					return;
-				}
-				default: break;
+		switch(opl.md) { // generic RMW write backs
+		case OPM.IMPL: return;
+		case OPM.IMM:
+		case OPM.DIR:
+		case OPM.IND:
+		case OPM.PCO:
+		case OPM.MOD:
+		case OPM.IMPL_R_DIR:
+			if(opl.w == TXS.B) this.write(rref.addr, rref.cdval);
+			else this.writew(rref.addr, rref.cdval);
+			return;
+		case OPM.RR:
+		case OPM.RC:
+		case OPM.RRS: // XFR
+		case OPM.RRSR: // STR
+			if(opl.w == TXS.B) {
+				this.set_rb(rref.dstreg, rref.cdval);
+			} else if(rref.is_addr) {
+				this.writew(rref.addr, rref.cdval);
+			} else this.set_rw(rref.dstreg, rref.cdval);
+			return;
+		case OPM.IMPL_R:
+			if(opl.w == TXS.B) this.set_rb(rref.dstreg, rref.cdval);
+			else this.set_rw(rref.dstreg, rref.cdval);
+			return;
+		}
+
+		throw {soi: soi};
+		switch(op) {
+		case 4: break; /*EI*/
+		case 5: break; /*DI*/
+		case 0x0a:/*RI*/break;
+		case 0x0b: throw 1; // illegal
+		case 0x0d:/*PCX*/break;
+		case 0x0f:/*RSV*/break;
+		// 2X
+		case 0x26:/*RRRB*/{
+			const rc = this.rcfetchb();
+			let v = rc.srcval;
+			let link = 0;
+			while(rc.cdval > -1) {
+				link = v & 1;
+				v = (v >> 1) | ((this.cc & 0x10) << 3);
+				rc.cdval -= 1;
 			}
+			this.set_rb(rc.srcreg, this.flags_8vmfl(v, 0, link));
+			return;
+		}
+		case 0x27:/*RLRB*/ break;
+		//case 0x2c:/*SRAB*/levelreg.al = this.flags_8vml((levelreg.al >> 1) | (levelreg.al & 128), levelreg.al & 1); return;
+		//case 0x2d:/*SLAB*/levelreg.al = this.flags_8vml((levelreg.al << 1) & 255, (levelreg.al & 128)!=0?1:0); return;
+		case 0x2e: // page
+			//"LDM","STM","LSM","SSM","FLM","MFM"
+			break;
+		case 0x2f: // DMA
+			// 'SAD','RAD','SCT','RCT','SDV','RDV'
+			// 'EAB','DAB','SMN','RMN'
+			break;
+		// 3X
+		case 0x36:/*RRR*/ {
+			const rc = this.rcfetchw();
+			if(rc.cdval!=0) break;
+			if((rc.srcreg & 1) != 0) {
+				break;
+			} else {
+				let v = rc.srcval;
+				let link = v & 1;
+				v = (v >> 1) | ((this.cc & 0x10) << 11);
+				this.set_rw(rc.srcreg, this.flags_16vmfl(v, 0, link));
+				return;
+			}
+		}
+		case 0x37:/*RLR*/ break;
+		// 4X
+		case 0x46: {// BIG.
+			
 			break;
 		}
-		case 0x48:/*AABB (ADD)*/this.levelreg.bl = this.flags_a8vmfl(this.levelreg.al, this.levelreg.bl, 0); return;
-		case 0x49:/*SABB (SUB)*/this.levelreg.bl = this.flags_a8vmfl(this.levelreg.al, this.levelreg.bl, 1); return;
-		case 0x4a:/*NABB (AND)*/this.levelreg.bl = this.flags_8vm(this.levelreg.al & this.levelreg.bl); return;
-		case 0x4b:/*XAXB (XFR)*/this.levelreg.xl = this.flags_8vm(this.levelreg.al); return;
-		case 0x4c:/*XAYB (XFR)*/this.levelreg.yl = this.flags_8vm(this.levelreg.al); return;
-		case 0x4d:/*XABB (XFR)*/this.levelreg.bl = this.flags_8vm(this.levelreg.al); return;
-		case 0x4e:/*XAZB (XFR)*/this.levelreg.zl = this.flags_8vm(this.levelreg.al); return;
-		case 0x4f:/*XASB (XFR)*/this.levelreg.sl = this.flags_8vm(this.levelreg.al); return;
+
 		// 5X
-		case 0x50:/*ADD*/{ const rr = this.rrfetchw();
-			this.set_rw(rr.dstreg, this.flags_a16vmfl(rr.srcval, rr.cdval));
-			return;
-		}
-		case 0x51:/*SUB*/{ const rr = this.rrfetchw();
-			this.set_rw(rr.dstreg, this.flags_a16vmfl(rr.srcval, rr.cdval ^ 65535, 1));
-			return;
-		}
-		case 0x52:/*AND*/{ const rr = this.rrfetchw();
-			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval & rr.cdval));
-			return;
-		}
-		case 0x53:/*ORI*/{ const rr = this.rrfetchw();
-			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval | rr.cdval));
-			return;
-		}
-		case 0x54:/*ORE*/{ const rr = this.rrfetchw();
-			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval ^ rr.cdval));
-			return;
-		}
-		case 0x55: { // XFR
-			const rr = this.rrfetchw();
-			this.set_rw(rr.dstreg, this.flags_16vm(rr.srcval));
-			return;
-		}
 		case 0x56:/*EAO*/break;
 		case 0x57:/*DAO*/break;
-		case 0x58:/*AAB*/this.levelreg.b = this.flags_a16vmfl(this.levelreg.a, this.levelreg.b); return;
-		case 0x59:/*SAB*/this.levelreg.b = this.flags_a16vmfl(this.levelreg.a, this.levelreg.b ^ 65535, 1); return;
-		case 0x5a:/*NAB*/this.levelreg.b = this.flags_16vm(this.levelreg.a & this.levelreg.b); return;
-		case 0x5b:/*XAX*/this.levelreg.x = this.flags_16vm(this.levelreg.a); return;
-		case 0x5c:/*XAY*/this.levelreg.y = this.flags_16vm(this.levelreg.a); return;
-		case 0x5d:/*XAB*/this.levelreg.b = this.flags_16vm(this.levelreg.a); return;
-		case 0x5e:/*XAZ*/this.levelreg.z = this.flags_16vm(this.levelreg.a); return;
-		case 0x5f:/*XAS*/this.levelreg.s = this.flags_16vm(this.levelreg.a); return;
 		// 6X
-		//case 0x60:/*LDX IMM,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_immw())); return;
-		//case 0x61:/*LDX DIR,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_dir())); return;
-		//case 0x62:/*LDX IND,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_ind())); return;
-		//case 0x63:/*LDX PCO,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_pco())); return;
-		//case 0x64:/*LDX IPO,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_ipo())); return;
-		//case 0x65:/*LDX MOD,w:TXS.W*/levelreg.x = this.flags_16vm(this.fetchw(this.lea_mod(2))); return;
-		case 0x66: // SVC
-			this.handle_svc(this.pcfetch());
-			return;
-		case 0x67: {// MEM.
-			const ib = this.pcfetch();
-			const sel = ib >> 4;
-			let l = this.levelreg.al;
-			switch(sel) {
-				case 0:/*CVXR*/break;
-				case 1:/*CPVR*/break;
-				case 2:/*MVVR*/break;
-				case 3:/*SCNR*/break;
-				case 4:/*MVFR*/{
-					const ex = this.ex_decode(ib, l+1);
-					let z = 0;
-					this.cc &= CC_NV & CC_NM;
-					let c = this.fetch(ex.srcval);
-					z |= c;
-					this.write(ex.addr, c);
-					if((c & 128) != 0) this.cc |= CC_M;
-					while(l > 0) {
-						ex.srcval = (ex.srcval + 1) & 65535;
-						ex.addr = (ex.addr + 1) & 65535;
-						c = this.fetch(ex.srcval);
-						z |= c;
-						this.write(ex.addr, c);
-						l -= 1;
-					}
-					if(z == 0) this.cc |= CC_V;
-					//this.levelreg.z = ex.sv;
-					//this.levelreg.y = ex.ea;
-					return;
-				}
-				case 5:/*ANCR*/break;
-				case 6:/*ORCR*/break;
-				case 7:/*XRCR*/break;
-				case 8:/*CPFR*/{
-					const ex = this.ex_decode(ib, l+1);
-					let c, d;
-					while(l > -1) {
-						c = this.fetch(ex.srcval);
-						d = this.fetch(ex.addr);
-						this.flags_a8vml(d, c, 1);
-						if((this.cc & CC_V) == 0) break;
-						ex.srcval = (ex.srcval + 1) & 65535;
-						ex.addr = (ex.addr + 1) & 65535;
-						l -= 1;
-					}
-					this.cc &= CC_NF;
-					if(l == -1) this.cc |= CC_F;
-					return;
-				}
-				case 9:{/*FILR*/
-					const ex = this.ex_decode(ib, 1);
-					let c = this.fetch(ex.srcval);
-					while(true) {
-						this.write(ex.addr, c);
-						if(l == 0) break;
-						ex.addr = (ex.addr + 1) & 65535;
-						l -= 1;
-					}
-					return;
-				}
-				default: break;
-			}
-			break;
-		}
-		//case 0x68:/*STX*/this.writew(this.lea_immw(), this.flags_16vm(levelreg.x)); return;
-		//case 0x69:/*STX*/this.writew(this.lea_dir(), this.flags_16vm(levelreg.x)); return;
-		//case 0x6a:/*STX*/this.writew(this.lea_ind(), this.flags_16vm(levelreg.x)); return;
-		//case 0x6b:/*STX*/this.writew(this.lea_pco(), this.flags_16vm(levelreg.x)); return;
-		//case 0x6c:/*STX*/this.writew(this.lea_ipo(), this.flags_16vm(levelreg.x)); return;
-		//case 0x6d:/*STX*/this.writew(this.lea_mod(2), this.flags_16vm(levelreg.x)); return;
 		case 0x6e:/*LST*/break;
 		case 0x6f:/*SST*/break;
 		// 7X
 		case 0x70: throw 1; // !ill70
-		//case 0x71:/*JMP*/this.pc = this.lea_dir(); return;
-		//case 0x72:/*JMP*/this.pc = this.lea_ind(); return;
-		//case 0x73:/*JMP*/this.pc = this.lea_pco(); return;
-		//case 0x74:/*JMP*/this.pc = this.lea_ipo(); return;
-		//case 0x75:/*JMP*/this.pc = this.lea_mod(2); return;
 		case 0x76:/*EPE*/break;
 		case 0x77:/*MUL*/break;
 		case 0x78:/*DIV*/break;
-		//case 0x79:/*JSR*/this.f_jsr(this.lea_dir()); return;
-		//case 0x7a:/*JSR*/this.f_jsr(this.lea_ind()); return;
-		//case 0x7b:/*JSR*/this.f_jsr(this.lea_pco()); return;
-		//case 0x7c:/*JSR*/this.f_jsr(this.lea_ipo()); return;
-		//case 0x7d:/*JSR*/this.f_jsr(this.lea_mod(2)); return;
-		case 0x7e:/*STK*/{
-			let r = this.pcfetch();
-			let c = r & 15;
-			r = ((r >> 4) + c) & 15;
-			let s = this.levelreg.s;
-			while(true) {
-				s = (s - 1) & 65535;
-				this.write(s, this.get_rb(r));
-				if(c==0) break;
-				r = (r - 1) & 15;
-				c -= 1;
-			}
-			this.levelreg.s = s;
-			return;
-		}
-		case 0x7f:/*POP*/{
-			let r = this.pcfetch();
-			let c = r & 15;
-			r = (r >> 4) & 15;
-			let s = this.levelreg.s;
-			while(true) {
-				this.set_rb(r, this.fetch(s));
-				s = (s + 1) & 65535;
-				if(c==0) break;
-				r = (r + 1) & 15;
-				c -= 1;
-			}
-			this.levelreg.s = s;
-			return;
-		}
 		// 8X
-		//case 0x80:/*LDAB*/this.f_ldab(this.lea_immb()); return;
-		//case 0x81:/*LDAB*/this.f_ldab(this.lea_dir()); return;
-		//case 0x82:/*LDAB*/this.f_ldab(this.lea_ind()); return;
-		//case 0x83:/*LDAB*/this.f_ldab(this.lea_pco()); return;
-		//case 0x84:/*LDAB*/this.f_ldab(this.lea_ipo()); return;
-		//case 0x85:/*LDAB*/this.f_ldab(this.lea_mod()); return;
 		case 0x86:/*DPE // priv*/break;
 		case 0x87: throw 1; // !ill87
-		//case 0x88:/* LAAB */this.f_ldab(levelreg.a); return;
-		//case 0x89:/* LABB */this.f_ldab(levelreg.b); return;
-		//case 0x8a:/* LAXB */this.f_ldab(levelreg.x); return;
-		//case 0x8b:/* LAYB */this.f_ldab(levelreg.y); return;
-		//case 0x8c:/* LAZB */this.f_ldab(levelreg.z); return;
-		//case 0x8d:/* LASB */this.f_ldab(levelreg.s); return;
-		//case 0x8e:/* LACB */this.f_ldab(levelreg.c); return;
-		//case 0x8f:/* LAPB */this.f_ldab(levelreg.p); return;
 		// 9X
-		//case 0x90:/*LDA*/this.f_lda(this.lea_immw()); return;
-		//case 0x91:/*LDA*/this.f_lda(this.lea_dir()); return;
-		//case 0x92:/*LDA*/this.f_lda(this.lea_ind()); return;
-		//case 0x93:/*LDA*/this.f_lda(this.lea_pco()); return;
-		//case 0x94:/*LDA*/this.f_lda(this.lea_ipo()); return;
-		//case 0x95:/*LDA*/this.f_lda(this.lea_mod(2)); return;
 		case 0x96:/*SOP*/break;
 		case 0x97: throw 1; // !ill97
-		//case 0x98:/* LAA */this.f_lda(levelreg.a); return;
-		//case 0x99:/* LAB */this.f_lda(levelreg.b); return;
-		//case 0x9a:/* LAX */this.f_lda(levelreg.x); return;
-		//case 0x9b:/* LAY */this.f_lda(levelreg.y); return;
-		//case 0x9c:/* LAZ */this.f_lda(levelreg.z); return;
-		//case 0x9d:/* LAS */this.f_lda(levelreg.s); return;
-		//case 0x9e:/* LAC */this.f_lda(levelreg.c); return;
-		//case 0x9f:/* LAP */this.f_lda(levelreg.p); return;
 		// AX
-		//case 0xa0:/*STAB*/this.write(this.lea_immb(), this.flags_8vm(levelreg.al)); return;
-		//case 0xa1:/*STAB*/this.write(this.lea_dir(), this.flags_8vm(levelreg.al)); return;
-		//case 0xa2:/*STAB*/this.write(this.lea_ind(), this.flags_8vm(levelreg.al)); return;
-		//case 0xa3:/*STAB*/this.write(this.lea_pco(), this.flags_8vm(levelreg.al)); return;
-		//case 0xa4:/*STAB*/this.write(this.lea_ipo(), this.flags_8vm(levelreg.al)); return;
-		//case 0xa5:/*STAB*/this.write(this.lea_mod(), this.flags_8vm(levelreg.al)); return;
 		case 0xa6:/*SEP*/break;
 		case 0xa7: throw 1; // !illA7
-		//case 0xa8:/*SAAB*/this.write(levelreg.a, this.flags_8vm(levelreg.al)); return;
-		//case 0xa9:/*SABB*/this.write(levelreg.b, this.flags_8vm(levelreg.al)); return;
-		//case 0xaa:/*SAXB*/this.write(levelreg.x, this.flags_8vm(levelreg.al)); return;
-		//case 0xab:/*SAYB*/this.write(levelreg.y, this.flags_8vm(levelreg.al)); return;
-		//case 0xac:/*SAZB*/this.write(levelreg.z, this.flags_8vm(levelreg.al)); return;
-		//case 0xad:/*SASB*/this.write(levelreg.s, this.flags_8vm(levelreg.al)); return;
-		//case 0xae:/*SACB*/this.write(levelreg.c, this.flags_8vm(levelreg.al)); return;
-		//case 0xaf:/*SAPB*/this.write(levelreg.p, this.flags_8vm(levelreg.al)); return;
 		// BX
-		//case 0xb0:/*STA*/this.writew(this.lea_immw(), this.flags_16vm(levelreg.a)); return;
-		//case 0xb1:/*STA*/this.writew(this.lea_dir(), this.flags_16vm(levelreg.a)); return;
-		//case 0xb2:/*STA*/this.writew(this.lea_ind(), this.flags_16vm(levelreg.a)); return;
-		//case 0xb3:/*STA*/this.writew(this.lea_pco(), this.flags_16vm(levelreg.a)); return;
-		//case 0xb4:/*STA*/this.writew(this.lea_ipo(), this.flags_16vm(levelreg.a)); return;
-		//case 0xb5:/*STA*/this.writew(this.lea_mod(2), this.flags_16vm(levelreg.a)); return;
 		case 0xb6:/*ECK*/break;
 		case 0xb7: throw 1; // !illB7
-		//case 0xb8:/*SAA*/this.writew(levelreg.a, this.flags_16vm(levelreg.a)); return;
-		//case 0xb9:/*SAB*/this.writew(levelreg.b, this.flags_16vm(levelreg.a)); return;
-		//case 0xba:/*SAX*/this.writew(levelreg.x, this.flags_16vm(levelreg.a)); return;
-		//case 0xbb:/*SAY*/this.writew(levelreg.y, this.flags_16vm(levelreg.a)); return;
-		//case 0xbc:/*SAZ*/this.writew(levelreg.z, this.flags_16vm(levelreg.a)); return;
-		//case 0xbd:/*SAS*/this.writew(levelreg.s, this.flags_16vm(levelreg.a)); return;
-		//case 0xbe:/*SAC*/this.writew(levelreg.c, this.flags_16vm(levelreg.a)); return;
-		//case 0xbf:/*SAP*/this.writew(levelreg.p, this.flags_16vm(levelreg.a)); return;
 		// CX
-		//case 0xc0:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_immb())); return;
-		//case 0xc1:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_dir())); return;
-		//case 0xc2:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_ind())); return;
-		//case 0xc3:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_pco())); return;
-		//case 0xc4:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_ipo())); return;
-		//case 0xc5:/*LDBB*/levelreg.bl = this.flags_8vm(this.fetch(this.lea_mod())); return;
 		case 0xc6:/*DCK*/break;
 		case 0xc7: throw 1; // !illC7
-		//case 0xc8:/*LBAB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.a)); return;
-		//case 0xc9:/*LBBB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.b)); return;
-		//case 0xca:/*LBXB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.x)); return;
-		//case 0xcb:/*LBYB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.y)); return;
-		//case 0xcc:/*LBZB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.z)); return;
-		//case 0xcd:/*LBSB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.s)); return;
-		//case 0xce:/*LBCB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.c)); return;
-		//case 0xcf:/*LBPB*/levelreg.bl = this.flags_8vm(this.fetch(levelreg.p)); return;
 		// DX
-		//case 0xd0:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_immw())); return;
-		//case 0xd1:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_dir())); return;
-		//case 0xd2:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_ind())); return;
-		//case 0xd3:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_pco())); return;
-		//case 0xd4:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_ipo())); return;
-		//case 0xd5:/*LDB*/levelreg.b = this.flags_16vm(this.fetchw(this.lea_mod(2))); return;
-		case 0xd6:{/*STR*/
-			const rrs = this.rrsfetchw();
-			if(rrs.cdval > -1) this.set_rw(rrs.srcreg, rrs.srcval);
-			else this.writew(rrs.addr, rrs.srcval);
-			return;
-		}
 		case 0xd7:/*SAR*/break;
-		//case 0xd8:/*LBA*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.a)); return;
-		//case 0xd9:/*LBB*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.b)); return;
-		//case 0xda:/*LBX*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.x)); return;
-		//case 0xdb:/*LBY*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.y)); return;
-		//case 0xdc:/*LBZ*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.z)); return;
-		//case 0xdd:/*LBS*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.s)); return;
-		//case 0xde:/*LBC*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.c)); return;
-		//case 0xdf:/*LBP*/levelreg.b = this.flags_16vm(this.fetchw(levelreg.p)); return;
 		// EX
-		//case 0xe0:/*STBB*/this.write(this.lea_immb(), this.flags_8vm(levelreg.bl)); return;
-		//case 0xe1:/*STBB*/this.write(this.lea_dir(), this.flags_8vm(levelreg.bl)); return;
-		//case 0xe2:/*STBB*/this.write(this.lea_ind(), this.flags_8vm(levelreg.bl)); return;
-		//case 0xe3:/*STBB*/this.write(this.lea_pco(), this.flags_8vm(levelreg.bl)); return;
-		//case 0xe4:/*STBB*/this.write(this.lea_ipo(), this.flags_8vm(levelreg.bl)); return;
-		//case 0xe5:/*STBB*/this.write(this.lea_mod(), this.flags_8vm(levelreg.bl)); return;
 		case 0xe6:/*LAR*/break;
 		case 0xe7: throw 1; // !illE7
-		//case 0xe8:/*SBAB*/this.write(levelreg.a, this.flags_8vm(levelreg.bl)); return;
-		//case 0xe9:/*SBBB*/this.write(levelreg.b, this.flags_8vm(levelreg.bl)); return;
-		//case 0xea:/*SBXB*/this.write(levelreg.x, this.flags_8vm(levelreg.bl)); return;
-		//case 0xeb:/*SBYB*/this.write(levelreg.y, this.flags_8vm(levelreg.bl)); return;
-		//case 0xec:/*SBZB*/this.write(levelreg.z, this.flags_8vm(levelreg.bl)); return;
-		//case 0xed:/*SBSB*/this.write(levelreg.s, this.flags_8vm(levelreg.bl)); return;
-		//case 0xee:/*SBCB*/this.write(levelreg.c, this.flags_8vm(levelreg.bl)); return;
-		//case 0xef:/*SBPB*/this.write(levelreg.p, this.flags_8vm(levelreg.bl)); return;
 		// FX
-		//case 0xf0:/*STB*/this.writew(this.lea_immw(), this.flags_16vm(levelreg.b)); return;
-		//case 0xf1:/*STB*/this.writew(this.lea_dir(), this.flags_16vm(levelreg.b)); return;
-		//case 0xf2:/*STB*/this.writew(this.lea_ind(), this.flags_16vm(levelreg.b)); return;
-		//case 0xf3:/*STB*/this.writew(this.lea_pco(), this.flags_16vm(levelreg.b)); return;
-		//case 0xf4:/*STB*/this.writew(this.lea_ipo(), this.flags_16vm(levelreg.b)); return;
-		//case 0xf5:/*STB*/this.writew(this.lea_mod(2), this.flags_16vm(levelreg.b)); return;
 		case 0xf6:/*LIO/SIO*/break;
 		case 0xf7:/*MVL*/break;
-		//case 0xf8:/*SBA*/this.writew(levelreg.a, this.flags_16vm(levelreg.b)); return;
-		//case 0xf9:/*SBB*/this.writew(levelreg.b, this.flags_16vm(levelreg.b)); return;
-		//case 0xfa:/*SBX*/this.writew(levelreg.x, this.flags_16vm(levelreg.b)); return;
-		//case 0xfb:/*SBY*/this.writew(levelreg.y, this.flags_16vm(levelreg.b)); return;
-		//case 0xfc:/*SBZ*/this.writew(levelreg.z, this.flags_16vm(levelreg.b)); return;
-		//case 0xfd:/*SBS*/this.writew(levelreg.s, this.flags_16vm(levelreg.b)); return;
-		//case 0xfe:/*SBC*/this.writew(levelreg.c, this.flags_16vm(levelreg.b)); return;
-		//case 0xff:/*SBP*/this.writew(levelreg.p, this.flags_16vm(levelreg.b)); return;
 		}
 	}
 }
@@ -10809,9 +11351,11 @@ class CPU6 {
 			}
 		}
 		let rsh = 0;
-		if (opcs.w == TXS.W) {
+		if (opcs.w == TXS.W || opcs.w == TXS.F) {
 			rsh = 1;
 		}
+		let regdst = 0;
+		let regsrc = 0;
 		const litpfx = LIT_PFX[name_conv];
 		const regconv = regname[name_conv == NAMECON.MEI ? 1:0];
 		const is_cent = (name_conv == NAMECON.CENT);
@@ -10928,8 +11472,8 @@ class CPU6 {
 			case OPM.RRSR: {
 				if(!is_write) throw new Error('RR* in source operand, should be in dest');
 				rvc = dfetch();
-				let regsrc = (rvc >> 4);
-				let regdst = (rvc & 15);
+				regsrc = (rvc >> 4);
+				regdst = (rvc & 15);
 				const rrmode = ((regsrc & 1) << 1) | (regdst & 1);
 				let strdst:string;
 				if(opcs.w == TXS.W) {
@@ -11036,8 +11580,8 @@ class CPU6 {
 			case OPM.RC: {
 				if(!is_write) throw new Error('RC in source operand, should be in dest');
 				rvc = dfetch();
-				let regdst = rvc >> 4;
-				let regsrc = rvc & 15;
+				regdst = rvc >> 4;
+				regsrc = rvc & 15;
 				let i_spec = '';
 				let i_val = 0;
 				if (opcs.i !== undefined) {
@@ -11172,13 +11716,8 @@ class CPU6 {
 			break;
 		case OPL_EXT.MPUSH:
 		case OPL_EXT.MPOP: {
-			let rvc = dfetch();
-			let rstart = (rvc >> 4);
-			let rcount = (rvc & 15)+1;
-			if(is_cent) {
-				pstr = regconv[(rstart & 1) != 0 ? 0 : 1][rstart];
-				psstr = `${rcount}`;
-			}
+			let rstart = regdst;
+			let rcount = regsrc+1;
 			let com;
 			if((rstart & 1) == 0 && rcount > 1) {
 				com = regconv[1][rstart];
@@ -11314,13 +11853,13 @@ class CPU6 {
 			// 0: none
 			// 1: len=#FF, term=AH
 			// 2: len=AL, term=AH
-			// TODO 3: len=AL
-			// TODO 4: len=AL
-			// TODO 5: len=AL
-			// TODO 6: len=AL
-			// TODO 7: len=AL
-			// TODO 8: len=AL
-			// TODO 9: len=AL
+			// 3: len=AL
+			// 4: len=AL
+			// 5: len=AL
+			// 6: len=AL
+			// 7: len=AL
+			// 8: len=AL
+			// 9: srclen=1, dstlen=AL
 			let lvlen = -1;
 			if(opcs.sr !== undefined) {
 				if(name_conv == NAMECON.MEI) {
@@ -11331,7 +11870,7 @@ class CPU6 {
 						pstr += 't=AH, ';
 					}
 				}
-				if((mod1 == 3) && ((nci & 4) != 0) && lvlen == -1) {
+				if(sel != 9 && (mod1 == 3) && ((nci & 4) != 0) && lvlen == -1) {
 					pstr += '<!unknown length>';
 				}
 			} else {
@@ -11371,12 +11910,12 @@ class CPU6 {
 			}
 			break;
 		}
-		case OPL_EXT.RII: {
+		case OPL_EXT.RII: { // LAR/SAR
 			const rvc = dfetch();
+			const level = rvc >> 4;
 			if(opcs.i == 1)
-				pstr = litpfx.ir + hexlist(rvc);
-			else
-				psstr = litpfx.ir + hexlist(rvc);
+				pstr = `${level},${regconv[1][rvc & 15]}`;
+			else psstr = `${level},${regconv[1][rvc & 15]}`;
 			break;
 		}
 		case OPL_EXT.XIO: {
@@ -11393,14 +11932,20 @@ class CPU6 {
 			// 1,0: LIOB JL = [EA] // always reads I/O area
 			// 0,1: SIO  EA = [JW] // always writes I/O area
 			// 1,1: SIOB EA = [JL] // always writes I/O area
-			pstr = `${DREF_L}${regconv[1][regl]}${hexlistp(rvd)}${DREF_R}`;
+			pstr = `${DREF_L}${regconv[1][regl]}${hexlistcp(rvd)}${DREF_R}`;
+			const xiobyte = (rvc & 16) != 0
 			if((rvc & 1) != 0) {
 				opname = name_conv == NAMECON.MEI ? 'S.IO':'SIO';
+				if(xiobyte && (name_conv != NAMECON.MEI)) opname += 'B';
 				psstr = pstr;
-				pstr = regconv[(rvc & 16) != 0 ? 0:1][regh];
+				pstr = regconv[xiobyte ? 0:1][regh];
 			} else {
 				if(name_conv == NAMECON.MEI) opname = 'L.IO';
-				psstr = regconv[(rvc & 16) != 0 ? 0:1][regh];
+				if(xiobyte && (name_conv != NAMECON.MEI)) opname += 'B';
+				if(is_cent) {
+					psstr = pstr;
+					pstr = regconv[xiobyte ? 0:1][regh];
+				} else psstr = regconv[xiobyte ? 0:1][regh];
 			}
 			break;
 		}
@@ -11463,17 +12008,6 @@ const test_tape = new MockTape9Tk();
 const main_ffc = new FinchFloppyControl();
 const test_cmd = new TestCMD();
 loadbin(bpl_rom_fc, bpl_romc, {invert:true, remap:[0,1,2,3,4,8,5,6,7]});
-cx_crt0.mux = mmio_mux.muxports[0];
-mmio_mux.muxports[0].line = cx_crt0;
-if(cx_crt1) {
-	cx_crt1.mux = mmio_mux.muxports[1];
-	mmio_mux.muxports[1].line = cx_crt1;
-}
-if(cx_crt2) {
-	cx_crt2.mux = mmio_mux.muxports[2];
-	mmio_mux.muxports[2].line = cx_crt2;
-}
-mmio_mux.muxports[3].line = prt_0;
 run_hw.push(dsk2_0);
 bpl.configio(0, mmio_mux);
 bpl.configio(1, dsk2_0);
@@ -11511,48 +12045,177 @@ function setupmemory() {
 		bpl.configmemory(0xb800, new RAM2k(), 2048);
 	}
 }
+function serial_ui_change(ev: Event) {
+	update_serial_config();
+}
+function init_serial_ui() {
+	// serial config will reset to the standard config for now
+	// (not persist)
+	for(let i = 0; i < 3; i++) {
+		com_conf.crt[i].value = '0';
+		com_conf.crt[i].addEventListener('change', serial_ui_change);
+	}
+	for(let i = 0; i < 4; i++) {
+		com_conf.mux[i].value = '0';
+		com_conf.mux[i].addEventListener('change', serial_ui_change);
+	}
+}
+function update_serial_ui() {
+	for(let x = 0; x < 4; x++) {
+		const c_ext = com_conf.ext[x];
+		const sel_elem = c_ext.sel;
+		const dev_count = com_conf.net.length;
+		sel_elem.disabled = dev_count < 1 || !com_conf.have_net;
+		if(dev_count < c_ext.opts.length) {
+			const limit = (dev_count > 2) ? dev_count : 2;
+			for(let i = c_ext.opts.length; i > limit;) {
+				i--;
+				const c_opt = c_ext.opts[i];
+				if(sel_elem.value == c_opt.value) sel_elem.value = '0';
+				sel_elem.removeChild(c_opt);
+			}
+			c_ext.opts.length = limit;
+		}
+		for(let i = 0; i < dev_count; i++) {
+			const c_com = com_conf.net[i];
+			let c_opt = c_ext.opts[i];
+			if(!com_conf.have_net) c_com.conn = null;
+			if(c_opt == undefined) {
+				c_opt = document.createElement('option');
+				c_opt.value = c_com.dev_index.toString();
+				c_opt.innerText = c_com.name;
+				c_opt.addEventListener('change', serial_ui_change);
+				sel_elem.appendChild(c_opt);
+				c_ext.opts.push(c_opt);
+			} else {
+				c_opt.innerText = c_com.name;
+			}
+		}
+	}
+}
+function update_serial_config() {
+	for(let i = 0; i < com_conf.net.length; i++) {
+		const ext_port = com_conf.net[i];
+		ext_port.dev_count = 0;
+	}
+	for(let i = 0; i < 3; i++) {
+		let ext_id = parseInt(com_conf.ext[i].sel.value);
+		let ext_avail = false;
+		let ext_port:NetSerial | undefined;
+		if(!isNaN(ext_id)) {
+			ext_port = com_conf.net[ext_id];
+			if(ext_port) ext_avail =
+				(ext_port.conn != null) && (ext_port.dev_count == 0);
+		}
+		const mux_port = mmio_mux.muxports[i];
+		const crt_port = cx_crt[i];
+		const mux_to_crt = !ext_avail || (
+			(com_conf.mux[i].value == '0') &&
+			(com_conf.crt[i].value == '0') );
+		let mux_target: CharDevice | undefined;
+		let crt_target: CharDevice | undefined;
+		let ext_target: CharDevice | undefined;
+		if(mux_to_crt) {
+			mux_target = crt_port;
+			crt_target = mux_port;
+		} else if(ext_port) {
+			if(com_conf.mux[i].value != '0') {
+				mux_target = ext_port;
+				ext_target = mux_port;
+			} else if(com_conf.crt[i].value != '0') {
+				crt_target = ext_port;
+				ext_target = crt_port;
+			}
+		}
+		if(mux_target != mux_port.get_dev()) mux_port.bind_dev(mux_target);
+		if(crt_target != crt_port.get_dev()) crt_port.bind_dev(crt_target);
+		if(ext_port && ext_target) {
+			ext_port.dev_count++;
+			if(ext_port.get_dev() != ext_target) ext_port.bind_dev(ext_target);
+		}
+	}
+	if(com_conf.mux[3].value == '0') {
+		mmio_mux.muxports[3].bind_dev(prt_0);
+	} else {
+		let ext_id = parseInt(com_conf.ext[3].sel.value);
+		let ext_avail = false;
+		let ext_port:NetSerial | undefined;
+		if(!isNaN(ext_id)) {
+			ext_port = com_conf.net[ext_id];
+			if(ext_port) ext_avail =
+				(ext_port.conn != null) && (ext_port.dev_count == 0);
+		}
+		const mux_port = mmio_mux.muxports[3];
+		let mux_target: CharDevice | undefined;
+		if(!ext_avail) {
+			mux_target = prt_0;
+		} else if(ext_port) {
+			mux_target = ext_port;
+			ext_port.dev_count++;
+			if(ext_port.get_dev() != mux_port) ext_port.bind_dev(mux_port);
+		}
+		if(mux_target != mux_port.get_dev()) mux_port.bind_dev(mux_target);
+	}
+	for(let i = 0; i < com_conf.net.length; i++) {
+		const ext_port = com_conf.net[i];
+		if(ext_port.dev_count == 0) {
+			ext_port.bind_dev(undefined);
+			ext_port.reset();
+		}
+	}
+}
+init_serial_ui();
+update_serial_config();
+
 type BRObject = {[index:string|number]:BRValue};
 type BRValue = undefined|null|boolean|number|string|BRObject|BRValue[];
-function brload(buffer:ArrayBuffer, into?:BRValue):BRValue {
+function brload(buffer:ArrayBuffer | DataView, into?:BRValue):BRValue {
 	let offset = 0;
-	const dv = new DataView(buffer);
-	const limit = buffer.byteLength;
+	let dv: DataView;
+	if(buffer instanceof DataView) dv = buffer;
+	else dv = new DataView(buffer);
+	const limit = dv.byteLength;
 	function brload_rec(depth:number, into?:BRValue):BRValue {
 		let b = dv.getUint8(offset++);
 		const m = b >> 5;
 		const v = b & 31;
 		let n = false;
-		function read_enc():number {
+		function read_enc():number | undefined {
 			if(v < 24) return v;
 			if(v == 24) {
 				if(offset+1 > limit) throw new Error();
 				let q = dv.getUint8(offset++);
 				if(q < 24) throw new Error();
 				return q;
-			}
-			if(v == 25) {
+			} else if(v == 25) {
 				if(offset+2 > limit) throw new Error();
-				let q = dv.getUint16(offset, false);
+				let q = dv.getUint16(offset);
 				offset += 2;
 				if(q < 256) throw new Error();
 				return q;
-			}
-			if(v == 26) {
+			} else if(v == 26) {
 				if(offset+4 > limit) throw new Error();
-				let q = dv.getUint32(offset, false);
+				let q = dv.getUint32(offset);
 				offset += 4;
 				if(q < 65536) throw new Error();
 				return q;
+			} else if(v == 27) {
+				if(offset+8 > limit) throw new Error();
+				let qh = dv.getUint32(offset);
+				let ql = dv.getUint32(offset+4);
+				offset += 8;
+				if((qh == 0) || (qh >= 1048576)) throw new Error();
+				return qh * 4294967296 + ql;
 			}
-			if(v == 27) throw new Error();
+			if(v == 31 && m == 4) return undefined;
 			throw new Error();
 		}
 		switch(m) {
-		case 0: return read_enc();
-		case 1: return -(read_enc()+1);
+		case 0: return read_enc() as number;
+		case 1: return -(read_enc() as number+1);
 		case 2: throw new Error();
 		case 3: {
-			const len = read_enc();
+			const len = read_enc() as number;
 			let s = '';
 			for(let i = 0; i < len; i++) {
 				if(offset+1 > limit) throw new Error();
@@ -11588,6 +12251,15 @@ function brload(buffer:ArrayBuffer, into?:BRValue):BRValue {
 				}
 			}
 			const a:BRValue[] = (into !== undefined) ? into:[];
+			if(len == undefined) {
+				let i = 0;
+				while(dv.getUint8(offset) != 0xff) {
+					a[i] = brload_rec(depth+1, a[i]);
+					i++;
+				}
+				offset++;
+				return a;
+			}
 			for(let i = 0; i < len; i++) {
 				a[i] = brload_rec(depth+1, a[i]);
 			}
@@ -11602,6 +12274,17 @@ function brload(buffer:ArrayBuffer, into?:BRValue):BRValue {
 			}
 			const o:{[index:string|number]:BRValue} =
 				(into !== undefined) ? into : {};
+			if(len == undefined) {
+				while(dv.getUint8(offset) != 0xff) {
+					const k = brload_rec(depth+1);
+					if(typeof k == 'number' || typeof k == 'string') {
+						const v = brload_rec(depth+1, o[k]);
+						o[k] = v;
+					} else throw new Error();
+				}
+				offset++;
+				return o;
+			}
 			for(let i = 0; i < len; i++) {
 				const k = brload_rec(depth+1);
 				if(typeof k == 'number' || typeof k == 'string') {
@@ -11670,7 +12353,7 @@ function brenc_int(value:number):number {
 		brscratchv.setUint16(1, value, false);
 		return 3;
 	} else if(value < 4294967296) {
-		brscratch[0] |= 27;
+		brscratch[0] |= 26;
 		brscratchv.setUint32(1, value, false);
 		return 5;
 	}
@@ -11838,6 +12521,7 @@ function config_load() {
 	{ // uicore
 		crtcol.value = CONFIG.vt_color_scheme.toString();
 		crtcrev.checked = CONFIG.vt_reverse;
+		check_sound.checked = CONFIG.sound;
 	}
 	{ // cpu
 		// 0: Array<boolean>
@@ -12093,13 +12777,6 @@ function rtd() {
 	} catch(ex) {
 		console.warn('unable to save config string:',[csr]);
 	}
-	//let hso = hexstr(d);
-	//const bv = new Uint8Array(from_csr(csr));
-	//let hsi = hexstr(bv);
-	//console.log(hso);
-	//console.log(hsi);
-	//console.log(csr);
-	//console.log(brload(bv.buffer, CONFIG_LL));
 }
 
 function config_initialize() {
@@ -12107,7 +12784,8 @@ function config_initialize() {
 	if(lsv == null) return;
 	try {
 		const bv = new Uint8Array(from_csr(lsv));
-		console.log(brload(bv.buffer, CONFIG_LL));
+		console.log('loading config');
+		brload(bv.buffer, CONFIG_LL);
 		config_load();
 	} catch(ex) {
 		console.warn('unable to load config:',[lsv],ex);
@@ -12120,13 +12798,13 @@ if (name_conv == NAMECON.CENT) conv_ee.checked = true;
 if (name_conv == NAMECON.MEI) conv_mei.checked = true;
 //@ts-ignore
 if (name_conv == NAMECON.WIKI) conv_uew.checked = true;
-//cx_crt0.show_ui = ui_crts[0].view.checked;
+//cx_crt[0].show_ui = ui_crts[0].view.checked;
 frame_crt1.show = ui_crts[1].view.checked;
 frame_crt2.show = ui_crts[2].view.checked;
 
 function nio_update_sim() {
 	run_control(false);
-	if (active_connection == null) {
+	if (active_connection == null || !net_provides_rc) {
 		selsim = mcsim;
 	} else {
 		if (nio.sim[0].checked) {
@@ -12142,7 +12820,7 @@ function nio_update_sim() {
 	CONFIG.updated();
 }
 function nio_update_disp() {
-	if (active_connection == null) {
+	if (active_connection == null || !net_provides_rc) {
 		selcdsp = mcsim;
 	} else {
 		if (nio.disp[0].checked) {
@@ -12163,7 +12841,7 @@ function nio_update_mem() {
 }
 function remote_check() {
 	if(active_connection != null) {
-		active_connection.socket.close();
+		active_connection.close(4000);
 		return;
 	}
 	new WSConnection();
@@ -12309,7 +12987,7 @@ function handle_dbg_input(cmd:HTMLInputElement) {
 handle_dbg_input(in_dbgcmd);
 function um_reset() {
 	ucpu.loadxrec(programx_xassm, 0x8000);
-	
+	ucpu.reset();
 }
 const xassm_ignore_branches = new Set<number>();
 {
@@ -12463,9 +13141,9 @@ function um_run(ncount = 1) {
 					}
 				}
 				if(memfail) break;
-				if(xassm_ignore_branches.has(soi)) {
-					continue;
-				}
+				// if(xassm_ignore_branches.has(soi)) {
+				// 	continue;
+				// }
 				let ti = brtrace.get(soi);
 				let tr = ucpu.trace.list[0];
 				if(ti == undefined) {
@@ -12494,15 +13172,15 @@ function um_run(ncount = 1) {
 					}
 				}
 			}
-			softlog('ucpu: step: '+um_show_soi(soi));
+			softlog(um_show_soi(soi));
 		} catch(e) {
 			ucpu.pc = soi;
 			if(e === 0) { // priv
-				console.error('ucpu: priv:',um_show_soi(soi));
+				softlog('ucpu: priv:'+ um_show_soi(soi));
 			} else if(e === 1) { // ill
-				console.error('ucpu: ill:',um_show_soi(soi));
+				softlog('ucpu: ill:'+ um_show_soi(soi));
 			} else if(typeof e == 'object' && e != null) { // NYI
-				softlog(`ucpu: NYI: ${e} ${um_show_soi(soi)}`);
+				softlog(`ucpu: NYI: ${JSON.stringify(e)} ${um_show_soi(soi)}`);
 				console.error('ucpu: NYI:',e,um_show_soi(soi));
 			}
 			break;
@@ -12534,7 +13212,12 @@ vc_reset.addEventListener('click', function(ev) {
 	um_reset();
 	brtrace.clear();
 	let r = 0;
-	ucpu.src_buffer = []; //vc_input.value.split('\n');
+	ucpu.src_buffer.length = 0;
+	const model = editors.edit1;
+	if(model) {
+		ucpu.src_buffer = model.getLinesContent();
+	}
+	//vc_input.value.split('\n');
 	if(um_enable_sync) {
 		while(!mcsim.at_boundry && r < 10000) {
 			mcsim.step(false);
@@ -12634,57 +13317,289 @@ function update_diagsw() {
 update_sense();
 update_diagsw();
 
+class NetSerial implements CharDevice {
+	dev: CharDevice | undefined = undefined;
+	rts: boolean = false;
+	cts: boolean = false;
+	rx_buf: number[] = [];
+	tx_buf: number[] = [];
+	name: string;
+	dev_index: number;
+	dev_count: number = 0;
+	rx_flag = false;
+	conn: WSConnection | null = null;
+	constructor(name:string, index:number) {
+		this.name = name;
+		this.dev_index = index;
+	}
+	reset(): void {
+		this.rx_buf.length = 0;
+		this.tx_buf.length = 0;
+	}
+	receive(c: number): void {
+		this.rx_buf.push(c);
+		if(!this.rx_flag && this.dev) {
+			this.rx_flag = true;
+			let l: number;
+			let k = 0;
+			do {
+				l = this.rx_buf.length;
+				this.dev.check_send();
+				k++;
+			} while(k < 20 && l != this.rx_buf.length);
+			this.rx_flag = false;
+			if(this.conn) {
+				this.conn.handle_tx_tick();
+			}
+		}
+	}
+	can_receive(): boolean {
+		return com_conf.have_net;
+	}
+	check_send(): void {
+		if(this.tx_buf.length > 0 && this.dev && this.dev.can_receive()) {
+			do {
+				let c = this.tx_buf.shift() as number;
+				this.dev.receive(c);
+			} while(this.tx_buf.length > 0 && !this.dev.emu_linked && this.dev.can_receive());
+		}
+	}
+	set_rts(value: boolean): void {
+		this.rts = value;
+		if(this.dev) {
+			this.dev.set_cts(this.rts);
+		}
+	}
+	get_dev(): CharDevice | undefined {
+		return this.dev;
+	}
+	bind_dev(dev: CharDevice | undefined): void {
+		this.dev = dev;
+		if(dev) {
+			this.set_cts(dev.rts);
+		}
+	}
+	set_cts(value: boolean): void {
+		this.rx_buf.push(value ? 0x101 : 0x100);
+		this.cts = value;
+	}
+}
 class WSConnection {
 	socket:WebSocket;
+	ext_count = 0;
+	opt_count = 0;
+	onmessage:((data:ArrayBuffer)=>void);
+	buf = new ArrayBuffer(4096);
 	constructor() {
 		active_connection = this;
 		style_if(local_button, 'warn', true);
 		console.log('network connecting');
 		this.socket = new WebSocket('ws://127.0.0.1:42646/');
 		this.socket.binaryType = 'arraybuffer';
+		this.onmessage = this.msg_hello;
 		this.socket.onopen = () => {
 			style_if(local_button, 'active', true);
 			style_if(local_button, 'warn', false);
-			remcpu.can_step = true;
+			const req = new DataView(this.buf, 0, 24);
+			req.setUint16(0, 0x0020, true);
+			req.setUint16(2, 0x0300);
+			req.setUint16(4, 0x5765);
+			req.setUint32(6, 0x6243656e);
+			req.setUint32(10, 0);
+			req.setUint32(14, 0);
+			req.setUint32(18, 0);
+			req.setUint16(22, 0x0200);
+			this.socket.send(req);
 			console.log('network open');
-			nio_update_sim();
-			nio_update_disp();
 		};
 		this.socket.onclose = (ev) => {
 			console.log('network closed', ev.code, `${ev.reason}`);
-			active_connection = null;
+			this.close();
 			style_if(local_button, 'active', false);
 			style_if(local_button, 'warn', false);
-			remcpu.can_step = false;
 		};
 		this.socket.onerror = () => {
 			console.warn('network error');
-			this.socket.close();
+			this.close();
 		};
 		this.socket.onmessage = (ev) => {
 			if(typeof ev.data == 'string') {
 				this.message_str(ev.data);
 			} else if(ev.data instanceof ArrayBuffer) {
 				if(ev.data.byteLength < 4) return;
-				this.message(ev.data);
+				try {
+				this.onmessage(ev.data);
+				} catch(e) {
+					console.warn('protocol error', e);
+					this.close(4001);
+				}
+			} else {
+				console.warn('unknown message', ev);
 			}
 		};
 	}
-	message_str(data:string) {
+	close(code?:number) {
+		const state = this.socket.readyState;
+		if(state != WebSocket.CLOSING && state != WebSocket.CLOSED) {
+			this.socket.close(code);
+		}
+		active_connection = null;
+		net_provides_rc = false;
+		style_if(local_button, 'active', false);
+		style_if(local_button, 'warn', true);
+		remcpu.can_step = false;
+		com_conf.have_net = false;
+		update_serial_ui();
+		update_serial_config();
+	}
+	message_str(data:string) {}
+	validate_hello(dv:DataView) {
+		if(dv.getUint16(0, true) != 0x20 ||
+			dv.getUint16(2) != 0x0300 ||
+			dv.getUint32(18) == 0
+			) return false;
+		this.ext_count = dv.getUint8(22);
+		this.opt_count = dv.getUint8(23);
+		return true;
+	}
+	msg_hello(data:ArrayBuffer) {
+		const message = new DataView(data);
+		if(!this.validate_hello(message)) {
+			this.close(4002);
+			return;
+		}
+		const req = new Uint16Array(this.buf, 0, 1);
+		req[0] = 0x40; // get extension points
+		this.socket.send(req);
+		this.onmessage = this.message;
+	}
+	handle_tx_tick() {
+		const dp = new Uint8Array(this.buf, 2);
+		for(let i = 0; i < com_conf.net.length; i++) {
+			const com = com_conf.net[i];
+			if(com && com.conn == this) {
+				let k = 0;
+				if(com.rx_buf.length > 0) {
+					dp[0] = com.dev_index;
+					for(; k < com.rx_buf.length && k < 1020; k++) {
+						let c = com.rx_buf[k];
+						if(c > 0xff) {
+							if(k > 0) {
+								console.log('tx>', com.dev_index, JSON.stringify(com.rx_buf));
+								const req = new DataView(this.buf, 0, 3 + k);
+								req.setUint16(0, 0x1820, true); // ser data
+								this.socket.send(req);
+								com.rx_buf.splice(0, k);
+							}
+							console.log('txc>', com.dev_index, JSON.stringify(com.rx_buf));
+							const req = new DataView(this.buf, 0, 4);
+							dp[1] = c & 0xff;
+							req.setUint16(0, 0x1830, true); // ser control
+							this.socket.send(req);
+							com.rx_buf.shift();
+							k = -1;
+							continue;
+						} else {
+							dp[1+k] = c;
+						}
+					}
+					if(k > 0) {
+						console.log('txe>', com.dev_index, JSON.stringify(com.rx_buf));
+						const req = new DataView(this.buf, 0, 3 + k);
+						req.setUint16(0, 0x1820, true); // ser data
+						this.socket.send(req);
+						com.rx_buf.length = 0;
+					}
+				}
+				com.check_send();
+			}
+		}
 	}
 	message(data:ArrayBuffer) {
-		const bytes = new Uint8Array(data);
 		const message = new DataView(data);
-		switch(bytes[0]) {
-		case 0x4a:
-			remcpu.decode_bytes(bytes, 1);
+		const payload_ofs = 2;
+		switch(message.getUint16(0, true)) {
+		case 0x048:{
+			let ext = new Uint16Array(data, payload_ofs);
+			console.log('ext resp',ext);
+			for(let i = 0; i < ext.length; i++) {
+				if(ext[i] == 0) { // remote control
+					remcpu.can_step = true;
+					nio_update_sim();
+					nio_update_disp();
+				}
+				if(ext[i] == 2) { // filesystem
+					const req = new DataView(this.buf, 0, 2);
+					req.setUint16(0, 0x2000, true);
+					this.socket.send(req);
+				}
+				if(ext[i] == 3) { // data ports (i.e. Serial)
+					const req = new DataView(this.buf, 0, 2);
+					req.setUint16(0, 0x1800, true);
+					this.socket.send(req);
+				}
+			}
+			break;}
+		case 0x4a0:
+			remcpu.decode_bytes(new Uint8Array(data, payload_ofs), 0);
 			if(selcdsp === remcpu) selcdsp.showstate(false);
 			break;
-		case 0x4b:
-			remcpu.decode_bytes(bytes, 1);
+		case 0x4b0:
+			remcpu.decode_bytes(new Uint8Array(data, payload_ofs), 0);
 			if(selcdsp === remcpu) selcdsp.showstate(false);
 			remcpu.can_step = true;
 			break;
+		case 0x1808:{
+			let listing = brload(new DataView(data, payload_ofs));
+			if(Array.isArray(listing)) {
+				if(listing.length > 0) {
+					com_conf.have_net = true;
+				}
+				let i:number;
+				if(com_conf.net.length > listing.length) {
+					com_conf.net.length = listing.length;
+				}
+				for(i = 0; i < listing.length; i++) {
+					const com_elem = listing[i] as [string, string, any];
+					const com_name = `${com_elem[0]} / ${com_elem[1]}`;
+					if(i >= com_conf.net.length) {
+						com_conf.net.push(new NetSerial(com_name, i));
+					}
+					const c_com = com_conf.net[i];
+					c_com.name = com_name;
+					c_com.conn = this;
+					c_com.dev_count = 0;
+					c_com.reset();
+				}
+				update_serial_ui();
+				update_serial_config();
+			}
+			console.log(listing);
+			break; }
+		case 0x1820:{
+			let i = message.getUint8(2);
+			const c_com = com_conf.net[i];
+			const dp = new Uint8Array(data, 3);
+			if(c_com && c_com.dev_count != 0) {
+				for(let i = 0; i < data.byteLength - 3; i++) {
+					c_com.tx_buf.push(dp[i]);
+				}
+				c_com.check_send();
+			}
+			break;
+		}
+		case 0x1830:{
+			let i = message.getUint8(2);
+			const c_com = com_conf.net[i];
+			if(c_com) {
+				c_com.set_rts(message.getUint8(3) != 0);
+			}
+			break;
+		}
+		case 0x2008:{
+			let listing = brload(new DataView(data, payload_ofs));
+			console.log(listing);
+			break; }
 		default:
 			break;
 		}
@@ -12727,6 +13642,7 @@ fp_load.addEventListener('click', function(ev) {
 		sense_switch |= 2; CONFIG.updated();
 		update_sense();
 	}
+	for(let i = 0; i < 3; i++) cx_crt[i].clear_buffer();
 	selsim.reset();
 	selcdsp.showstate(true);
 });
@@ -12735,6 +13651,7 @@ fp_select.addEventListener('click', function(ev) {
 		sense_switch &= 253; CONFIG.updated();
 		update_sense();
 	}
+	for(let i = 0; i < 3; i++) cx_crt[i].clear_buffer();
 	selsim.reset();
 	selcdsp.showstate(true);
 });
@@ -12759,6 +13676,7 @@ disk_button.addEventListener('click', function(ev) {
 });
 
 run_button.addEventListener('click', function(ev) {
+	if(check_sound.checked && wa == undefined) wa = wa_setup();
 	run_control(run_ctl == 0);
 });
 function update_runrate(new_rate:number) {
@@ -12786,6 +13704,7 @@ step_button.addEventListener('click', function(ev) {
 	run_once = true;
 	run_step = true;
 	run_follow = true;
+	if(check_sound.checked && wa == undefined) wa = wa_setup();
 	show_disasm();
 	run_stop = function() {
 		handle_dbg_input(in_dbgcmd);
@@ -12795,6 +13714,7 @@ step_button.addEventListener('click', function(ev) {
 });
 microstep_button.addEventListener('click', function(ev) {
 	run_once = true;
+	if(check_sound.checked && wa == undefined) wa = wa_setup();
 	selsim.step(false);
 	selcdsp.step(true);
 	selcdsp.showstate(true);
@@ -12869,6 +13789,10 @@ document.body.addEventListener('dragover', function(ev) {
 	}
 	ev.preventDefault();
 });
+
+const crt_sizesy = [250, 500, 750, 1000];
+const crt_sizesx = [640, 1280, 1920];
+const crt_size_v = [1,1,1];
 function update_layout() {
 	display_if(dc_regs, show_reg);
 	display_if(dc_int, show_int);
@@ -12877,30 +13801,28 @@ function update_layout() {
 	display_if(dc_listing, view_dis.checked);
 	display_if(dc_ffc, show_ffc);
 	display_if(dc_crt0, ui_crts[0].view.checked);
-	let crt0_size = parseInt(ui_crts[0].size.value);
-	let crt1_size = parseInt(ui_crts[1].size.value);
-	let crt2_size = parseInt(ui_crts[2].size.value);
-	style_if(cv_term0,'size2x', crt0_size == 1);
-	style_if(cv_term0,'size3x', crt0_size == 2);
-	style_if(cv_term0,'tall',ui_crts[0].tall.checked);
-	style_if(cv_term0,'boxed', window.innerWidth <= cv_term0.clientWidth + 4);
+	for(let i = 0; i < 3; i++) {
+		crt_size_v[i] = parseInt(ui_crts[i].size.value);
+		style_if(cx_crt[i].canv,'size2x', crt_size_v[i] == 1);
+		style_if(cx_crt[i].canv,'size3x', crt_size_v[i] == 2);
+		style_if(cx_crt[i].canv,'tall',ui_crts[i].tall.checked);
+		if(cx_crt[i].glv && ui_crts[i].view.checked) {
+			cx_crt[i].canv.height = crt_sizesy[crt_size_v[i] + (ui_crts[i].tall.checked ? 1:0)];
+			cx_crt[i].canv.width = crt_sizesx[crt_size_v[i]];
+		}
+	}
+	style_if(cx_crt[0].canv,'boxed', window.innerWidth <= cx_crt[0].canv.clientWidth + 4);
 	frame_crt1.show = ui_crts[1].view.checked;
-	style_if(cv_term1,'size2x', crt1_size == 1);
-	style_if(cv_term1,'size3x', crt1_size == 2);
-	style_if(cv_term1,'tall',ui_crts[1].tall.checked);
 	frame_crt2.show = ui_crts[2].view.checked;
-	style_if(cv_term2,'size2x', crt2_size == 1);
-	style_if(cv_term2,'size3x', crt2_size == 2);
-	style_if(cv_term2,'tall',ui_crts[2].tall.checked);
 	dc_regs.parentElement?.removeChild(dc_regs);
 	dc_crt0.parentElement?.removeChild(dc_crt0);
 	con_rows[1].removeChild(con_row2col2);
-	let crt_wide_layout = crt0_size > 0 && !loc_crt0[1].checked;
+	let crt_wide_layout = crt_size_v[0] > 0 && !loc_crt0[1].checked;
 	let crt_tall_layout = ui_crts[0].tall.checked;
 	const row1_reg_width = 1690;
 	const row1_crt_width = 1410;
 	const reg_fits_on_first_row = show_reg && window.innerWidth >= row1_reg_width;
-	const crt_fits_on_first_row = crt0_size == 0 && !loc_crt0[1].checked && ui_crts[0].view.checked && window.innerWidth >= row1_crt_width;
+	const crt_fits_on_first_row = crt_size_v[0] == 0 && !loc_crt0[1].checked && ui_crts[0].view.checked && window.innerWidth >= row1_crt_width;
 	let show_reg_layout = show_reg;
 	let first_row_hp = !show_int || !show_uop || !reg_fits_on_first_row;
 	if(crt_wide_layout && reg_fits_on_first_row) {
@@ -13061,7 +13983,13 @@ class DiskImageUI {
 	}
 	setactive(image:DiskImage|null):void {
 		if(image != null) {
-			disk_images[this.sta.id.substring(0,5) + image.filename] = image;
+			image.identifier = this.sta.id.substring(0,4);
+			const luid = disk_image_luid(image);
+			let index = disk_images_lu[luid];
+			if(index == undefined) {
+				disk_images_lu[luid] = disk_images.length;
+				disk_images.push(image);
+			}
 			this.image = image;
 			image.protect = this.wp.checked;
 			this.sta.innerText = image.filename;
@@ -13079,7 +14007,6 @@ class DiskImageUI {
 diskui.push(new DiskImageUI('dsk0', disk_templates[0], dsk2_0.units[0]));
 diskui.push(new DiskImageUI('dsk1', disk_templates[0], dsk2_0.units[1]));
 diskui.push(new DiskImageUI('ffc1', disk_templates[2], main_ffc.unit_1));
-diskui[2].click_newdl();
 
 function select_crt_color() {
 	let color = parseInt(crtcol.value);
@@ -13090,17 +14017,21 @@ function select_crt_color() {
 }
 crtcol.addEventListener('change', select_crt_color);
 crtcrev.addEventListener('change', function(ev) { CONFIG.vt_reverse = crtcrev.checked; });
-document.body.addEventListener('mouseover', function(ev) {
+
+function sl_init(ev: KeyboardEvent | MouseEvent) {
+	//@ts-ignore
+	document.body.removeEventListener(ev.type, sl_init);
+	//@ts-ignore
+	document.body.addEventListener(ev.type, sl_control);
+	return sl_control(ev);
+}
+function sl_control(ev: KeyboardEvent | MouseEvent) {
 	const cl = ev.getModifierState('CapsLock');
 	caps_lock = cl;
-});
-document.body.addEventListener('mouseleave', function(ev) {
-	const cl = ev.getModifierState('CapsLock');
-	caps_lock = cl;
-});
-document.body.addEventListener('keydown', function(ev) {
-	caps_lock = ev.getModifierState('CapsLock');
-});
+}
+document.body.addEventListener('mouseover', sl_init);
+document.body.addEventListener('mouseleave', sl_init);
+document.body.addEventListener('keydown', sl_init);
 document.body.addEventListener('drop', async function(ev) {
 	const dt = ev.dataTransfer;
 	ev.preventDefault();
@@ -13136,6 +14067,7 @@ document.body.addEventListener('drop', async function(ev) {
 				diskui[0].setactive(loaded_image);
 				console.log(`loaded disk image as Hawk0 removable @ ${im_stride} B/sec`);
 			}
+			accept = true;
 		} else if(im_kind == 'finch') {
 			diskui[2].setactive(loaded_image);
 			if(im_stride == FINCH_TRACK) {
@@ -13143,8 +14075,9 @@ document.body.addEventListener('drop', async function(ev) {
 			} else {
 				console.log(`loaded disk image as Finch0 @ ${im_stride} B/sec`);
 			}
+			accept = true;
 		}
-		accept = true;
+		if(accept && frame_disks.show) disk_view.update();
 	}
 	if (!accept && (
 		file.name.match(/\.bin$/i) != null ||
@@ -13173,8 +14106,12 @@ document.body.addEventListener('drop', async function(ev) {
 let editor_loaded = false;
 
 function load_editor() {
-	editor_loaded = true;
-
+	require(['monaco-editor'], function(mod:{
+		editor:typeof monaco.editor,
+		languages:typeof monaco.languages
+	}) {
+		editor_loaded = true;
+		const monaco = mod;
 	monaco.languages.register({
 		id: 'centasm',
 	});
@@ -13218,7 +14155,8 @@ function load_editor() {
 	});
 	m = editors.output1.getModel();
 	if(m) editors.out_m = m;
-}
+});
+}// */
 
 show_disasm(); // initial disassembly
-export const __meisaka = undefined;
+export const __meisaka = 'meisaka';
